@@ -1,6 +1,6 @@
 <script>
 	let { items = [] } = $props()
-	const latest = $derived(items.slice(0, 5))
+	const latest = $derived(items.slice(-5))
 </script>
 
 <div class="fixed bottom-0 left-0 right-0 bg-base-200/80 backdrop-blur-sm
