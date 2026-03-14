@@ -3,13 +3,20 @@ services:
     build: .
     ports:
       - "${PORT:-3000}:3000"
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        REDIS_PASS=$$(printf '%s' "$$REDIS_PASSWORD" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
+        export REDIS_URL="redis://default:$${REDIS_PASS}@redis:6379"
+        exec node build
     environment:
-      - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/stickynotes
-      - REDIS_URL=redis://redis:6379
-      - PORT=3000
-      - ORIGIN=${ORIGIN:-http://localhost:3000}
-      - PROTOCOL_HEADER=x-forwarded-proto
-      - HOST_HEADER=x-forwarded-host
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/stickynotes
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      PORT: "3000"
+      ORIGIN: ${ORIGIN:-http://localhost:3000}
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,8 +32,8 @@ services:
       context: .
       dockerfile: Dockerfile.postgres
     environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=stickynotes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: stickynotes
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -39,10 +46,13 @@ services:
 
   redis:
     image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: sh -c "redis-server --requirepass $$REDIS_PASSWORD --appendonly yes"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping"]
       interval: 5s
       timeout: 3s
       retries: 5
