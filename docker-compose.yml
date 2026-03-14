@@ -15,6 +15,8 @@ services:
         condition: service_healthy
       cache:
         condition: service_healthy
+    labels:
+      - "traefik.http.services.app.loadbalancer.server.port=3000"
     restart: unless-stopped
     networks:
       - default
