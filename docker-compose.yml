@@ -5,7 +5,7 @@ services:
       - "${PORT:-3000}:3000"
     environment:
       - DATABASE_URL=postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/stickynotes
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-}@redis:6379
+      - REDIS_URL=redis://redis:6379
       - PORT=3000
       - ORIGIN=${ORIGIN:-http://localhost:3000}
       - PROTOCOL_HEADER=x-forwarded-proto
@@ -39,13 +39,10 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: sh -c "if [ -n \"$REDIS_PASSWORD\" ]; then exec redis-server --requirepass \"$REDIS_PASSWORD\"; else exec redis-server; fi"
-    environment:
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$REDIS_PASSWORD\" ]; then redis-cli -a \"$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
