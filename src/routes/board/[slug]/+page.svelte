@@ -1,6 +1,7 @@
 <script>
 	import { batch } from 'svelte-realtime/client'
-	import { notes, createNote, moveNote, editNote, deleteNote, focusNote } from '$live/boards/notes'
+	import { notes, createNote, moveNote, editNote, deleteNote, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
+	import { Layers, LayoutGrid, Shuffle, Users, Sparkles, X } from 'lucide-svelte'
 	import { activity } from '$live/boards/activity'
 	import { settings, updateSettings } from '$live/boards/settings'
 	import Canvas from '$lib/components/Canvas.svelte'
@@ -31,13 +32,23 @@
 
 	let localPositions = $state({})
 
+	let dragging = $state(false)
+
 	function handleMove(noteId, x, y) {
+		if (!dragging) {
+			dragging = true
+			notesStore.pauseHistory()
+		}
 		localPositions[noteId] = { x, y }
 		batch(() => [moveNote(boardId, noteId, x, y)])
 	}
 
 	function handleMoveEnd(noteId) {
 		delete localPositions[noteId]
+		if (dragging) {
+			dragging = false
+			notesStore.resumeHistory()
+		}
 	}
 
 	const displayNotes = $derived(
@@ -68,6 +79,8 @@
 	})
 
 	function onKeyDown(e) {
+		const tag = document.activeElement?.tagName
+		if (tag === 'TEXTAREA' || tag === 'INPUT') return
 		if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
 			e.preventDefault()
 			if (e.shiftKey) {
@@ -117,7 +130,61 @@
 	</Canvas>
 
 	<ActivityTicker items={$activityStore} />
+
+	<!-- FAB Flower: Tidy & Re-arrange -->
+	<div class="fab fab-flower">
+		<div tabindex="0" role="button" class="btn btn-lg btn-circle btn-primary fab-trigger">
+			<Sparkles size={22} />
+		</div>
+		<div class="fab-close">
+			<button class="btn btn-circle btn-lg btn-error" onclick={() => document.activeElement?.blur()}>
+				<X size={20} />
+			</button>
+		</div>
+		<div class="tooltip tooltip-left" data-tip="Tidy z-order">
+			<button class="btn btn-lg btn-circle btn-secondary" onclick={() => tidyNotes(boardId)}>
+				<Layers size={20} />
+			</button>
+		</div>
+		<div class="tooltip tooltip-left" data-tip="Re-arrange by color">
+			<button class="btn btn-lg btn-circle btn-accent" onclick={() => rearrangeNotes(boardId)}>
+				<LayoutGrid size={20} />
+			</button>
+		</div>
+		<div class="tooltip" data-tip="Shuffle notes">
+			<button class="btn btn-lg btn-circle btn-warning" onclick={() => shuffleNotes(boardId)}>
+				<Shuffle size={20} />
+			</button>
+		</div>
+		<div class="tooltip tooltip-top" data-tip="Group by author">
+			<button class="btn btn-lg btn-circle btn-info" onclick={() => groupByAuthor(boardId)}>
+				<Users size={20} />
+			</button>
+		</div>
+	</div>
 {/if}
+
+<style>
+	.fab-trigger {
+		transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease, rotate 0.3s ease;
+	}
+	.fab-trigger:hover {
+		transform: scale(1.12) rotate(15deg);
+		box-shadow: 0 0 16px rgba(99, 102, 241, 0.5);
+	}
+	.fab-trigger:active {
+		transform: scale(0.92) rotate(-10deg);
+	}
+	.fab .fab-close button {
+		transition: opacity 0.3s ease, scale 0.3s ease;
+		opacity: 0;
+		scale: 0.6;
+	}
+	.fab:focus-within .fab-close button {
+		opacity: 1;
+		scale: 1;
+	}
+</style>
 
 {#if rateLimitCountdown > 0}
 	<div class="toast toast-top toast-center z-50">

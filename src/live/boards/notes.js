@@ -79,6 +79,149 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 	})
 })
 
+export const tidyNotes = live(async (ctx, boardId) => {
+	if (!boardId) throw new LiveError('VALIDATION', 'Board ID required')
+	const allNotes = await listNotes(boardId)
+	if (allNotes.length === 0) return []
+
+	// Sort by position: top-left to bottom-right (x + y)
+	const sorted = [...allNotes].sort((a, b) => (a.x + a.y) - (b.x + b.y))
+
+	const updated = []
+	for (let i = 0; i < sorted.length; i++) {
+		const note = await dbUpdateNote(sorted[i].note_id, { z_index: i })
+		if (note) {
+			ctx.publish(`board:${boardId}:notes`, 'updated', note)
+			updated.push(note)
+		}
+	}
+
+	ctx.publish(`board:${boardId}:activity`, 'created', {
+		action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
+	})
+	return updated
+})
+
+export const rearrangeNotes = live(async (ctx, boardId) => {
+	if (!boardId) throw new LiveError('VALIDATION', 'Board ID required')
+	const allNotes = await listNotes(boardId)
+	if (allNotes.length === 0) return []
+
+	// Group notes by color
+	const groups = new Map()
+	for (const note of allNotes) {
+		if (!groups.has(note.color)) groups.set(note.color, [])
+		groups.get(note.color).push(note)
+	}
+
+	const NOTE_WIDTH = 230  // w-52 (208px) + gap
+	const CASCADE_X = 4     // horizontal cascade offset per note
+	const CASCADE_Y = 35    // vertical cascade offset per note
+	const START_X = 40
+	const START_Y = 40
+	const COLUMN_GAP = 30   // extra gap between columns
+
+	let zCounter = 0
+	const updated = []
+	let colIndex = 0
+
+	for (const [, colorNotes] of groups) {
+		const colX = START_X + colIndex * (NOTE_WIDTH + COLUMN_GAP)
+
+		for (let i = 0; i < colorNotes.length; i++) {
+			const x = colX + i * CASCADE_X
+			const y = START_Y + i * CASCADE_Y
+			const note = await dbUpdateNote(colorNotes[i].note_id, {
+				x, y, z_index: zCounter++
+			})
+			if (note) {
+				ctx.publish(`board:${boardId}:notes`, 'updated', note)
+				updated.push(note)
+			}
+		}
+		colIndex++
+	}
+
+	ctx.publish(`board:${boardId}:activity`, 'created', {
+		action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
+	})
+	return updated
+})
+
+export const shuffleNotes = live(async (ctx, boardId) => {
+	if (!boardId) throw new LiveError('VALIDATION', 'Board ID required')
+	const allNotes = await listNotes(boardId)
+	if (allNotes.length === 0) return []
+
+	// Scatter notes randomly across a generous area
+	const AREA_W = Math.max(800, allNotes.length * 120)
+	const AREA_H = Math.max(600, allNotes.length * 90)
+	const MARGIN = 40
+
+	const updated = []
+	for (let i = 0; i < allNotes.length; i++) {
+		const x = MARGIN + Math.floor(Math.random() * (AREA_W - MARGIN * 2))
+		const y = MARGIN + Math.floor(Math.random() * (AREA_H - MARGIN * 2))
+		const note = await dbUpdateNote(allNotes[i].note_id, { x, y, z_index: i })
+		if (note) {
+			ctx.publish(`board:${boardId}:notes`, 'updated', note)
+			updated.push(note)
+		}
+	}
+
+	ctx.publish(`board:${boardId}:activity`, 'created', {
+		action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
+	})
+	return updated
+})
+
+export const groupByAuthor = live(async (ctx, boardId) => {
+	if (!boardId) throw new LiveError('VALIDATION', 'Board ID required')
+	const allNotes = await listNotes(boardId)
+	if (allNotes.length === 0) return []
+
+	// Group notes by creator_name
+	const groups = new Map()
+	for (const note of allNotes) {
+		const author = note.creator_name || 'Unknown'
+		if (!groups.has(author)) groups.set(author, [])
+		groups.get(author).push(note)
+	}
+
+	const NOTE_WIDTH = 230
+	const CASCADE_X = 4
+	const CASCADE_Y = 35
+	const START_X = 40
+	const START_Y = 40
+	const COLUMN_GAP = 30
+
+	let zCounter = 0
+	const updated = []
+	let colIndex = 0
+
+	for (const [, authorNotes] of groups) {
+		const colX = START_X + colIndex * (NOTE_WIDTH + COLUMN_GAP)
+
+		for (let i = 0; i < authorNotes.length; i++) {
+			const x = colX + i * CASCADE_X
+			const y = START_Y + i * CASCADE_Y
+			const note = await dbUpdateNote(authorNotes[i].note_id, {
+				x, y, z_index: zCounter++
+			})
+			if (note) {
+				ctx.publish(`board:${boardId}:notes`, 'updated', note)
+				updated.push(note)
+			}
+		}
+		colIndex++
+	}
+
+	ctx.publish(`board:${boardId}:activity`, 'created', {
+		action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
+	})
+	return updated
+})
+
 export const notes = live.stream((ctx, boardId) => `board:${boardId}:notes`, async (ctx, boardId) => {
 	return listNotes(boardId)
 }, { merge: 'crud', key: 'note_id' })
