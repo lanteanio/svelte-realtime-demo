@@ -17,6 +17,7 @@ services:
         condition: service_healthy
     labels:
       - "traefik.http.services.app.loadbalancer.server.port=3000"
+      - "caddy_0.handle_path.0_reverse_proxy={{upstreams 3000}}"
     restart: unless-stopped
     networks:
       - default
