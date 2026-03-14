@@ -18,6 +18,12 @@
 	const settingsStore = $derived(settings(boardId))
 	const activityStore = $derived(activity(boardId))
 
+	$effect(() => {
+		if ($notesStore !== undefined) {
+			notesStore.enableHistory()
+		}
+	})
+
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
 	function handleCanvasDoubleClick(e) {
@@ -81,7 +87,10 @@
 	function onKeyDown(e) {
 		const tag = document.activeElement?.tagName
 		if (tag === 'TEXTAREA' || tag === 'INPUT') return
-		if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+		if (e.key === 'y' && (e.ctrlKey || e.metaKey)) {
+			e.preventDefault()
+			notesStore.redo()
+		} else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
 			e.preventDefault()
 			if (e.shiftKey) {
 				notesStore.redo()
