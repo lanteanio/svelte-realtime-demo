@@ -9,6 +9,9 @@ services:
       - |
         REDIS_PASS=$$(printf '%s' "$$REDIS_PASSWORD" | sed 's/+/%2B/g; s/\//%2F/g; s/=/%3D/g')
         export REDIS_URL="redis://:$${REDIS_PASS}@redis:6379"
+        echo "DEBUG REDIS_URL=$$REDIS_URL"
+        echo "DEBUG REDIS_PASSWORD=$$REDIS_PASSWORD"
+        redis-cli -h redis -a "$$REDIS_PASSWORD" ping || echo "REDIS PING FAILED"
         exec node build
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/stickynotes
