@@ -23,6 +23,10 @@ declare module '$live/boards/notes' {
   export const editNote: (...args: any[]) => Promise<any>;
   export const focusNote: (...args: any[]) => Promise<any>;
   export const deleteNote: (...args: any[]) => Promise<any>;
+  export const tidyNotes: (...args: any[]) => Promise<any>;
+  export const rearrangeNotes: (...args: any[]) => Promise<any>;
+  export const shuffleNotes: (...args: any[]) => Promise<any>;
+  export const groupByAuthor: (...args: any[]) => Promise<any>;
   export type ErrorCode = 'FORBIDDEN' | 'NOT_FOUND' | 'VALIDATION';
   export const notes: Readable<any>;
 }

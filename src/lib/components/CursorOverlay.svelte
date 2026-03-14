@@ -6,7 +6,7 @@
 	const cursors = $derived([...$cursorStore].filter(([, { user }]) => user.id !== userId))
 </script>
 
-<svg class="absolute inset-0 w-full h-full pointer-events-none" style:z-index="100">
+<svg class="absolute inset-0 w-full h-full pointer-events-none" style:z-index="2147483647">
 	{#each cursors as [key, { user, data }] (key)}
 		<g transform="translate({data.x}, {data.y})" style:transition="transform 50ms linear">
 			<path d="M0,0 L0,16 L4,12 L8,18 L10,17 L6,11 L12,11 Z" fill={user.color} />
