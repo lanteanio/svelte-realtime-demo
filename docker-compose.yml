@@ -16,6 +16,9 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - default
+      - coolify
 
   postgres:
     build:
@@ -48,3 +51,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+
+networks:
+  coolify:
+    external: true
