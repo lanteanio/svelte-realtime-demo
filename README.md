@@ -19,7 +19,8 @@ Open the page, get a random funny name, drop sticky notes on a shared canvas. Ev
 | Undo / redo | svelte-realtime | Ctrl+Z / Ctrl+Shift+Z to undo note actions |
 | `status` store | svelte-adapter-uws | Connection status dot in navbar (green/yellow/red) |
 | Redis pub/sub bus | extensions | Multi-instance deployment with cross-instance updates |
-| Rate limiting | extensions | Throttle note creation to prevent spam |
+| Input validation | server | Board titles, note content, colors, and coordinates are validated and bounded |
+| Rate limiting | extensions | Throttle note creation to prevent spam (drag moves are excluded from the global limit) |
 | Presence | extensions | Colored dots showing who's on each board |
 | Cursors | extensions | Live cursor positions on the spatial canvas |
 
@@ -113,7 +114,8 @@ src/
 ├── lib/
 │   ├── names.js                    -- Random name + color + slug generator
 │   ├── server/
-│   │   └── db.js                   -- Pure SQL via pg driver (in-memory Map fallback for dev)
+│   │   ├── db.js                   -- Pure SQL via pg driver (in-memory Map fallback for dev)
+│   │   └── validate.js             -- Input validation and bounds checking for all user-controlled fields
 │   └── components/
 │       ├── StickyNote.svelte       -- Draggable note with color picker + z-ordering
 │       ├── Canvas.svelte           -- Scrollable canvas container + cursor tracking
@@ -165,6 +167,8 @@ The full schema including the auto-archive trigger is in `schema.sql`.
 ## How identity works
 
 No login screen. Every new connection gets a random two-word name (like "Cosmic Penguin") and a random color, persisted in a cookie. Same tab, new tab, page reload -- you keep your name. New incognito window -- fresh name.
+
+The identity cookie is validated on both the WebSocket upgrade path and the HTTP layout load. Only cookies with a valid UUID, a name between 1-40 characters, and a hex color are accepted. Malformed or tampered cookies are discarded and a fresh identity is generated.
 
 900 possible combinations (30 adjectives x 30 nouns). Collisions don't matter for a demo.
 

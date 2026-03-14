@@ -5,7 +5,8 @@
 
 	let newTitle = $state('')
 
-	async function handleCreate() {
+	async function handleCreate(e) {
+		e.preventDefault()
 		if (!newTitle.trim()) return
 		const board = await createBoard(newTitle)
 		newTitle = ''

@@ -15,6 +15,7 @@ CREATE TABLE note (
     y            integer      DEFAULT 200 NOT NULL,
     color        text         DEFAULT '#fef08a' NOT NULL,
     creator_name text         NOT NULL,
+    z_index      integer      DEFAULT 0 NOT NULL,
     is_archived  boolean      DEFAULT FALSE NOT NULL,
     created_at   timestamptz  DEFAULT now() NOT NULL
 );

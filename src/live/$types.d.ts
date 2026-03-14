@@ -8,6 +8,12 @@ declare module '$live/boards/activity' {
   export const activity: Readable<any>;
 }
 
+declare module '$live/boards/cursors' {
+  export const joinBoard: (...args: any[]) => Promise<any>;
+  export const leaveBoard: (...args: any[]) => Promise<any>;
+  export const moveCursor: (...args: any[]) => Promise<any>;
+}
+
 declare module '$live/boards/notes' {
   import type { Readable } from 'svelte/store';
   import type { RpcError } from 'svelte-realtime/client';
@@ -15,8 +21,9 @@ declare module '$live/boards/notes' {
   export const createNote: (...args: any[]) => Promise<any>;
   export const moveNote: (...args: any[]) => Promise<any>;
   export const editNote: (...args: any[]) => Promise<any>;
+  export const focusNote: (...args: any[]) => Promise<any>;
   export const deleteNote: (...args: any[]) => Promise<any>;
-  export type ErrorCode = 'VALIDATION';
+  export type ErrorCode = 'FORBIDDEN' | 'NOT_FOUND' | 'VALIDATION';
   export const notes: Readable<any>;
 }
 
@@ -25,7 +32,7 @@ declare module '$live/boards/settings' {
   import type { RpcError } from 'svelte-realtime/client';
 
   export const updateSettings: (...args: any[]) => Promise<any>;
-  export type ErrorCode = 'VALIDATION';
+  export type ErrorCode = 'NOT_FOUND' | 'VALIDATION';
   export const settings: Readable<any>;
 }
 
@@ -34,6 +41,5 @@ declare module '$live/boards' {
   import type { RpcError } from 'svelte-realtime/client';
 
   export const createBoard: (...args: any[]) => Promise<any>;
-  export type ErrorCode = 'VALIDATION';
   export const boards: Readable<any>;
 }
