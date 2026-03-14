@@ -25,9 +25,7 @@
 		<div class="flex gap-1 ml-4">
 			{#each BACKGROUNDS as bg}
 				<button
-					class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110"
-					class:border-primary={settings?.background === bg}
-					class:border-transparent={settings?.background !== bg}
+					class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
 					style:background={bg}
 					aria-label="Set background to {bg}"
 					onclick={() => onUpdate({ background: bg })}

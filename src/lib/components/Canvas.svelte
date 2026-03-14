@@ -1,18 +1,17 @@
 <script>
-	import { on } from 'svelte-adapter-uws/client'
+	import { batch } from 'svelte-realtime/client'
+	import { moveCursor } from '$live/boards/cursors'
 
 	let { children, background, boardId, ondblclick, noteCount = 0 } = $props()
 	let canvasEl = $state()
 
-	const cursorChannel = $derived(on(`__cursor:board:${boardId}`))
-
 	function onPointerMove(e) {
 		if (!canvasEl) return
 		const rect = canvasEl.getBoundingClientRect()
-		cursorChannel?.send?.({
+		batch(() => [moveCursor(boardId, {
 			x: e.clientX - rect.left,
 			y: e.clientY - rect.top
-		})
+		})])
 	}
 </script>
 

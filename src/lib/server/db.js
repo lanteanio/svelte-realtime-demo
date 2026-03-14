@@ -1,7 +1,8 @@
 import pg from 'pg'
+import { env } from '$env/dynamic/private'
 
-const pool = process.env.DATABASE_URL
-	? new pg.Pool({ connectionString: process.env.DATABASE_URL })
+const pool = env.DATABASE_URL
+	? new pg.Pool({ connectionString: env.DATABASE_URL })
 	: null
 
 // --- Postgres implementation ---
@@ -76,6 +77,10 @@ async function pgUpdateBoard(boardId, fields) {
 	return board
 }
 
+function pgGetNote(noteId) {
+	return sql(`SELECT note_id, board_id FROM note WHERE note_id = $1`, [noteId]).then(rows => rows[0])
+}
+
 function pgListNotes(boardId) {
 	return sql(`
 		  SELECT note_id,
@@ -84,7 +89,8 @@ function pgListNotes(boardId) {
 		         x,
 		         y,
 		         color,
-		         creator_name
+		         creator_name,
+		         COALESCE(z_index, 0) AS z_index
 		    FROM note
 		   WHERE board_id = $1
 		     AND NOT is_archived
@@ -94,14 +100,14 @@ function pgListNotes(boardId) {
 
 function pgCreateNote({ boardId, content, x, y, color, creatorName }) {
 	return sql(`
-		INSERT INTO note (board_id, content, x, y, color, creator_name)
-		     VALUES ($1, $2, $3, $4, $5, $6)
-		  RETURNING note_id, board_id, content, x, y, color, creator_name
+		INSERT INTO note (board_id, content, x, y, color, creator_name, z_index)
+		     VALUES ($1, $2, $3, $4, $5, $6, 0)
+		  RETURNING note_id, board_id, content, x, y, color, creator_name, z_index
 	`, [boardId, content, x, y, color, creatorName]).then(rows => rows[0])
 }
 
 async function pgUpdateNote(noteId, fields) {
-	const allowed = ['content', 'x', 'y', 'color']
+	const allowed = ['content', 'x', 'y', 'color', 'z_index']
 	const sets = []
 	const params = []
 	let i = 1
@@ -120,7 +126,7 @@ async function pgUpdateNote(noteId, fields) {
 		UPDATE note
 		   SET ${sets.join(', ')}
 		 WHERE note_id = $${i}
-	 RETURNING note_id, board_id, content, x, y, color, creator_name
+	 RETURNING note_id, board_id, content, x, y, color, creator_name, z_index
 	`, params)
 	return note
 }
@@ -176,12 +182,17 @@ function memUpdateBoard(boardId, fields) {
 	return { board_id: board.board_id, title: board.title, slug: board.slug, background: board.background }
 }
 
+function memGetNote(noteId) {
+	const n = notesMap.get(noteId)
+	return n ? { note_id: n.note_id, board_id: n.board_id } : undefined
+}
+
 function memListNotes(boardId) {
 	return [...notesMap.values()]
 		.filter(n => n.board_id === boardId && !n.is_archived)
 		.sort((a, b) => a.created_at - b.created_at)
-		.map(({ note_id, board_id, content, x, y, color, creator_name }) => ({
-			note_id, board_id, content, x, y, color, creator_name
+		.map(({ note_id, board_id, content, x, y, color, creator_name, z_index }) => ({
+			note_id, board_id, content, x, y, color, creator_name, z_index: z_index ?? 0
 		}))
 }
 
@@ -194,20 +205,21 @@ function memCreateNote({ boardId, content, x, y, color, creatorName }) {
 		y: y ?? 200,
 		color: color ?? '#fef08a',
 		creator_name: creatorName,
+		z_index: 0,
 		is_archived: false,
 		created_at: Date.now()
 	}
 	notesMap.set(note.note_id, note)
-	return { note_id: note.note_id, board_id: note.board_id, content: note.content, x: note.x, y: note.y, color: note.color, creator_name: note.creator_name }
+	return { note_id: note.note_id, board_id: note.board_id, content: note.content, x: note.x, y: note.y, color: note.color, creator_name: note.creator_name, z_index: note.z_index }
 }
 
 function memUpdateNote(noteId, fields) {
 	const note = notesMap.get(noteId)
 	if (!note) return null
-	for (const key of ['content', 'x', 'y', 'color']) {
+	for (const key of ['content', 'x', 'y', 'color', 'z_index']) {
 		if (fields[key] !== undefined) note[key] = fields[key]
 	}
-	return { note_id: note.note_id, board_id: note.board_id, content: note.content, x: note.x, y: note.y, color: note.color, creator_name: note.creator_name }
+	return { note_id: note.note_id, board_id: note.board_id, content: note.content, x: note.x, y: note.y, color: note.color, creator_name: note.creator_name, z_index: note.z_index }
 }
 
 function memDeleteNote(noteId) {
@@ -216,6 +228,7 @@ function memDeleteNote(noteId) {
 
 // --- Export the right implementation ---
 
+export const getNote = pool ? pgGetNote : memGetNote
 export const getBoard = pool ? pgGetBoard : memGetBoard
 export const getBoardBySlug = pool ? pgGetBoardBySlug : memGetBoardBySlug
 export const listBoards = pool ? pgListBoards : memListBoards

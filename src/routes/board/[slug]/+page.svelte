@@ -1,6 +1,6 @@
 <script>
 	import { batch } from 'svelte-realtime/client'
-	import { notes, createNote, moveNote, editNote, deleteNote } from '$live/boards/notes'
+	import { notes, createNote, moveNote, editNote, deleteNote, focusNote } from '$live/boards/notes'
 	import { activity } from '$live/boards/activity'
 	import { settings, updateSettings } from '$live/boards/settings'
 	import Canvas from '$lib/components/Canvas.svelte'
@@ -13,6 +13,10 @@
 	let { data } = $props()
 	const boardId = $derived(data.boardId)
 
+	const notesStore = $derived(notes(boardId))
+	const settingsStore = $derived(settings(boardId))
+	const activityStore = $derived(activity(boardId))
+
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
 	function handleCanvasDoubleClick(e) {
@@ -21,7 +25,7 @@
 			content: '',
 			x: e.clientX - rect.left,
 			y: e.clientY - rect.top,
-			color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)]
+			color: localStorage.getItem('noteColor') || NOTE_COLORS[0]
 		})
 	}
 
@@ -29,7 +33,7 @@
 
 	function handleMove(noteId, x, y) {
 		localPositions[noteId] = { x, y }
-		batch(() => moveNote(boardId, noteId, x, y))
+		batch(() => [moveNote(boardId, noteId, x, y)])
 	}
 
 	function handleMoveEnd(noteId) {
@@ -37,25 +41,39 @@
 	}
 
 	const displayNotes = $derived(
-		($notes ?? []).map(note => localPositions[note.note_id]
-			? { ...note, ...localPositions[note.note_id] }
-			: note
-		)
+		($notesStore ?? []).map(note => {
+			const pos = localPositions[note.note_id]
+			return pos ? { ...note, x: pos.x, y: pos.y } : note
+		})
 	)
 
-	let topZ = $state(1)
-
 	function bringToFront(noteId) {
-		localPositions[noteId] = { ...localPositions[noteId], z: ++topZ }
+		const maxZ = Math.max(0, ...($notesStore ?? []).map(n => n.z_index ?? 0))
+		focusNote(boardId, noteId, maxZ + 1)
 	}
+
+	let rateLimitCountdown = $state(0)
+
+	$effect(() => {
+		const msg = $notesStore?.error?.message
+		if (!msg) return
+		const match = msg.match(/Retry in (\d+)s/)
+		if (!match) return
+		rateLimitCountdown = parseInt(match[1])
+		const timer = setInterval(() => {
+			rateLimitCountdown--
+			if (rateLimitCountdown <= 0) clearInterval(timer)
+		}, 1000)
+		return () => clearInterval(timer)
+	})
 
 	function onKeyDown(e) {
 		if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
 			e.preventDefault()
 			if (e.shiftKey) {
-				notes.redo()
+				notesStore.redo()
 			} else {
-				notes.undo()
+				notesStore.undo()
 			}
 		}
 	}
@@ -63,22 +81,22 @@
 
 <svelte:window onkeydown={onKeyDown} />
 
-{#if $notes === undefined}
+{#if $notesStore === undefined}
 	<div class="flex justify-center items-center h-[80vh]">
 		<span class="loading loading-spinner loading-lg"></span>
 	</div>
-{:else if $notes?.error}
-	<div class="alert alert-error m-4">{$notes.error.message}</div>
+{:else if $notesStore?.error && !$notesStore.error.message?.includes('Retry')}
+	<div class="alert alert-error m-4">{$notesStore.error.message}</div>
 {:else}
 	<BoardHeader
-		settings={$settings}
+		settings={$settingsStore}
 		onUpdate={(fields) => updateSettings(boardId, fields)}
 	>
 		<PresenceBar {boardId} />
 	</BoardHeader>
 
 	<Canvas
-		background={$settings?.background ?? '#f5f5f4'}
+		background={$settingsStore?.background ?? '#f5f5f4'}
 		ondblclick={handleCanvasDoubleClick}
 		{boardId}
 		noteCount={displayNotes.length}
@@ -86,7 +104,7 @@
 		{#each displayNotes as note (note.note_id)}
 			<StickyNote
 				{note}
-				zIndex={localPositions[note.note_id]?.z ?? 1}
+				zIndex={note.z_index ?? 0}
 				onMove={(x, y) => handleMove(note.note_id, x, y)}
 				onMoveEnd={() => handleMoveEnd(note.note_id)}
 				onEdit={(fields) => editNote(boardId, note.note_id, fields)}
@@ -95,8 +113,16 @@
 			/>
 		{/each}
 
-		<CursorOverlay {boardId} />
+		<CursorOverlay {boardId} userId={data.identity?.id} />
 	</Canvas>
 
-	<ActivityTicker items={$activity} />
+	<ActivityTicker items={$activityStore} />
+{/if}
+
+{#if rateLimitCountdown > 0}
+	<div class="toast toast-top toast-center z-50">
+		<div class="alert alert-warning shadow-lg">
+			<span>Slow down! Retry in {rateLimitCountdown}s</span>
+		</div>
+	</div>
 {/if}

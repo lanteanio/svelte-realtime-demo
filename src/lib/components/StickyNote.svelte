@@ -1,4 +1,5 @@
 <script>
+	import { Palette, X } from 'lucide-svelte'
 	let { note, zIndex = 1, onMove, onMoveEnd, onEdit, onDelete, onFocus } = $props()
 	let dragging = $state(false)
 	let editing = $state(false)
@@ -6,6 +7,7 @@
 	let offset = $state({ x: 0, y: 0 })
 
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
+
 
 	function onPointerDown(e) {
 		if (editing) return
@@ -26,60 +28,90 @@
 			onMoveEnd()
 		}
 	}
+
+	function startEditing() {
+		editing = true
+	}
+
+	function stopEditing(e) {
+		editing = false
+		onEdit({ content: e.target.value })
+	}
+
+	function stopDrag(e) {
+		e.stopPropagation()
+	}
+
+	$effect(() => {
+		if (!showColors) return
+		function close() { showColors = false }
+		window.addEventListener('pointerdown', close)
+		return () => window.removeEventListener('pointerdown', close)
+	})
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="absolute w-48 min-h-32 rounded-lg shadow-md p-3 select-none
-				 transition-shadow hover:shadow-lg group"
+	class="absolute w-52 min-h-36 rounded-lg shadow-md shadow-black/20 select-none border border-black/15
+				 transition-shadow hover:shadow-lg hover:shadow-black/30 group flex flex-col text-black"
 	style:left="{note.x}px"
 	style:top="{note.y}px"
 	style:background={note.color}
-	style:cursor={dragging ? 'grabbing' : 'grab'}
+	style:cursor={editing ? 'auto' : dragging ? 'grabbing' : 'grab'}
 	style:z-index={dragging ? 999 : zIndex}
-	onpointerdown={onPointerDown}
+onpointerdown={onPointerDown}
 	onpointermove={onPointerMove}
 	onpointerup={onPointerUp}
+	ondblclick={(e) => { e.stopPropagation(); startEditing() }}
 >
-	{#if editing}
-		<textarea
-			class="w-full h-full bg-transparent resize-none border-none outline-none text-sm"
-			value={note.content}
-			onblur={(e) => { editing = false; onEdit({ content: e.target.value }) }}
-			onkeydown={(e) => { if (e.key === 'Escape') editing = false }}
-		></textarea>
-	{:else}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<p
-			class="text-sm whitespace-pre-wrap cursor-text min-h-8"
-			ondblclick={(e) => { e.stopPropagation(); editing = true }}
-		>{note.content || 'Double-click to edit'}</p>
-	{/if}
+	<!-- Content area -->
+	<div class="flex-1 p-3 pb-0">
+		{#if editing}
+			<!-- svelte-ignore a11y_autofocus -->
+			<textarea
+				class="w-full min-h-20 bg-transparent resize-none border-none outline-none text-sm
+							 break-words whitespace-pre-wrap [field-sizing:content]"
+				value={note.content}
+				autofocus
+				onblur={stopEditing}
+				onkeydown={(e) => { if (e.key === 'Escape') e.target.blur() }}
+			></textarea>
+		{:else}
+			<p class="text-sm whitespace-pre-wrap break-words min-h-8 overflow-hidden"
+			>{note.content || 'Double-click to edit'}</p>
+		{/if}
+	</div>
+
+	<!-- Footer -->
+	<div class="px-3 pb-1.5 pt-1 text-xs opacity-40 text-right shrink-0">{note.creator_name}</div>
 
 	<!-- Top-right controls: color picker toggle + delete -->
-	<div class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1" onpointerdown={stopDrag}>
 		<button
-			class="w-5 h-5 rounded-full border border-black/20"
-			style:background={note.color}
+			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors"
 			aria-label="Pick color"
-			onclick={(e) => { e.stopPropagation(); showColors = !showColors }}
-		></button>
-		<button class="btn btn-ghost btn-xs btn-circle" onclick={onDelete}>x</button>
+			onclick={() => showColors = !showColors}
+		><Palette size={14} /></button>
+		<button
+			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors"
+			onclick={() => onDelete()}
+			aria-label="Delete note"
+		><X size={14} /></button>
 	</div>
 
 	<!-- Color picker row -->
 	{#if showColors}
-		<div class="absolute -top-8 right-0 flex gap-1 bg-white/90 rounded-lg p-1 shadow-md">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="absolute -top-9 right-0 flex gap-1 bg-white/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg" onpointerdown={stopDrag}>
 			{#each NOTE_COLORS as c}
 				<button
-					class="w-5 h-5 rounded-full border border-black/10 hover:scale-125 transition-transform"
+					class="w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform {note.color === c ? 'border-black/30' : 'border-black/10'}"
 					style:background={c}
 					aria-label="Set color to {c}"
-					onclick={(e) => { e.stopPropagation(); onEdit({ color: c }); showColors = false }}
+					onclick={() => { onEdit({ color: c }); showColors = false }}
 				></button>
 			{/each}
 		</div>
 	{/if}
-
-	<div class="absolute bottom-1 right-2 text-xs opacity-40">{note.creator_name}</div>
 </div>
