@@ -3,15 +3,9 @@ services:
     build: .
     ports:
       - "${PORT:-3000}:3000"
-    entrypoint: sh
-    command:
-      - -c
-      - |
-        export REDIS_URL="redis://:$$REDIS_PASSWORD@redis:6379"
-        exec node build
     environment:
       DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/stickynotes
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      REDIS_URL: redis://redis:6379
       PORT: "3000"
       ORIGIN: ${ORIGIN:-http://localhost:3000}
       PROTOCOL_HEADER: x-forwarded-proto
@@ -45,16 +39,11 @@ services:
 
   redis:
     image: redis:7-alpine
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
-    entrypoint: sh
-    command:
-      - -c
-      - exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes
+    command: redis-server --protected-mode no --appendonly yes
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$REDIS_PASSWORD\" ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
