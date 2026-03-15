@@ -63,41 +63,31 @@
 	}
 
 	// --- Drag handling ---
-	// During a drag, we track positions locally (for instant visual feedback)
-	// AND send them to the server (so other users see the movement).
-	// batch() groups the moveNote RPC with other pending calls.
-	let localPositions = $state({})
+	// StickyNote updates its own DOM position directly during drag
+	// (bypassing Svelte reactivity for 60fps). The parent only needs
+	// to send the server RPC and manage undo history.
 	let dragging = $state(false)
 
 	function handleMove(noteId, x, y) {
 		if (!dragging) {
 			dragging = true
-			// Pause undo history during drag -- we don't want every
-			// pixel of movement as a separate undo step.
 			notesStore.pauseHistory()
 		}
-		localPositions[noteId] = { x, y }
+		// Only send the RPC -- StickyNote handles its own visual position.
 		batch(() => [moveNote(boardId, noteId, x, y)])
 	}
 
 	function handleMoveEnd(noteId) {
-		delete localPositions[noteId]
 		if (dragging) {
 			dragging = false
-			// Resume history -- the entire drag is now one undo step.
 			notesStore.resumeHistory()
 		}
 	}
 
-	// Merge local drag positions with server-confirmed positions.
-	// During a drag, localPositions overrides the server position
-	// for instant feedback. After drag ends, server position takes over.
-	const displayNotes = $derived(
-		($notesStore ?? []).map(note => {
-			const pos = localPositions[note.note_id]
-			return pos ? { ...note, x: pos.x, y: pos.y } : note
-		})
-	)
+	// Notes array straight from the server. No local position merging
+	// needed -- StickyNote handles its own position during drag via
+	// direct DOM manipulation.
+	const displayNotes = $derived($notesStore ?? [])
 
 	// --- Z-ordering ---
 	// Clicking a note brings it to the front by setting z_index = max + 1.
