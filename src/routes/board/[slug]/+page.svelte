@@ -79,11 +79,14 @@
 	}
 
 	function handleMoveEnd(noteId) {
-		delete localPositions[noteId]
 		if (dragging) {
 			dragging = false
 			notesStore.resumeHistory()
 		}
+		// Keep the local position briefly so the note doesn't snap back
+		// to the stale server position while the final moveNote RPC is
+		// in flight. 300ms is enough for the round trip.
+		setTimeout(() => { delete localPositions[noteId] }, 300)
 	}
 
 	// Merge local drag positions with server-confirmed positions.
