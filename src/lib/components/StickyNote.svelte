@@ -72,7 +72,14 @@
 
 	function onPointerUp() {
 		if (dragging) {
+			// Flush any pending rAF callback so the final position
+			// reaches the server before we hand control back to Svelte.
+			if (rafPending) {
+				rafPending = false
+				onMove(lastX, lastY)
+			}
 			dragging = false
+			dragEl = null
 			onMoveEnd()
 		}
 	}
@@ -114,6 +121,7 @@
 	style:cursor={editing ? 'auto' : dragging ? 'grabbing' : 'grab'}
 	style:z-index={dragging ? 999 : zIndex}
 	style:will-change={dragging ? 'transform' : 'auto'}
+	style:transition={dragging ? 'none' : 'transform 80ms linear'}
 	onpointerdown={onPointerDown}
 	onpointermove={onPointerMove}
 	onpointerup={onPointerUp}
