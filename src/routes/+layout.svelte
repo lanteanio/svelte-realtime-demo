@@ -15,7 +15,7 @@
 	import '../app.css'
 	import { status } from 'svelte-adapter-uws/client'
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
-	import { StickyNote, Wifi, WifiOff, Sun, Moon, User, Globe } from 'lucide-svelte'
+	import { Wifi, WifiOff, Sun, Moon, User, Globe, Github } from 'lucide-svelte'
 
 	let { children, data } = $props()
 	const identity = $derived(data.identity)
@@ -54,8 +54,11 @@
 	<div class="navbar bg-base-100 border-b border-base-300 px-4">
 		<div class="navbar-start">
 			<a href="/" class="flex items-center gap-2 text-lg font-bold">
-				<StickyNote size={20} />
-				Sticky Notes
+				<svg viewBox="0 0 15 16" width="20" height="20" class="inline-block">
+					<path d="M13.7 1.6C12.4.3 10.5-.1 8.9.6 7.2 1.3 6 2.8 5.8 4.6c-.1.9 0 1.8.3 2.6.1.3 0 .6-.2.8L1.6 12.3c-.6.6-.6 1.6 0 2.1l.1.1c.6.6 1.5.6 2.1 0L8 10.3c.2-.2.5-.3.8-.2.8.3 1.7.4 2.6.3 1.8-.2 3.3-1.4 4-3.1.7-1.6.3-3.5-1-4.8l-.7.1z" fill="#ff3e00"/>
+					<path d="M5.3 11.5c-.4.4-1 .4-1.4 0-.4-.4-.4-1 0-1.4l3.2-3.2c.1-.1.2-.3.1-.5-.2-.6-.3-1.2-.2-1.8.1-1.2.9-2.3 2-2.8 1.1-.5 2.4-.2 3.3.6.9.9 1.2 2.2.6 3.3-.5 1.1-1.6 1.9-2.8 2-.6.1-1.2 0-1.8-.2-.2-.1-.4 0-.5.1l-3.2 3.2.7-.3z" fill="#fff" opacity=".3"/>
+				</svg>
+				Svelte Realtime Demo
 			</a>
 		</div>
 		<div class="navbar-end flex items-center gap-3">
@@ -95,6 +98,11 @@
 					{/each}
 				</div>
 			{/if}
+
+			<!-- GitHub link -->
+			<a href="https://github.com/lanteanio/svelte-realtime-demo" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+				<Github size={16} />
+			</a>
 
 			<!-- Dark/light theme toggle (DaisyUI swap component) -->
 			<label class="swap btn btn-ghost btn-sm">

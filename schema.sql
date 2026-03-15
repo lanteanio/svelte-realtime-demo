@@ -1,10 +1,15 @@
 CREATE TABLE board (
-    board_id     uuid         DEFAULT gen_random_uuid() PRIMARY KEY,
-    title        text         NOT NULL,
-    slug         text         NOT NULL UNIQUE,
-    background   text         DEFAULT '#f5f5f4' NOT NULL,
-    created_at   timestamptz  DEFAULT now() NOT NULL
+    board_id       uuid         DEFAULT gen_random_uuid() PRIMARY KEY,
+    title          text         NOT NULL,
+    slug           text         NOT NULL UNIQUE,
+    background     text         DEFAULT '#f5f5f4' NOT NULL,
+    last_activity  timestamptz  DEFAULT now() NOT NULL,
+    created_at     timestamptz  DEFAULT now() NOT NULL
 );
+
+-- If upgrading an existing database:
+-- ALTER TABLE board ADD COLUMN IF NOT EXISTS last_activity timestamptz DEFAULT now() NOT NULL;
+-- UPDATE board SET last_activity = created_at WHERE last_activity IS NULL;
 
 CREATE TABLE note (
     note_id      uuid         DEFAULT gen_random_uuid() PRIMARY KEY,

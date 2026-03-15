@@ -10,9 +10,15 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { listBoards, createBoard as dbCreateBoard } from '$lib/server/db'
+import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard } from '$lib/server/db'
 import { generateSlug } from '$lib/names'
 import { validateBoardTitle } from '$lib/server/validate'
+
+/** How long a board lives without activity (1 hour). */
+const BOARD_TTL_MS = 60 * 60 * 1000
+
+/** Slugs that never expire. */
+const PROTECTED_SLUGS = ['stress-me-out']
 
 /**
  * Create a new board.
@@ -50,3 +56,24 @@ export const createBoard = live(async (ctx, title) => {
 export const boards = live.stream('boards', async () => {
 	return listBoards()
 }, { merge: 'crud', key: 'board_id' })
+
+/**
+ * Cleanup cron -- runs every minute.
+ *
+ * Finds boards that haven't had activity in BOARD_TTL_MS (1 hour)
+ * and deletes them. Protected boards (stress-me-out) are exempt.
+ *
+ * Publishes individual 'deleted' events via ctx.publish so the crud
+ * merge on the client removes each board from the list. Returns
+ * undefined to skip the automatic 'set' publish.
+ */
+export const cleanupStaleBoards = live.cron('* * * * *', 'boards', async (ctx) => {
+	const stale = await listStaleBoards(BOARD_TTL_MS, PROTECTED_SLUGS)
+	for (const board of stale) {
+		await dbDeleteBoard(board.board_id)
+		ctx.publish('boards', 'deleted', { board_id: board.board_id })
+	}
+	if (stale.length > 0) {
+		console.log(`[cleanup] Deleted ${stale.length} stale board(s): ${stale.map(b => b.slug).join(', ')}`)
+	}
+})
