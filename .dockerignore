@@ -4,3 +4,6 @@ build
 .env
 test-results
 e2e
+!e2e/destroyer*.spec.js
+!e2e/destroyer-standalone.js
+!e2e/stress.spec.js
