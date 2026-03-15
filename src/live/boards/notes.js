@@ -35,7 +35,12 @@ import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, va
  */
 function touch(ctx, boardId) {
 	touchBoard(boardId).then(board => {
-		if (board) ctx.publish('boards', 'updated', board)
+		if (!board) return
+		// Update the home page board list timer
+		ctx.publish('boards', 'updated', board)
+		// Update the board page header timer. The settings stream uses 'set'
+		// merge (replaces the whole object), so we send all fields.
+		ctx.publish(`board:${boardId}:settings`, 'set', board)
 	}).catch(() => {})
 }
 

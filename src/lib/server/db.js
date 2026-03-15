@@ -66,7 +66,7 @@ function pgTouchBoard(boardId) {
 	return sql(`
 		UPDATE board SET last_activity = now()
 		 WHERE board_id = $1
-	 RETURNING board_id, title, slug, last_activity
+	 RETURNING board_id, title, slug, background, last_activity
 	`, [boardId]).then(rows => rows[0])
 }
 
@@ -258,7 +258,7 @@ function memTouchBoard(boardId) {
 	const b = boardsMap.get(boardId)
 	if (!b) return undefined
 	b.last_activity = Date.now()
-	return { board_id: b.board_id, title: b.title, slug: b.slug, last_activity: new Date(b.last_activity).toISOString() }
+	return { board_id: b.board_id, title: b.title, slug: b.slug, background: b.background, last_activity: new Date(b.last_activity).toISOString() }
 }
 
 function memDeleteBoard(boardId) {

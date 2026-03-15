@@ -1,30 +1,29 @@
 <!--
 	CountdownTimer -- shows time remaining before a board expires.
 
-	Uses DaisyUI's countdown component. Updates every second.
-	Changes color as the deadline approaches:
+	Uses DaisyUI's countdown component for the animated digit transition.
+	Updates every second. Changes color as the deadline approaches:
 	- > 10 min: neutral (text-base-content/50)
 	- 5-10 min: warning
 	- < 5 min: error (pulses)
-
-	When the countdown reaches zero the board has already been deleted
-	by the server cron. The home page receives a 'deleted' event and
-	removes the card. The board page should redirect home.
 -->
 <script>
 	const TTL_MS = 60 * 60 * 1000
 
-	let { lastActivity, compact = false } = $props()
+	let { lastActivity } = $props()
 
 	let remaining = $state(0)
 
 	function update() {
 		const expiresAt = new Date(lastActivity).getTime() + TTL_MS
-		remaining = Math.max(0, expiresAt - Date.now())
+		// Round down to the nearest full second so the display always
+		// decrements by exactly 1 second per tick, even if setInterval
+		// fires slightly early or late.
+		const raw = Math.max(0, expiresAt - Date.now())
+		remaining = Math.floor(raw / 1000) * 1000
 	}
 
 	$effect(() => {
-		// Recalculate whenever lastActivity changes
 		void lastActivity
 		update()
 		const timer = setInterval(update, 1000)
@@ -42,17 +41,8 @@
 	)
 </script>
 
-{#if compact}
-	<span class="text-xs tabular-nums {urgency}">
-		{minutes}:{seconds.toString().padStart(2, '0')}
-	</span>
-{:else}
-	<span class="flex items-center gap-1 font-mono text-xs {urgency}">
-		<span class="countdown">
-			<span style="--value:{minutes};"></span>
-		</span>m
-		<span class="countdown">
-			<span style="--value:{seconds};"></span>
-		</span>s
-	</span>
-{/if}
+<span class="countdown font-mono text-xs {urgency}">
+	<span style="--value:{minutes};" aria-live="polite" aria-label="{minutes}">{minutes}</span>
+	:
+	<span style="--value:{seconds}; --digits: 2;" aria-live="polite" aria-label="{seconds}">{seconds}</span>
+</span>

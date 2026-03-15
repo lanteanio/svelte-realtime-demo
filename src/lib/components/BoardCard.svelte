@@ -23,7 +23,7 @@
 		<span class="font-medium">{board.title}</span>
 		<div class="flex items-center gap-2">
 			{#if !isProtected && board.last_activity}
-				<CountdownTimer lastActivity={board.last_activity} compact />
+				<CountdownTimer lastActivity={board.last_activity} />
 			{/if}
 			{#if users.length > 0}
 				<span class="badge badge-sm badge-primary">{users.length} here</span>
