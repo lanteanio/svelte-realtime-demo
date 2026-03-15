@@ -29,28 +29,45 @@
 	// Coordinates are relative to the scrollable canvas surface, not the
 	// viewport, so we account for the canvas scroll offset and position.
 
-	// Cached on drag start to avoid DOM queries on every pointermove.
-	let canvas = null
-	let canvasRect = null
+	// Drag state -- cached on pointerdown, used every pointermove.
+	let dragEl = null
+	let startScroll = { x: 0, y: 0 }
+	let startRect = { left: 0, top: 0 }
+	let lastX = 0
+	let lastY = 0
+	let rafPending = false
 
 	function onPointerDown(e) {
 		if (editing) return
 		onFocus()
 		dragging = true
-		// Cache canvas reference and its rect once at drag start.
-		canvas = e.currentTarget.closest('[class*="overflow-auto"]')
-		canvasRect = canvas?.getBoundingClientRect() ?? { left: 0, top: 0 }
-		const x = e.clientX - canvasRect.left + (canvas?.scrollLeft ?? 0)
-		const y = e.clientY - canvasRect.top + (canvas?.scrollTop ?? 0)
-		offset = { x: x - note.x, y: y - note.y }
-		e.currentTarget.setPointerCapture(e.pointerId)
+		dragEl = e.currentTarget
+		// Snapshot everything once. No DOM reads during pointermove.
+		const canvas = dragEl.parentElement
+		startRect = canvas?.getBoundingClientRect() ?? { left: 0, top: 0 }
+		startScroll = { x: canvas?.scrollLeft ?? 0, y: canvas?.scrollTop ?? 0 }
+		offset = {
+			x: e.clientX - startRect.left + startScroll.x - note.x,
+			y: e.clientY - startRect.top + startScroll.y - note.y
+		}
+		dragEl.setPointerCapture(e.pointerId)
 	}
 
 	function onPointerMove(e) {
 		if (!dragging) return
-		const x = e.clientX - canvasRect.left + (canvas?.scrollLeft ?? 0)
-		const y = e.clientY - canvasRect.top + (canvas?.scrollTop ?? 0)
-		onMove(x - offset.x, y - offset.y)
+		// Pure math -- zero DOM reads, zero layout recalc.
+		lastX = e.clientX - startRect.left + startScroll.x - offset.x
+		lastY = e.clientY - startRect.top + startScroll.y - offset.y
+		// Direct DOM write -- bypasses Svelte reactivity entirely.
+		dragEl.style.transform = `translate(${lastX}px, ${lastY}px)`
+		// Notify parent once per frame for server sync.
+		if (!rafPending) {
+			rafPending = true
+			requestAnimationFrame(() => {
+				rafPending = false
+				onMove(lastX, lastY)
+			})
+		}
 	}
 
 	function onPointerUp() {
