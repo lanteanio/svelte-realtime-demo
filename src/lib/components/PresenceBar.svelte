@@ -21,7 +21,7 @@
 	import { joinBoard, leaveBoard } from '$live/boards/cursors'
 
 	const MAX_AVATARS_DESKTOP = 8
-	const MAX_AVATARS_MOBILE = 3
+	const MAX_AVATARS_MOBILE = 1
 
 	let { boardId } = $props()
 	const presenceStore = $derived(presence(`board:${boardId}`, { maxAge: 90000 }))

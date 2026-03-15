@@ -29,29 +29,28 @@
 	// Coordinates are relative to the scrollable canvas surface, not the
 	// viewport, so we account for the canvas scroll offset and position.
 
-	function canvasOffset(e) {
-		const canvas = e.currentTarget.closest('[class*="overflow-auto"]')
-		if (!canvas) return { x: e.clientX, y: e.clientY }
-		const rect = canvas.getBoundingClientRect()
-		return {
-			x: e.clientX - rect.left + canvas.scrollLeft,
-			y: e.clientY - rect.top + canvas.scrollTop
-		}
-	}
+	// Cached on drag start to avoid DOM queries on every pointermove.
+	let canvas = null
+	let canvasRect = null
 
 	function onPointerDown(e) {
 		if (editing) return
 		onFocus()
 		dragging = true
-		const pos = canvasOffset(e)
-		offset = { x: pos.x - note.x, y: pos.y - note.y }
+		// Cache canvas reference and its rect once at drag start.
+		canvas = e.currentTarget.closest('[class*="overflow-auto"]')
+		canvasRect = canvas?.getBoundingClientRect() ?? { left: 0, top: 0 }
+		const x = e.clientX - canvasRect.left + (canvas?.scrollLeft ?? 0)
+		const y = e.clientY - canvasRect.top + (canvas?.scrollTop ?? 0)
+		offset = { x: x - note.x, y: y - note.y }
 		e.currentTarget.setPointerCapture(e.pointerId)
 	}
 
 	function onPointerMove(e) {
 		if (!dragging) return
-		const pos = canvasOffset(e)
-		onMove(pos.x - offset.x, pos.y - offset.y)
+		const x = e.clientX - canvasRect.left + (canvas?.scrollLeft ?? 0)
+		const y = e.clientY - canvasRect.top + (canvas?.scrollTop ?? 0)
+		onMove(x - offset.x, y - offset.y)
 	}
 
 	function onPointerUp() {
