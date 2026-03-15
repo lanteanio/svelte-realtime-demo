@@ -109,6 +109,32 @@ npm run build
 npm start
 ```
 
+### Deploy with Docker Compose
+
+The included `docker-compose.yml` sets up everything you need: app, Postgres, Redis, and a certbot container that automatically obtains and renews a Let's Encrypt TLS certificate. You get HTTPS out of the box.
+
+1. Point a domain at your server (A record)
+2. Create a `.env` file:
+
+```bash
+DOMAIN=your-domain.com
+POSTGRES_PASSWORD=pick-a-strong-password
+```
+
+3. Get the initial certificate:
+
+```bash
+docker compose run --rm certbot certonly --standalone -d your-domain.com
+```
+
+4. Start everything:
+
+```bash
+docker compose up -d
+```
+
+The app serves HTTPS on port 443. Certbot renews the certificate automatically every 12 hours. Postgres and Redis data are persisted in Docker volumes.
+
 ---
 
 ## E2E tests
