@@ -123,9 +123,10 @@ test.describe('WebSocket Connection', () => {
 		// Create and visit 3 different boards
 		for (let i = 0; i < 3; i++) {
 			await page.goto('/');
+			await waitForWS(page);
 			await page.getByPlaceholder('New board name...').fill(`Leak Test ${i} ${Date.now()}`);
 			await page.getByRole('button', { name: 'Create' }).click();
-			await page.waitForURL(/\/board\//);
+			await page.waitForURL(/\/board\//, { timeout: 15000 });
 			await waitForBoardReady(page);
 			await page.waitForTimeout(1500);
 		}

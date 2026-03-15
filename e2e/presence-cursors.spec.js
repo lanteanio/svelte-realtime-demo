@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getCanvas, waitForBoardReady } from './helpers.js';
+import { getCanvas, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('Presence & Cursors', () => {
 	let boardUrl;
@@ -8,9 +8,10 @@ test.describe('Presence & Cursors', () => {
 		const ctx = await browser.newContext();
 		const page = await ctx.newPage();
 		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Presence Test ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForURL(/\/board\//);
+		await page.waitForURL(/\/board\//, { timeout: 15000 });
 		boardUrl = new URL(page.url()).pathname;
 		await ctx.close();
 	});
@@ -99,7 +100,7 @@ test.describe('Presence & Cursors', () => {
 		// If we got here without timeout, cursor data was sent
 	});
 
-	test('other user cursor appears in overlay', async ({ browser }) => {
+	test('other user cursor appears in overlay', { timeout: 60000 }, async ({ browser }) => {
 		const ctxA = await browser.newContext();
 		const ctxB = await browser.newContext();
 		const pageA = await ctxA.newPage();

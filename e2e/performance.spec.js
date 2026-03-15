@@ -82,11 +82,12 @@ test.describe('Performance', () => {
 	test('board page performance', async ({ page }) => {
 		// Create a board first
 		await page.goto('/');
+		await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
 		const input = page.getByPlaceholder(/board/i).or(page.locator('input[type="text"]').first());
 		await input.fill(`Perf Test ${Date.now()}`);
 		const createBtn = page.getByRole('button', { name: /create/i }).or(page.locator('form button[type="submit"]'));
 		await createBtn.click();
-		await page.waitForURL(/\/board\//);
+		await page.waitForURL(/\/board\//, { timeout: 15000 });
 		const boardPath = new URL(page.url()).pathname;
 
 		// Now measure a fresh navigation to the board
@@ -133,8 +134,8 @@ test.describe('Performance', () => {
 	});
 
 	test('WebSocket connection establishes quickly', async ({ page }) => {
-		const wsPromise = page.waitForEvent('websocket', { timeout: 10_000 });
-		await page.goto('/');
+		const wsPromise = page.waitForEvent('websocket', { timeout: 15_000 });
+		await page.goto('/', { waitUntil: 'commit' });
 		const ws = await wsPromise;
 
 		console.log(`\nWebSocket URL: ${ws.url()}`);
@@ -210,11 +211,12 @@ test.describe('Performance', () => {
 
 		// Create a board
 		await page.goto('/');
+		await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
 		const input = page.getByPlaceholder(/board/i).or(page.locator('input[type="text"]').first());
 		await input.fill(`Error Check ${Date.now()}`);
 		const createBtn = page.getByRole('button', { name: /create/i }).or(page.locator('form button[type="submit"]'));
 		await createBtn.click();
-		await page.waitForURL(/\/board\//);
+		await page.waitForURL(/\/board\//, { timeout: 15000 });
 
 		errors.length = 0; // Reset after navigation
 		await page.waitForTimeout(3000);

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, getCanvas, getNotes, waitForBoardReady } from './helpers.js';
+import { createBoard, getCanvas, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('Input Validation', () => {
 	test('empty board title does not create a board', async ({ page }) => {
@@ -27,6 +27,7 @@ test.describe('Input Validation', () => {
 
 	test('very long board title (>100 chars) is handled gracefully', async ({ page }) => {
 		await page.goto('/');
+		await waitForWS(page);
 		const longTitle = 'A'.repeat(150);
 		await page.getByPlaceholder('New board name...').fill(longTitle);
 		await page.getByRole('button', { name: 'Create' }).click();
@@ -43,6 +44,7 @@ test.describe('Input Validation', () => {
 
 	test('XSS in board title is escaped', async ({ page }) => {
 		await page.goto('/');
+		await waitForWS(page);
 		const xss = '<script>alert("xss")</script>';
 		await page.getByPlaceholder('New board name...').fill(xss);
 		await page.getByRole('button', { name: 'Create' }).click();

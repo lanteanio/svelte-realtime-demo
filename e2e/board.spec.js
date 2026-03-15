@@ -1,51 +1,42 @@
 import { test, expect } from '@playwright/test';
+import { createBoard, getCanvas, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 let boardUrl;
 
 test.describe.serial('Board Page', () => {
 	test('create a board to test with', async ({ page }) => {
-		await page.goto('/');
-		const boardName = `E2E Board ${Date.now()}`;
-		await page.getByPlaceholder('New board name...').fill(boardName);
-		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForURL(/\/board\//);
-		boardUrl = new URL(page.url()).pathname;
+		boardUrl = await createBoard(page, `E2E Board ${Date.now()}`);
 	});
 
 	test('board canvas is visible with empty hint', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForBoardReady(page);
 		await expect(page.getByText('Double-click anywhere to add a note')).toBeVisible();
 	});
 
 	test('double-click canvas creates a note', async ({ page }) => {
 		await page.goto(boardUrl);
-		await page.waitForTimeout(1500);
+		await waitForBoardReady(page);
 
-		// The canvas is the div with overflow-auto below the board header
-		const canvas = page.locator('div.relative.w-full.overflow-auto');
+		const canvas = getCanvas(page);
 		const box = await canvas.boundingBox();
 		await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
-
-		// Wait for note to appear - it should remove the empty hint or add a sticky note element
 		await page.waitForTimeout(2000);
 
-		// The empty hint should be gone now
 		const hint = page.getByText('Double-click anywhere to add a note');
 		await expect(hint).not.toBeVisible({ timeout: 5000 });
 	});
 
 	test('can edit a note by double-clicking', async ({ page }) => {
 		await page.goto(boardUrl);
-		await page.waitForTimeout(2000);
+		await waitForBoardReady(page);
 
-		// Create a note
-		const canvas = page.locator('div.relative.w-full.overflow-auto');
+		const canvas = getCanvas(page);
 		const box = await canvas.boundingBox();
 		await page.mouse.dblclick(box.x + 200, box.y + 200);
 		await page.waitForTimeout(2000);
 
-		// Find the note's content area and double-click to edit
-		const note = page.locator('.card').first();
+		const note = getNotes(page).first();
 		if (await note.isVisible()) {
 			await note.dblclick();
 			await page.waitForTimeout(500);
@@ -60,8 +51,8 @@ test.describe.serial('Board Page', () => {
 
 	test('presence bar shows users on board', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForBoardReady(page);
 		await page.waitForTimeout(2000);
-		// The board page shows "X online" with presence avatars
 		await expect(page.getByText(/online/).first()).toBeVisible();
 	});
 

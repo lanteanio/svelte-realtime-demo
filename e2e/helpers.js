@@ -3,10 +3,19 @@
  */
 
 /**
+ * Wait for the WebSocket to be connected (green wifi icon visible).
+ */
+export async function waitForWS(page) {
+	await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
+}
+
+/**
  * Create a fresh board and return its URL path.
+ * Waits for WS connection before submitting to prevent RPC failures.
  */
 export async function createBoard(page, name) {
 	await page.goto('/');
+	await waitForWS(page);
 	await page.getByPlaceholder('New board name...').fill(name || `Test ${Date.now()}`);
 	await page.getByRole('button', { name: 'Create' }).click();
 	await page.waitForURL(/\/board\//, { timeout: 15000 });
@@ -42,9 +51,7 @@ export function getNotes(page) {
  * Wait for the board to be fully loaded (spinner gone, board header visible).
  */
 export async function waitForBoardReady(page) {
-	// Wait for the loading spinner to disappear
 	await page.locator('.loading').waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
-	// Wait for the board header (h1 with title) to appear
 	await page.locator('h1').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
 	await page.waitForTimeout(500);
 }

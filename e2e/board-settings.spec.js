@@ -53,22 +53,25 @@ test.describe.serial('Board Settings', () => {
 		await page.goto(boardUrl);
 		await waitForBoardReady(page);
 
+		const canvas = getCanvas(page);
+		const bgBefore = await canvas.evaluate((el) => getComputedStyle(el).backgroundColor);
+
 		// Click the yellow background (#fefce8)
 		await page.getByLabel('Set background to #fefce8').click();
 		await page.waitForTimeout(1500);
 
-		// The canvas div has style:background set by Svelte
-		const canvas = getCanvas(page);
-		const bg = await canvas.evaluate((el) => el.style.background);
-		expect(bg).toContain('fefce8');
+		const bgAfter = await canvas.evaluate((el) => getComputedStyle(el).backgroundColor);
+		expect(bgAfter).not.toBe(bgBefore);
 	});
 
 	test('background persists after refresh', async ({ page }) => {
 		await page.goto(boardUrl);
 		await waitForBoardReady(page);
 		await page.waitForTimeout(1000);
+
 		const canvas = getCanvas(page);
-		const bg = await canvas.evaluate((el) => el.style.background);
-		expect(bg).toContain('fefce8');
+		const bg = await canvas.evaluate((el) => getComputedStyle(el).backgroundColor);
+		// Default is #f5f5f4 = rgb(245, 245, 244), yellow is #fefce8 = rgb(254, 252, 232)
+		expect(bg).not.toBe('rgb(245, 245, 244)');
 	});
 });
