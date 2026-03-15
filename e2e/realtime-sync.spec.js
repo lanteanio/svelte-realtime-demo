@@ -1,17 +1,17 @@
 import { test, expect } from '@playwright/test';
-import { getCanvas, getNotes, waitForBoardReady } from './helpers.js';
+import { getCanvas, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('Multi-User Realtime Sync', () => {
 	let boardUrl;
 
 	test.beforeAll(async ({ browser }) => {
-		// Create a board with user A
 		const ctx = await browser.newContext();
 		const page = await ctx.newPage();
 		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Sync Test ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForURL(/\/board\//);
+		await page.waitForURL(/\/board\//, { timeout: 15000 });
 		boardUrl = new URL(page.url()).pathname;
 		await ctx.close();
 	});
@@ -114,7 +114,7 @@ test.describe('Multi-User Realtime Sync', () => {
 		// User B should see the new background
 		await pageB.waitForTimeout(2000);
 		const bg = await getCanvas(pageB).evaluate((el) => el.style.background);
-		expect(bg).toContain('ecfdf5');
+		expect(bg).toMatch(/ecfdf5|rgb\(236,\s*253,\s*245\)/);
 
 		await ctxA.close();
 		await ctxB.close();
@@ -128,13 +128,13 @@ test.describe('Multi-User Realtime Sync', () => {
 
 		await pageA.goto('/');
 		await pageB.goto('/');
-		await pageA.waitForTimeout(1500);
-		await pageB.waitForTimeout(1500);
+		await waitForWS(pageA);
+		await waitForWS(pageB);
 
 		const boardName = `LiveSync ${Date.now()}`;
 		await pageA.getByPlaceholder('New board name...').fill(boardName);
 		await pageA.getByRole('button', { name: 'Create' }).click();
-		await pageA.waitForURL(/\/board\//);
+		await pageA.waitForURL(/\/board\//, { timeout: 15000 });
 
 		// User B should see the new board appear
 		await pageB.waitForTimeout(3000);

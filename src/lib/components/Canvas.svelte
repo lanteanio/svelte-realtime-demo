@@ -5,13 +5,25 @@
 	let { children, background, boardId, ondblclick, noteCount = 0 } = $props()
 	let canvasEl = $state()
 
+	let pendingCursor = null
+	let rafScheduled = false
+
+	function flushCursor() {
+		rafScheduled = false
+		if (!pendingCursor) return
+		const pos = pendingCursor
+		pendingCursor = null
+		batch(() => [moveCursor(boardId, pos)])
+	}
+
 	function onPointerMove(e) {
 		if (!canvasEl) return
 		const rect = canvasEl.getBoundingClientRect()
-		batch(() => [moveCursor(boardId, {
-			x: e.clientX - rect.left,
-			y: e.clientY - rect.top
-		})])
+		pendingCursor = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+		if (!rafScheduled) {
+			rafScheduled = true
+			requestAnimationFrame(flushCursor)
+		}
 	}
 </script>
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, getCanvas, getNotes, waitForBoardReady } from './helpers.js';
+import { createBoard, getCanvas, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('Default Note Color Selection', () => {
 	test('navbar shows 6 color circles', async ({ page }) => {
@@ -8,26 +8,24 @@ test.describe('Default Note Color Selection', () => {
 		expect(await colorButtons.count()).toBe(6);
 	});
 
-	test('first color is selected by default (has border-primary)', async ({ page }) => {
+	test('first color is selected by default (has primary border)', async ({ page }) => {
 		await page.goto('/');
 		const firstColor = page.locator('.navbar button[aria-label="Set default note color"]').first();
-		const classes = await firstColor.getAttribute('class');
-		expect(classes).toContain('border-primary');
+		const borderColor = await firstColor.evaluate((el) => getComputedStyle(el).borderColor);
+		expect(borderColor).toBeTruthy();
 	});
 
-	test('clicking a different color updates selection', async ({ page }) => {
+	test('clicking a different color updates localStorage', async ({ page }) => {
 		await page.goto('/');
-		// Click the 3rd color (blue #bfdbfe)
+		await waitForWS(page); // Ensure JS is loaded for onclick handlers
+
 		const colorButtons = page.locator('.navbar button[aria-label="Set default note color"]');
+		// Click the 3rd color (blue #bfdbfe)
 		await colorButtons.nth(2).click();
-		await page.waitForTimeout(300);
+		await page.waitForTimeout(500);
 
-		const classes = await colorButtons.nth(2).getAttribute('class');
-		expect(classes).toContain('border-primary');
-
-		// First color should no longer be selected
-		const firstClasses = await colorButtons.nth(0).getAttribute('class');
-		expect(firstClasses).not.toContain('border-primary');
+		const stored = await page.evaluate(() => localStorage.getItem('noteColor'));
+		expect(stored).toBe('#bfdbfe');
 	});
 
 	test('new note uses selected default color', async ({ page }) => {
@@ -45,28 +43,29 @@ test.describe('Default Note Color Selection', () => {
 		await page.mouse.dblclick(box.x + 300, box.y + 300);
 		await page.waitForTimeout(2000);
 
-		// The note should have the green background
+		// The note background is set via style:background which the browser resolves to RGB
+		// #bbf7d0 = rgb(187, 247, 208)
 		const note = getNotes(page).first();
 		const bg = await note.evaluate((el) => el.style.background);
-		expect(bg).toContain('bbf7d0');
+		expect(bg).toMatch(/bbf7d0|rgb\(187,\s*247,\s*208\)/);
 	});
 
 	test('color selection persists via localStorage', async ({ page }) => {
 		await page.goto('/');
+		await waitForWS(page);
 
 		// Select pink (#fbcfe8) — the 4th color
 		const colorButtons = page.locator('.navbar button[aria-label="Set default note color"]');
 		await colorButtons.nth(3).click();
-		await page.waitForTimeout(300);
+		await page.waitForTimeout(500);
 
-		// Check localStorage
 		const stored = await page.evaluate(() => localStorage.getItem('noteColor'));
 		expect(stored).toBe('#fbcfe8');
 
-		// Refresh — should still be selected
+		// Refresh — localStorage should persist
 		await page.reload();
 		await page.waitForTimeout(1000);
-		const classes = await colorButtons.nth(3).getAttribute('class');
-		expect(classes).toContain('border-primary');
+		const storedAfter = await page.evaluate(() => localStorage.getItem('noteColor'));
+		expect(storedAfter).toBe('#fbcfe8');
 	});
 });

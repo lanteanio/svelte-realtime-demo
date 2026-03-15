@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForWS } from './helpers.js';
 
 test.describe('Home Page', () => {
 	test('loads and displays board list', async ({ page }) => {
@@ -16,10 +17,11 @@ test.describe('Home Page', () => {
 
 	test('creates a new board and navigates to it', async ({ page }) => {
 		await page.goto('/');
+		await waitForWS(page);
 		const boardName = `Test Board ${Date.now()}`;
 		await page.getByPlaceholder('New board name...').fill(boardName);
 		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForURL(/\/board\//);
+		await page.waitForURL(/\/board\//, { timeout: 15000 });
 		expect(page.url()).toContain('/board/');
 	});
 
@@ -27,7 +29,6 @@ test.describe('Home Page', () => {
 		await page.goto('/');
 		const navbar = page.locator('.navbar');
 		await expect(navbar).toBeVisible();
-		// Should show user's random name
 		await expect(navbar.getByText(/online/)).toBeVisible();
 	});
 

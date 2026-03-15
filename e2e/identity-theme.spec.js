@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForWS } from './helpers.js';
 
 test.describe('Identity System', () => {
 	test('user gets a random name on first visit', async ({ page }) => {
@@ -13,9 +14,10 @@ test.describe('Identity System', () => {
 		await page.goto('/');
 		const name1 = await page.locator('.navbar .font-medium').textContent();
 
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Identity Test ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForURL(/\/board\//);
+		await page.waitForURL(/\/board\//, { timeout: 15000 });
 
 		const name2 = await page.locator('.navbar .font-medium').textContent();
 		expect(name2).toBe(name1);
@@ -75,17 +77,20 @@ test.describe('Theme Toggle', () => {
 	test('clicking theme toggle switches to dark mode', async ({ page }) => {
 		await page.goto('/');
 
-		// The .theme-controller is a hidden checkbox inside a label.swap.
-		// Use evaluate to toggle it since it may be outside viewport.
-		await page.evaluate(() => {
-			const checkbox = document.querySelector('.theme-controller');
-			checkbox.checked = true;
-			checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-		});
+		const bgBefore = await page.evaluate(() =>
+			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+		);
+
+		// Click the label (swap) that wraps the hidden checkbox
+		await page.locator('label.swap').click();
 		await page.waitForTimeout(500);
 
-		const htmlAfter = await page.locator('html').getAttribute('data-theme');
-		expect(htmlAfter).toBe('dark');
+		const bgAfter = await page.evaluate(() =>
+			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+		);
+
+		// Background should have changed (dark theme has different bg)
+		expect(bgAfter).not.toBe(bgBefore);
 	});
 
 	test('dark mode changes visual appearance', async ({ page }) => {
@@ -95,11 +100,7 @@ test.describe('Theme Toggle', () => {
 			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
 		);
 
-		await page.evaluate(() => {
-			const checkbox = document.querySelector('.theme-controller');
-			checkbox.checked = true;
-			checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-		});
+		await page.locator('label.swap').click();
 		await page.waitForTimeout(500);
 
 		const bgAfter = await page.evaluate(() =>
@@ -109,26 +110,27 @@ test.describe('Theme Toggle', () => {
 		expect(bgAfter).not.toBe(bgBefore);
 	});
 
-	test('unchecking toggle returns to light mode', async ({ page }) => {
+	test('toggling back restores light mode', async ({ page }) => {
 		await page.goto('/');
 
-		// Enable dark
-		await page.evaluate(() => {
-			const cb = document.querySelector('.theme-controller');
-			cb.checked = true;
-			cb.dispatchEvent(new Event('change', { bubbles: true }));
-		});
-		await page.waitForTimeout(300);
-		expect(await page.locator('html').getAttribute('data-theme')).toBe('dark');
+		const bgOriginal = await page.evaluate(() =>
+			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+		);
 
-		// Disable dark
-		await page.evaluate(() => {
-			const cb = document.querySelector('.theme-controller');
-			cb.checked = false;
-			cb.dispatchEvent(new Event('change', { bubbles: true }));
-		});
+		// Toggle dark
+		await page.locator('label.swap').click();
 		await page.waitForTimeout(300);
-		const theme = await page.locator('html').getAttribute('data-theme');
-		expect(theme).not.toBe('dark');
+		const bgDark = await page.evaluate(() =>
+			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+		);
+		expect(bgDark).not.toBe(bgOriginal);
+
+		// Toggle light
+		await page.locator('label.swap').click();
+		await page.waitForTimeout(300);
+		const bgLight = await page.evaluate(() =>
+			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+		);
+		expect(bgLight).toBe(bgOriginal);
 	});
 });

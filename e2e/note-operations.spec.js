@@ -95,7 +95,7 @@ test.describe.serial('Note Operations', () => {
 
 		// Note background should have changed
 		const bg = await note.evaluate((el) => el.style.background);
-		expect(bg).toContain('bbf7d0');
+		expect(bg).toMatch(/bbf7d0|rgb\(187,\s*247,\s*208\)/);
 	});
 
 	test('drag note to a new position', async ({ page }) => {
