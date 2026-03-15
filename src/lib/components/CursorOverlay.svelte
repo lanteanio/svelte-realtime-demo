@@ -2,7 +2,7 @@
 	import { cursor } from 'svelte-adapter-uws/plugins/cursor/client'
 
 	let { boardId, userId } = $props()
-	const cursorStore = $derived(cursor(`board:${boardId}`))
+	const cursorStore = $derived(cursor(`board:${boardId}`, { maxAge: 10000 }))
 	const cursors = $derived([...$cursorStore].filter(([, { user }]) => user.id !== userId))
 </script>
 

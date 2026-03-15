@@ -5,7 +5,7 @@
 	const MAX_AVATARS = 8
 
 	let { boardId } = $props()
-	const presenceStore = $derived(presence(`board:${boardId}`))
+	const presenceStore = $derived(presence(`board:${boardId}`, { maxAge: 120000 }))
 	const users = $derived($presenceStore ?? [])
 	const visible = $derived(users.slice(0, MAX_AVATARS))
 	const overflow = $derived(Math.max(0, users.length - MAX_AVATARS))
