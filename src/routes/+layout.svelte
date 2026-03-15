@@ -18,7 +18,7 @@
 		localStorage.setItem('noteColor', color)
 	}
 
-	const globalPresence = presence('global', { maxAge: 120000 })
+	const globalPresence = presence('global', { maxAge: 90000 })
 	const globalUsers = $derived($globalPresence ?? [])
 
 	const statusColor = $derived(

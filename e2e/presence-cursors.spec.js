@@ -73,13 +73,12 @@ test.describe('Presence & Cursors', () => {
 		await ctxB.close();
 	});
 
-	test('cursor overlay SVG exists on board', async ({ page }) => {
+	test('cursor overlay canvas exists on board', async ({ page }) => {
 		await page.goto(boardUrl);
 		await waitForBoardReady(page);
 
-		// The CursorOverlay renders an SVG with pointer-events-none
-		const svg = page.locator('svg.absolute.pointer-events-none');
-		await expect(svg).toBeVisible();
+		const cursorCanvas = page.locator('canvas.absolute.pointer-events-none');
+		await expect(cursorCanvas).toBeVisible();
 	});
 
 	test('moving cursor sends data over WebSocket', async ({ page }) => {
@@ -124,12 +123,9 @@ test.describe('Presence & Cursors', () => {
 		// Give time for cursor to propagate
 		await pageB.waitForTimeout(2000);
 
-		// User B should see a cursor element in the SVG overlay
-		// The cursor has a <g> with a <path> and <foreignObject>
-		const cursorElements = pageB.locator('svg.absolute.pointer-events-none g');
-		const count = await cursorElements.count();
-		// May or may not render depending on timing, but at least the SVG should exist
-		expect(count).toBeGreaterThanOrEqual(0);
+		// User B should see the cursor canvas (can't inspect individual cursors in canvas)
+		const cursorCanvas = pageB.locator('canvas.absolute.pointer-events-none');
+		await expect(cursorCanvas).toBeVisible();
 
 		await ctxA.close();
 		await ctxB.close();
