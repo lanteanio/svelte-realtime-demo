@@ -57,6 +57,16 @@ function pgListBoards() {
 	`)
 }
 
+/**
+ * Ensure a board with the given slug exists. Creates it if missing.
+ * Used at startup to guarantee well-known boards (like the stress test board).
+ */
+async function pgEnsureBoard({ title, slug }) {
+	const existing = await pgGetBoardBySlug(slug)
+	if (existing) return existing
+	return pgCreateBoard({ title, slug })
+}
+
 function pgCreateBoard({ title, slug }) {
 	return sql(`
 		INSERT INTO board (title, slug)
@@ -202,6 +212,12 @@ function memListBoards() {
 		.map(({ board_id, title, slug }) => ({ board_id, title, slug }))
 }
 
+async function memEnsureBoard({ title, slug }) {
+	const existing = memGetBoardBySlug(slug)
+	if (existing) return existing
+	return memCreateBoard({ title, slug })
+}
+
 function memCreateBoard({ title, slug }) {
 	const board = {
 		board_id: crypto.randomUUID(),
@@ -294,4 +310,5 @@ export const listNotes = pool ? pgListNotes : memListNotes
 export const createNote = pool ? pgCreateNote : memCreateNote
 export const updateNote = pool ? pgUpdateNote : memUpdateNote
 export const batchUpdateNotes = pool ? pgBatchUpdateNotes : memBatchUpdateNotes
+export const ensureBoard = pool ? pgEnsureBoard : memEnsureBoard
 export const deleteNote = pool ? pgDeleteNote : memDeleteNote

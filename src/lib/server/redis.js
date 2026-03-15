@@ -49,8 +49,8 @@ export const presence = createPresence(redis, {
 /**
  * Cursor position tracker for live cursor overlays.
  *
- * - throttle: 50ms per-connection -- one user can broadcast their
- *   cursor position at most 20 times/second
+ * - throttle: 32ms per-connection -- one user can broadcast their
+ *   cursor position at most ~30 times/second
  * - topicThrottle: 16ms per-topic aggregate -- no matter how many
  *   users are on a board, the server broadcasts cursor updates at
  *   most ~60 times/second per board (matching 60fps). Extra updates
@@ -58,7 +58,7 @@ export const presence = createPresence(redis, {
  * - select: same as presence, only expose public user fields
  */
 export const cursor = createCursor(redis, {
-	throttle: 50,
+	throttle: 32,
 	topicThrottle: 16,
 	select: (u) => ({ id: u.id, name: u.name, color: u.color })
 })

@@ -16,7 +16,7 @@ import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
 
 const WS_URL = 'wss://svelte-realtime-demo.lantean.io/ws';
-const BOARD_URL = '/board/plucky-noodle-184';
+const BOARD_URL = '/board/stress-me-out';
 const LEVELS = [1000, 2000, 3000, 5000, 7000, 10000];
 
 let msgIdCounter = 0;
