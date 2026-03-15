@@ -8,8 +8,49 @@
 	let canvas = $state()
 	let raf = 0
 
-	// Cursor arrow path as a reusable Path2D
 	const ARROW = new Path2D('M0,0 L0,16 L4,12 L8,18 L10,17 L6,11 L12,11 Z')
+
+	// Pre-rendered label cache: "name|color" -> { canvas, width, height }
+	const labelCache = new Map()
+
+	function getLabel(name, color) {
+		const cacheKey = name + '|' + color
+		let cached = labelCache.get(cacheKey)
+		if (cached) return cached
+
+		// Evict oldest entries if cache gets too large
+		if (labelCache.size > 2000) {
+			const first = labelCache.keys().next().value
+			labelCache.delete(first)
+		}
+
+		const dpr = window.devicePixelRatio || 1
+		const offscreen = document.createElement('canvas')
+		const ctx = offscreen.getContext('2d')
+
+		ctx.font = '500 11px system-ui, sans-serif'
+		const metrics = ctx.measureText(name)
+		const textW = Math.ceil(metrics.width)
+		const pad = 4
+		const w = textW + pad * 2
+		const h = 16
+
+		offscreen.width = w * dpr
+		offscreen.height = h * dpr
+		ctx.scale(dpr, dpr)
+
+		ctx.font = '500 11px system-ui, sans-serif'
+		ctx.textBaseline = 'middle'
+		ctx.lineWidth = 3
+		ctx.strokeStyle = color + 'e0'
+		ctx.strokeText(name, pad, h / 2)
+		ctx.fillStyle = '#fff'
+		ctx.fillText(name, pad, h / 2)
+
+		cached = { canvas: offscreen, width: w, height: h }
+		labelCache.set(cacheKey, cached)
+		return cached
+	}
 
 	function draw() {
 		raf = 0
@@ -28,34 +69,22 @@
 
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 		ctx.clearRect(0, 0, w, h)
-		ctx.textBaseline = 'middle'
-		ctx.font = '500 11px system-ui, sans-serif'
 
 		for (const [, { user, data }] of cursors) {
-			const x = data.x
-			const y = data.y
-
-			// Draw arrow
+			// Arrow
 			ctx.save()
-			ctx.translate(x, y)
+			ctx.translate(data.x, data.y)
 			ctx.fillStyle = user.color
 			ctx.fill(ARROW)
 			ctx.restore()
 
-			// Draw name label
-			const label = user.name
-			const textX = x + 16
-			const textY = y + 12
-			ctx.lineWidth = 3
-			ctx.strokeStyle = user.color + 'e0'
-			ctx.strokeText(label, textX, textY)
-			ctx.fillStyle = '#fff'
-			ctx.fillText(label, textX, textY)
+			// Cached label bitmap
+			const label = getLabel(user.name, user.color)
+			ctx.drawImage(label.canvas, data.x + 14, data.y + 4, label.width, label.height)
 		}
 	}
 
 	$effect(() => {
-		// Subscribe to cursor changes and schedule a repaint
 		void cursors
 		if (!raf && typeof window !== 'undefined') {
 			raf = requestAnimationFrame(draw)
