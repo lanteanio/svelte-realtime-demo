@@ -1,0 +1,5 @@
+FROM node:24-alpine
+WORKDIR /test
+RUN npm init -y && npm pkg set type=module && npm install ws
+COPY e2e/destroyer-standalone.js destroyer.js
+CMD ["node", "destroyer.js"]
