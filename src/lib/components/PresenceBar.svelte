@@ -20,13 +20,27 @@
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
 	import { joinBoard, leaveBoard } from '$live/boards/cursors'
 
-	const MAX_AVATARS = 8
+	const MAX_AVATARS_DESKTOP = 8
+	const MAX_AVATARS_MOBILE = 3
 
 	let { boardId } = $props()
 	const presenceStore = $derived(presence(`board:${boardId}`, { maxAge: 90000 }))
 	const users = $derived($presenceStore ?? [])
-	const visible = $derived(users.slice(0, MAX_AVATARS))
-	const overflow = $derived(Math.max(0, users.length - MAX_AVATARS))
+
+	// Detect mobile by checking window width. Falls back to desktop cap
+	// on SSR where window is undefined.
+	let isMobile = $state(false)
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 639px)')
+		isMobile = mq.matches
+		function onChange(e) { isMobile = e.matches }
+		mq.addEventListener('change', onChange)
+		return () => mq.removeEventListener('change', onChange)
+	})
+
+	const maxAvatars = $derived(isMobile ? MAX_AVATARS_MOBILE : MAX_AVATARS_DESKTOP)
+	const visible = $derived(users.slice(0, maxAvatars))
+	const overflow = $derived(Math.max(0, users.length - maxAvatars))
 
 	$effect(() => {
 		joinBoard(boardId)

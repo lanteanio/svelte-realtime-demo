@@ -55,7 +55,8 @@
 		<div class="navbar-start">
 			<a href="/" class="flex items-center gap-2 text-lg font-bold">
 				<img src="/Svelte_Logo.svg" alt="Svelte" width="20" height="24" />
-				Svelte Realtime Demo
+				<span class="hidden sm:inline">Svelte Realtime Demo</span>
+				<span class="sm:hidden">Demo</span>
 			</a>
 		</div>
 		<div class="navbar-end flex items-center gap-3">
