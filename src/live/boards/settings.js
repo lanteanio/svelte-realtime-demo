@@ -1,9 +1,9 @@
 import { live, LiveError } from 'svelte-realtime/server'
 import { getBoard, updateBoard } from '$lib/server/db'
-import { validateBoardFields } from '$lib/server/validate'
+import { validateBoardId, validateBoardFields } from '$lib/server/validate'
 
 export const updateSettings = live(async (ctx, boardId, fields) => {
-	if (!boardId) throw new LiveError('VALIDATION', 'Board ID required')
+	validateBoardId(boardId)
 	const clean = validateBoardFields(fields)
 	if (Object.keys(clean).length === 0) throw new LiveError('VALIDATION', 'No valid fields to update')
 	const board = await updateBoard(boardId, clean)

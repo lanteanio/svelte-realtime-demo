@@ -1,5 +1,6 @@
 import { LiveError } from 'svelte-realtime/server'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
 const LIMITS = {
@@ -53,6 +54,20 @@ export function validateZIndex(value) {
 	const n = Number(value)
 	if (!Number.isFinite(n) || n < 0) throw new LiveError('VALIDATION', 'z_index must be a non-negative number')
 	return Math.round(n)
+}
+
+export function validateBoardId(boardId) {
+	if (typeof boardId !== 'string' || !UUID_RE.test(boardId)) {
+		throw new LiveError('VALIDATION', 'Invalid board ID')
+	}
+	return boardId
+}
+
+export function validateNoteId(noteId) {
+	if (typeof noteId !== 'string' || !UUID_RE.test(noteId)) {
+		throw new LiveError('VALIDATION', 'Invalid note ID')
+	}
+	return noteId
 }
 
 export function validateNoteFields(fields) {
