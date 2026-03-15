@@ -1,3 +1,18 @@
+<!--
+	Board page -- the main collaborative canvas.
+
+	This is where all the action happens. Users see a shared canvas with
+	sticky notes they can create, drag, edit, delete, and rearrange.
+	Other users' cursors appear in real time, and a presence bar shows
+	who's currently on the board.
+
+	Data flow:
+	- Server sends initial notes/settings/activity via live streams
+	- User actions call RPCs (createNote, moveNote, etc) over WebSocket
+	- RPCs update the database and publish events
+	- All connected clients receive events and update their local state
+	- Undo/redo is built into the notes stream (enableHistory)
+-->
 <script>
 	import { batch } from 'svelte-realtime/client'
 	import { notes, createNote, moveNote, editNote, deleteNote, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
@@ -14,10 +29,16 @@
 	let { data } = $props()
 	const boardId = $derived(data.boardId)
 
+	// --- Live streams ---
+	// These are reactive: they update automatically when events arrive
+	// from the server. $notesStore is an array of notes, $settingsStore
+	// is the board settings object, $activityStore is the activity feed.
 	const notesStore = $derived(notes(boardId))
 	const settingsStore = $derived(settings(boardId))
 	const activityStore = $derived(activity(boardId))
 
+	// Enable undo/redo once the notes stream has loaded.
+	// This tracks all created/updated/deleted events so Ctrl+Z works.
 	$effect(() => {
 		if ($notesStore !== undefined) {
 			notesStore.enableHistory()
@@ -26,6 +47,8 @@
 
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
+	// --- Note creation ---
+	// Double-click the canvas -> create a note at that position
 	function handleCanvasDoubleClick(e) {
 		const rect = e.currentTarget.getBoundingClientRect()
 		createNote(boardId, {
@@ -36,13 +59,18 @@
 		})
 	}
 
+	// --- Drag handling ---
+	// During a drag, we track positions locally (for instant visual feedback)
+	// AND send them to the server (so other users see the movement).
+	// batch() groups the moveNote RPC with other pending calls.
 	let localPositions = $state({})
-
 	let dragging = $state(false)
 
 	function handleMove(noteId, x, y) {
 		if (!dragging) {
 			dragging = true
+			// Pause undo history during drag -- we don't want every
+			// pixel of movement as a separate undo step.
 			notesStore.pauseHistory()
 		}
 		localPositions[noteId] = { x, y }
@@ -53,10 +81,14 @@
 		delete localPositions[noteId]
 		if (dragging) {
 			dragging = false
+			// Resume history -- the entire drag is now one undo step.
 			notesStore.resumeHistory()
 		}
 	}
 
+	// Merge local drag positions with server-confirmed positions.
+	// During a drag, localPositions overrides the server position
+	// for instant feedback. After drag ends, server position takes over.
 	const displayNotes = $derived(
 		($notesStore ?? []).map(note => {
 			const pos = localPositions[note.note_id]
@@ -64,11 +96,17 @@
 		})
 	)
 
+	// --- Z-ordering ---
+	// Clicking a note brings it to the front by setting z_index = max + 1.
 	function bringToFront(noteId) {
 		const maxZ = Math.max(0, ...($notesStore ?? []).map(n => n.z_index ?? 0))
 		focusNote(boardId, noteId, maxZ + 1)
 	}
 
+	// --- Rate limit feedback ---
+	// If the user sends too many requests, the server returns a
+	// RATE_LIMITED error with a countdown. We show a toast with the
+	// remaining seconds.
 	let rateLimitCountdown = $state(0)
 
 	$effect(() => {
@@ -84,6 +122,9 @@
 		return () => clearInterval(timer)
 	})
 
+	// --- Keyboard shortcuts ---
+	// Ctrl+Z = undo, Ctrl+Shift+Z or Ctrl+Y = redo.
+	// Disabled when typing in a textarea or input (so browser undo works there).
 	function onKeyDown(e) {
 		const tag = document.activeElement?.tagName
 		if (tag === 'TEXTAREA' || tag === 'INPUT') return
@@ -103,12 +144,15 @@
 
 <svelte:window onkeydown={onKeyDown} />
 
+<!-- Loading state: notes stream hasn't returned data yet -->
 {#if $notesStore === undefined}
 	<div class="flex justify-center items-center h-[80vh]">
 		<span class="loading loading-spinner loading-lg"></span>
 	</div>
+<!-- Error state: something went wrong (but not rate limiting) -->
 {:else if $notesStore?.error && !$notesStore.error.message?.includes('Retry')}
 	<div class="alert alert-error m-4">{$notesStore.error.message}</div>
+<!-- Normal state: board is loaded -->
 {:else}
 	<BoardHeader
 		settings={$settingsStore}
@@ -140,7 +184,11 @@
 
 	<ActivityTicker items={$activityStore} />
 
-	<!-- FAB Flower: Tidy & Re-arrange -->
+	<!--
+		FAB (Floating Action Button) menu for board arrangement actions.
+		Uses DaisyUI's fab-flower pattern: focus the trigger button to
+		reveal the action buttons. Blur (or click close) to hide them.
+	-->
 	<div class="fab fab-flower">
 		<div tabindex="0" role="button" class="btn btn-lg btn-circle btn-primary fab-trigger">
 			<Sparkles size={22} />
@@ -174,6 +222,7 @@
 {/if}
 
 <style>
+	/* FAB hover/press animations */
 	.fab-trigger {
 		transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease, rotate 0.3s ease;
 	}
@@ -184,6 +233,7 @@
 	.fab-trigger:active {
 		transform: scale(0.92) rotate(-10deg);
 	}
+	/* Action buttons are hidden by default, shown when FAB has focus */
 	.fab .fab-close button {
 		transition: opacity 0.3s ease, scale 0.3s ease;
 		opacity: 0;
@@ -195,6 +245,7 @@
 	}
 </style>
 
+<!-- Rate limit toast -->
 {#if rateLimitCountdown > 0}
 	<div class="toast toast-top toast-center z-50">
 		<div class="alert alert-warning shadow-lg">

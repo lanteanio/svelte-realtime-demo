@@ -1,3 +1,18 @@
+<!--
+	StickyNote -- a draggable, editable sticky note card.
+
+	Interaction model:
+	- Click: brings to front (z-index)
+	- Drag: moves the note (pointer capture for smooth dragging)
+	- Double-click: enters edit mode (shows textarea)
+	- Escape or blur: exits edit mode and saves
+	- Hover: shows delete (X) and color picker (palette) buttons
+
+	The note doesn't own its data -- it receives everything via props
+	and calls parent callbacks (onMove, onEdit, onDelete, onFocus) to
+	request changes. The parent then sends RPCs to the server, which
+	publishes events to all connected clients.
+-->
 <script>
 	import { Palette, X } from 'lucide-svelte'
 	let { note, zIndex = 1, onMove, onMoveEnd, onEdit, onDelete, onFocus } = $props()
@@ -8,6 +23,9 @@
 
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
+	// --- Drag handling ---
+	// Uses pointer capture so the note keeps receiving events even if
+	// the cursor moves outside the element (fast dragging).
 
 	function onPointerDown(e) {
 		if (editing) return
@@ -29,6 +47,8 @@
 		}
 	}
 
+	// --- Edit handling ---
+
 	function startEditing() {
 		editing = true
 	}
@@ -38,10 +58,12 @@
 		onEdit({ content: e.target.value })
 	}
 
+	/** Prevent drag start when clicking buttons inside the note. */
 	function stopDrag(e) {
 		e.stopPropagation()
 	}
 
+	// Close the color picker when clicking anywhere else.
 	$effect(() => {
 		if (!showColors) return
 		function close() { showColors = false }
@@ -59,7 +81,7 @@
 	style:background={note.color}
 	style:cursor={editing ? 'auto' : dragging ? 'grabbing' : 'grab'}
 	style:z-index={dragging ? 999 : zIndex}
-onpointerdown={onPointerDown}
+	onpointerdown={onPointerDown}
 	onpointermove={onPointerMove}
 	onpointerup={onPointerUp}
 	ondblclick={(e) => { e.stopPropagation(); startEditing() }}
@@ -82,10 +104,10 @@ onpointerdown={onPointerDown}
 		{/if}
 	</div>
 
-	<!-- Footer -->
+	<!-- Footer: who created this note -->
 	<div class="px-3 pb-1.5 pt-1 text-xs opacity-40 text-right shrink-0">{note.creator_name}</div>
 
-	<!-- Top-right controls: color picker toggle + delete -->
+	<!-- Hover controls: color picker + delete button -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1" onpointerdown={stopDrag}>
 		<button
@@ -100,7 +122,7 @@ onpointerdown={onPointerDown}
 		><X size={14} /></button>
 	</div>
 
-	<!-- Color picker row -->
+	<!-- Color picker dropdown -->
 	{#if showColors}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="absolute -top-9 right-0 flex gap-1 bg-white/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg" onpointerdown={stopDrag}>

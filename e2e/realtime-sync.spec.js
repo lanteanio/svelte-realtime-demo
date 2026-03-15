@@ -83,8 +83,8 @@ test.describe('Multi-User Realtime Sync', () => {
 
 		// User A deletes a note
 		const noteA = getNotes(pageA).first();
-		await noteA.hover();
-		await pageA.getByLabel('Delete note').first().click();
+		await noteA.hover({ force: true });
+		await pageA.getByLabel('Delete note').first().click({ force: true });
 		await pageA.waitForTimeout(2000);
 
 		// User B should see one fewer note

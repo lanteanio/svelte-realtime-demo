@@ -1,5 +1,16 @@
+<!--
+	ActivityTicker -- fixed bar at the bottom showing recent board activity.
+
+	Shows the 5 most recent actions (note created, edited, deleted, etc).
+	Items are ephemeral -- they come from the activity live stream, not
+	from the database. If you refresh the page, the ticker starts empty.
+
+	Each entry has a colored dot (matching the user's identity color),
+	the user's name, and a short description of what they did.
+-->
 <script>
 	let { items = [] } = $props()
+	// Show the 5 newest entries, most recent first
 	const latest = $derived(items.slice(-5).toReversed())
 </script>
 

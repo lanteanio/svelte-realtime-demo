@@ -35,7 +35,11 @@ test.describe('Default Note Color Selection', () => {
 		// Select green (#bbf7d0) — the 2nd color circle
 		const colorButtons = page.locator('.navbar button[aria-label="Set default note color"]');
 		await colorButtons.nth(1).click();
-		await page.waitForTimeout(300);
+		await page.waitForTimeout(500);
+
+		// Verify localStorage was set before creating the note
+		const stored = await page.evaluate(() => localStorage.getItem('noteColor'));
+		expect(stored).toBe('#bbf7d0');
 
 		// Create a note
 		const canvas = getCanvas(page);
@@ -43,8 +47,7 @@ test.describe('Default Note Color Selection', () => {
 		await page.mouse.dblclick(box.x + 300, box.y + 300);
 		await page.waitForTimeout(2000);
 
-		// The note background is set via style:background which the browser resolves to RGB
-		// #bbf7d0 = rgb(187, 247, 208)
+		// The note should have green background
 		const note = getNotes(page).first();
 		const bg = await note.evaluate((el) => el.style.background);
 		expect(bg).toMatch(/bbf7d0|rgb\(187,\s*247,\s*208\)/);

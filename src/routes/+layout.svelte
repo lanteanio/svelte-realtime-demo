@@ -1,3 +1,16 @@
+<!--
+	Root layout -- wraps every page in the app.
+
+	Renders the top navbar with:
+	- App logo/name (links to home)
+	- Global online count (all connected users across all boards)
+	- WebSocket connection status (green wifi = connected)
+	- Your identity (random name + color assigned on first visit)
+	- Default note color picker (persisted in localStorage)
+	- Dark/light theme toggle (DaisyUI theme-controller)
+
+	The page content ({@render children()}) appears below the navbar.
+-->
 <script>
 	import '../app.css'
 	import { status } from 'svelte-adapter-uws/client'
@@ -7,6 +20,9 @@
 	let { children, data } = $props()
 	const identity = $derived(data.identity)
 
+	// --- Default note color ---
+	// When you create a note, it uses whatever color is selected here.
+	// Saved to localStorage so it persists across sessions.
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
 	let noteColor = $state(
@@ -18,9 +34,16 @@
 		localStorage.setItem('noteColor', color)
 	}
 
+	// --- Global presence ---
+	// Everyone who connects to the app joins the "global" presence channel
+	// (see hooks.ws.js open()). maxAge: 90s auto-cleans stale entries.
+	// The server heartbeat (30s) keeps live users' timestamps fresh.
 	const globalPresence = presence('global', { maxAge: 90000 })
 	const globalUsers = $derived($globalPresence ?? [])
 
+	// --- Connection status ---
+	// $status is a Svelte store from the adapter that tracks the WebSocket
+	// state: 'open', 'connecting', or 'closed'.
 	const statusColor = $derived(
 		$status === 'open' ? 'text-success' :
 		$status === 'connecting' ? 'text-warning' : 'text-error'
@@ -44,7 +67,7 @@
 				</div>
 			{/if}
 
-			<!-- Connection status -->
+			<!-- Connection status indicator -->
 			<div class="tooltip tooltip-bottom" data-tip={$status}>
 				{#if $status === 'open'}
 					<Wifi size={16} class={statusColor} />
@@ -53,7 +76,7 @@
 				{/if}
 			</div>
 
-			<!-- Your identity + note color -->
+			<!-- Your identity + note color picker -->
 			{#if identity}
 				<div class="flex items-center gap-1.5 text-sm">
 					<User size={14} style="color: {identity.color}" />
@@ -73,7 +96,7 @@
 				</div>
 			{/if}
 
-			<!-- Theme toggle -->
+			<!-- Dark/light theme toggle (DaisyUI swap component) -->
 			<label class="swap btn btn-ghost btn-sm">
 				<input type="checkbox" class="theme-controller" value="dark" />
 				<Sun size={16} class="swap-off" />

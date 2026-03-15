@@ -1,3 +1,14 @@
+<!--
+	Home page -- board list with create form.
+
+	Shows all boards sorted by creation date (newest first, max 100).
+	Each board card shows a live presence badge ("X here").
+
+	Creating a board: type a name, hit Create. The RPC runs over
+	WebSocket, generates a random slug, inserts into the database,
+	and publishes a 'created' event. Every other user's board list
+	updates instantly. Then we navigate to the new board.
+-->
 <script>
 	import { boards, createBoard } from '$live/boards'
 	import { goto } from '$app/navigation'

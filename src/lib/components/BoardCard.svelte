@@ -1,3 +1,11 @@
+<!--
+	BoardCard -- a single board in the home page list.
+
+	Shows the board title and a live presence badge ("X here") if
+	anyone is currently on that board. The presence data comes from
+	subscribing to the board's presence channel -- so the badge
+	updates in real time without polling.
+-->
 <script>
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
 

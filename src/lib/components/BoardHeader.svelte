@@ -1,7 +1,17 @@
+<!--
+	BoardHeader -- board title (editable) + background color picker.
+
+	Double-click the title to edit it inline. Press Enter or click away
+	to save. The background color buttons change the canvas background
+	for all users on the board in real time.
+
+	The children slot renders the PresenceBar on the right side.
+-->
 <script>
 	let { settings, onUpdate, children } = $props()
 	let editingTitle = $state(false)
 
+	// 5 light backgrounds + 1 dark option
 	const BACKGROUNDS = ['#f5f5f4', '#fefce8', '#ecfdf5', '#eff6ff', '#fdf4ff', '#1e1e2e']
 </script>
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, waitForBoardReady } from './helpers.js';
+import { createBoard, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('WebSocket Connection', () => {
 	test('WebSocket connects on page load', async ({ page }) => {

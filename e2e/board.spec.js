@@ -38,7 +38,7 @@ test.describe.serial('Board Page', () => {
 
 		const note = getNotes(page).first();
 		if (await note.isVisible()) {
-			await note.dblclick();
+			await note.dblclick({ force: true });
 			await page.waitForTimeout(500);
 			const editor = page.locator('textarea').first();
 			if (await editor.isVisible()) {

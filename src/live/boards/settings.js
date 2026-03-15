@@ -1,3 +1,11 @@
+/**
+ * Board settings -- live RPC and stream.
+ *
+ * Settings are board-level properties like title and background color.
+ * merge: 'set' means the entire settings object is replaced on each
+ * update (not merged field-by-field like CRUD).
+ */
+
 import { live, LiveError } from 'svelte-realtime/server'
 import { getBoard, updateBoard } from '$lib/server/db'
 import { validateBoardId, validateBoardFields } from '$lib/server/validate'

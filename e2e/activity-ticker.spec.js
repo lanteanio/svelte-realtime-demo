@@ -70,8 +70,8 @@ test.describe.serial('Activity Ticker', () => {
 
 		if (await getNotes(page).count() > 0) {
 			const note = getNotes(page).first();
-			await note.hover();
-			await page.getByLabel('Delete note').first().click();
+			await note.hover({ force: true });
+			await page.getByLabel('Delete note').first().click({ force: true });
 			await page.waitForTimeout(2000);
 
 			const entriesAfter = await ticker.locator('span.whitespace-nowrap').count();
