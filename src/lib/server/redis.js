@@ -11,6 +11,7 @@ export const limiter = createRateLimit(redis, { points: 100, interval: 10000 })
 
 export const presence = createPresence(redis, {
 	key: 'id',
+	heartbeat: 30000,
 	select: (u) => ({ id: u.id, name: u.name, color: u.color })
 })
 

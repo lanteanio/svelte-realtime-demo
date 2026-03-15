@@ -193,8 +193,11 @@ test.describe('Stress Test', () => {
 		const canvasVisible = await page.locator('div.relative.w-full.overflow-auto').isVisible();
 		console.log(`\nCanvas responsive:  ${canvasVisible}`);
 
-		const cursorCount = await page.locator('svg.absolute.pointer-events-none g').count();
-		console.log(`Visible cursors:   ${cursorCount}`);
+		// Canvas-based cursor overlay -- we can't count individual cursors in canvas,
+		// but we can verify the canvas element exists and is rendering (non-zero size)
+		const cursorCanvas = page.locator('canvas.absolute.pointer-events-none');
+		const canvasExists = await cursorCanvas.isVisible();
+		console.log(`Cursor canvas:     ${canvasExists ? 'visible' : 'not found'}`);
 
 		const presenceText = await page.locator('.text-xs.opacity-50').filter({ hasText: /online/ }).first().textContent().catch(() => 'N/A');
 		console.log(`Presence display:  ${presenceText}`);
