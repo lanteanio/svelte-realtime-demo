@@ -26,18 +26,32 @@
 	// --- Drag handling ---
 	// Uses pointer capture so the note keeps receiving events even if
 	// the cursor moves outside the element (fast dragging).
+	// Coordinates are relative to the scrollable canvas surface, not the
+	// viewport, so we account for the canvas scroll offset and position.
+
+	function canvasOffset(e) {
+		const canvas = e.currentTarget.closest('[class*="overflow-auto"]')
+		if (!canvas) return { x: e.clientX, y: e.clientY }
+		const rect = canvas.getBoundingClientRect()
+		return {
+			x: e.clientX - rect.left + canvas.scrollLeft,
+			y: e.clientY - rect.top + canvas.scrollTop
+		}
+	}
 
 	function onPointerDown(e) {
 		if (editing) return
 		onFocus()
 		dragging = true
-		offset = { x: e.clientX - note.x, y: e.clientY - note.y }
+		const pos = canvasOffset(e)
+		offset = { x: pos.x - note.x, y: pos.y - note.y }
 		e.currentTarget.setPointerCapture(e.pointerId)
 	}
 
 	function onPointerMove(e) {
 		if (!dragging) return
-		onMove(e.clientX - offset.x, e.clientY - offset.y)
+		const pos = canvasOffset(e)
+		onMove(pos.x - offset.x, pos.y - offset.y)
 	}
 
 	function onPointerUp() {

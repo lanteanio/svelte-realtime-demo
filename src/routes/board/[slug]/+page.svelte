@@ -48,13 +48,16 @@
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
 	// --- Note creation ---
-	// Double-click the canvas -> create a note at that position
+	// Double-click the canvas -> create a note at that position.
+	// Account for scroll offset so notes land where you clicked,
+	// not where the viewport thinks you clicked.
 	function handleCanvasDoubleClick(e) {
-		const rect = e.currentTarget.getBoundingClientRect()
+		const canvas = e.currentTarget
+		const rect = canvas.getBoundingClientRect()
 		createNote(boardId, {
 			content: '',
-			x: e.clientX - rect.left,
-			y: e.clientY - rect.top,
+			x: e.clientX - rect.left + canvas.scrollLeft,
+			y: e.clientY - rect.top + canvas.scrollTop,
 			color: localStorage.getItem('noteColor') || NOTE_COLORS[0]
 		})
 	}
