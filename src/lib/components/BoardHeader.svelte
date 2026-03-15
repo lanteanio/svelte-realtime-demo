@@ -36,11 +36,11 @@
 		>{settings?.title ?? 'Untitled Board'}</h1>
 	{/if}
 
-	<!-- Background colors -->
-	<div class="flex gap-0.5 sm:gap-1 shrink-0">
+	<!-- Background colors (hidden on mobile to save space) -->
+	<div class="hidden sm:flex gap-1 shrink-0">
 		{#each BACKGROUNDS as bg}
 			<button
-				class="w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 transition-transform hover:scale-110 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
+				class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
 				style:background={bg}
 				aria-label="Set background to {bg}"
 				onclick={() => onUpdate({ background: bg })}

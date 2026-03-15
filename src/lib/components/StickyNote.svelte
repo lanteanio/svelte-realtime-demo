@@ -87,13 +87,16 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-	class="absolute w-52 min-h-36 rounded-lg shadow-md shadow-black/20 select-none border border-black/15
-				 transition-shadow hover:shadow-lg hover:shadow-black/30 group flex flex-col text-black touch-none"
-	style:left="{note.x}px"
-	style:top="{note.y}px"
+	class="absolute w-52 min-h-36 rounded-lg select-none border border-black/15
+				 group flex flex-col text-black touch-none
+				 {dragging ? 'shadow-lg shadow-black/30' : 'shadow-md shadow-black/20'}"
+	style:transform="translate({note.x}px, {note.y}px)"
+	style:left="0"
+	style:top="0"
 	style:background={note.color}
 	style:cursor={editing ? 'auto' : dragging ? 'grabbing' : 'grab'}
 	style:z-index={dragging ? 999 : zIndex}
+	style:will-change={dragging ? 'transform' : 'auto'}
 	onpointerdown={onPointerDown}
 	onpointermove={onPointerMove}
 	onpointerup={onPointerUp}
