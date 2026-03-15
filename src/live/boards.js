@@ -6,16 +6,17 @@ import { validateBoardTitle } from '$lib/server/validate'
 export const createBoard = live(async (ctx, title) => {
 	const cleanTitle = validateBoardTitle(title)
 	let board
-	for (let attempt = 0; attempt < 3; attempt++) {
+	for (let attempt = 0; attempt < 5; attempt++) {
 		const slug = generateSlug()
 		try {
 			board = await dbCreateBoard({ title: cleanTitle, slug })
 			break
 		} catch (err) {
 			const isUniqueViolation = err?.code === '23505' || err?.message?.includes('UNIQUE')
-			if (!isUniqueViolation || attempt === 2) throw err
+			if (!isUniqueViolation || attempt === 4) throw err
 		}
 	}
+	if (!board) throw new LiveError('SERVER_ERROR', 'Could not generate a unique board URL, please try again')
 	ctx.publish('boards', 'created', board)
 	return board
 })

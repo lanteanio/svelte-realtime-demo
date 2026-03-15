@@ -41,6 +41,7 @@ function pgListBoards() {
 		       slug
 		  FROM board
 	  ORDER BY created_at DESC
+	  LIMIT 100
 	`)
 }
 
@@ -131,6 +132,23 @@ async function pgUpdateNote(noteId, fields) {
 	return note
 }
 
+async function pgBatchUpdateNotes(updates) {
+	if (updates.length === 0) return []
+	// Build a single query using unnest arrays for bulk update
+	const ids = updates.map(u => u.note_id)
+	const xs = updates.map(u => u.x)
+	const ys = updates.map(u => u.y)
+	const zs = updates.map(u => u.z_index)
+	return sql(`
+		UPDATE note AS n
+		   SET x = v.x, y = v.y, z_index = v.z
+		  FROM unnest($1::uuid[], $2::int[], $3::int[], $4::int[])
+		    AS v(id, x, y, z)
+		 WHERE n.note_id = v.id
+	 RETURNING n.note_id, n.board_id, n.content, n.x, n.y, n.color, n.creator_name, n.z_index
+	`, [ids, xs, ys, zs])
+}
+
 function pgDeleteNote(noteId) {
 	return sql(`
 		DELETE FROM note
@@ -158,6 +176,7 @@ function memGetBoardBySlug(slug) {
 function memListBoards() {
 	return [...boardsMap.values()]
 		.sort((a, b) => b.created_at - a.created_at)
+		.slice(0, 100)
 		.map(({ board_id, title, slug }) => ({ board_id, title, slug }))
 }
 
@@ -222,6 +241,19 @@ function memUpdateNote(noteId, fields) {
 	return { note_id: note.note_id, board_id: note.board_id, content: note.content, x: note.x, y: note.y, color: note.color, creator_name: note.creator_name, z_index: note.z_index }
 }
 
+function memBatchUpdateNotes(updates) {
+	const results = []
+	for (const u of updates) {
+		const note = notesMap.get(u.note_id)
+		if (!note) continue
+		note.x = u.x
+		note.y = u.y
+		note.z_index = u.z_index
+		results.push({ note_id: note.note_id, board_id: note.board_id, content: note.content, x: note.x, y: note.y, color: note.color, creator_name: note.creator_name, z_index: note.z_index })
+	}
+	return results
+}
+
 function memDeleteNote(noteId) {
 	notesMap.delete(noteId)
 }
@@ -237,4 +269,5 @@ export const updateBoard = pool ? pgUpdateBoard : memUpdateBoard
 export const listNotes = pool ? pgListNotes : memListNotes
 export const createNote = pool ? pgCreateNote : memCreateNote
 export const updateNote = pool ? pgUpdateNote : memUpdateNote
+export const batchUpdateNotes = pool ? pgBatchUpdateNotes : memBatchUpdateNotes
 export const deleteNote = pool ? pgDeleteNote : memDeleteNote

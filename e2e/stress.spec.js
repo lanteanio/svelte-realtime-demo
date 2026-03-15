@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
 
 const WS_URL = 'wss://svelte-realtime-demo.lantean.io/ws';
-const BOARD_URL = '/board/plucky-jellyfish-209';
+const BOARD_URL = '/board/bouncy-llama-854';
 const BOARD_SLUG = 'plucky-jellyfish-209';
 
 let msgIdCounter = 0;
