@@ -1,8 +1,9 @@
 <!--
 	Home page -- board list with create form.
 
-	Shows all boards sorted by creation date (newest first, max 100).
-	Each board card shows a live presence badge ("X here").
+	Boards are sorted by activity: boards with the most users online
+	appear first. Boards with equal presence are sorted by most
+	recently active. This way the most interesting boards bubble up.
 
 	Creating a board: type a name, hit Create. The RPC runs over
 	WebSocket, generates a random slug, inserts into the database,
@@ -15,6 +16,24 @@
 	import BoardCard from '$lib/components/BoardCard.svelte'
 
 	let newTitle = $state('')
+
+	// Track presence count per board. Each BoardCard reports its
+	// count back here via the onpresence callback. We use this
+	// to sort boards by activity (most users first).
+	let presenceCounts = $state({})
+
+	const sortedBoards = $derived.by(() => {
+		const list = $boards
+		if (!list) return undefined
+		return [...list].sort((a, b) => {
+			const countA = presenceCounts[a.board_id] || 0
+			const countB = presenceCounts[b.board_id] || 0
+			if (countA !== countB) return countB - countA
+			const timeA = new Date(a.last_activity).getTime() || 0
+			const timeB = new Date(b.last_activity).getTime() || 0
+			return timeB - timeA
+		})
+	})
 
 	async function handleCreate(e) {
 		e.preventDefault()
@@ -38,16 +57,16 @@
 		<button type="submit" class="btn btn-primary">Create</button>
 	</form>
 
-	{#if $boards === undefined}
+	{#if sortedBoards === undefined}
 		<div class="flex justify-center py-8">
 			<span class="loading loading-spinner"></span>
 		</div>
 	{:else}
 		<div class="grid gap-3">
-			{#each $boards as board (board.board_id)}
-				<BoardCard {board} />
+			{#each sortedBoards as board (board.board_id)}
+				<BoardCard {board} onpresence={(count) => presenceCounts[board.board_id] = count} />
 			{/each}
-			{#if $boards.length === 0}
+			{#if sortedBoards.length === 0}
 				<p class="text-center opacity-40 py-8">No boards yet. Create the first one.</p>
 			{/if}
 		</div>
