@@ -75,7 +75,7 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
 	class="absolute w-52 min-h-36 rounded-lg shadow-md shadow-black/20 select-none border border-black/15
-				 transition-shadow hover:shadow-lg hover:shadow-black/30 group flex flex-col text-black"
+				 transition-shadow hover:shadow-lg hover:shadow-black/30 group flex flex-col text-black touch-none"
 	style:left="{note.x}px"
 	style:top="{note.y}px"
 	style:background={note.color}
@@ -109,7 +109,10 @@
 
 	<!-- Hover controls: color picker + delete button -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1" onpointerdown={stopDrag}>
+	<!-- On touch devices (no hover), controls are always visible via the
+		 @media(hover:none) query handled by Tailwind's active: variant.
+		 On desktop, they appear on hover. -->
+	<div class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity flex items-center gap-1" onpointerdown={stopDrag}>
 		<button
 			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors"
 			aria-label="Pick color"

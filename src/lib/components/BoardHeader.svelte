@@ -5,8 +5,10 @@
 	to save. The background color buttons change the canvas background
 	for all users on the board in real time.
 
-	The countdown timer shows how long until this board expires from
-	inactivity. Every note/settings action resets the timer server-side.
+	On mobile:
+	- Title truncates with ellipsis to prevent overflow
+	- Color picker and timer stay compact
+	- PresenceBar (children slot) wraps below if needed
 
 	The children slot renders the PresenceBar on the right side.
 -->
@@ -23,8 +25,9 @@
 	const isProtected = $derived(settings?.slug === 'stress-me-out')
 </script>
 
-<div class="navbar bg-base-100/80 backdrop-blur-sm border-b border-base-300 px-4 min-h-0 py-1">
-	<div class="navbar-start">
+<div class="flex flex-wrap items-center gap-x-4 gap-y-1 bg-base-100/80 backdrop-blur-sm border-b border-base-300 px-4 py-1">
+	<!-- Left group: title + colors + timer -->
+	<div class="flex items-center gap-2 min-w-0 shrink">
 		{#if editingTitle}
 			<input
 				class="input input-sm w-48"
@@ -35,12 +38,12 @@
 		{:else}
 			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<h1
-				class="text-sm font-bold cursor-pointer hover:underline"
+				class="text-sm font-bold cursor-pointer hover:underline truncate max-w-32 sm:max-w-none"
 				ondblclick={() => editingTitle = true}
 			>{settings?.title ?? 'Untitled Board'}</h1>
 		{/if}
 
-		<div class="flex gap-1 ml-4">
+		<div class="flex gap-1 shrink-0">
 			{#each BACKGROUNDS as bg}
 				<button
 					class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
@@ -52,14 +55,15 @@
 		</div>
 
 		{#if !isProtected && settings?.last_activity}
-			<div class="flex items-center gap-1 ml-4 opacity-70">
+			<div class="flex items-center gap-1 opacity-70 shrink-0">
 				<Clock size={12} />
-				<CountdownTimer lastActivity={settings.last_activity} compact />
+				<CountdownTimer lastActivity={settings.last_activity} />
 			</div>
 		{/if}
 	</div>
 
-	<div class="navbar-end">
+	<!-- Right group: presence bar (pushed to the right) -->
+	<div class="ml-auto shrink-0">
 		{@render children?.()}
 	</div>
 </div>
