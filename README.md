@@ -1,6 +1,6 @@
 # svelte-realtime-demo
 
-A collaborative sticky notes wall built with [svelte-realtime](https://github.com/nicobrinkkemper/svelte-realtime), [svelte-adapter-uws](https://github.com/nicobrinkkemper/svelte-adapter-uws), and [svelte-adapter-uws-extensions](https://github.com/nicobrinkkemper/svelte-adapter-uws-extensions).
+A collaborative sticky notes wall built with [svelte-realtime](https://github.com/lanteanio/svelte-realtime), [svelte-adapter-uws](https://github.com/lanteanio/svelte-adapter-uws), and [svelte-adapter-uws-extensions](https://github.com/lanteanio/svelte-adapter-uws-extensions).
 
 Open the page, get a random funny name, drop sticky notes on a shared canvas. Every note, cursor movement, and color change syncs in real time across all connected browsers. No login, no auth, no friction.
 
