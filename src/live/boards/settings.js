@@ -17,6 +17,8 @@ export const updateSettings = live(async (ctx, boardId, fields) => {
 	const board = await updateBoard(boardId, clean)
 	if (!board) throw new LiveError('NOT_FOUND', 'Board not found')
 	ctx.publish(`board:${boardId}:settings`, 'set', board)
+	// updateBoard already sets last_activity = now(), broadcast to home page
+	ctx.publish('boards', 'updated', { board_id: board.board_id, title: board.title, slug: board.slug, last_activity: board.last_activity })
 	if (clean.title !== undefined) {
 		ctx.publish(`board:${boardId}:activity`, 'created', {
 			action: 'renamed the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()

@@ -27,7 +27,7 @@
 
 <div class="max-w-xl mx-auto p-8">
 	<h1 class="text-2xl font-bold mb-2">Boards</h1>
-	<p class="text-sm opacity-50 mb-6">Pick a board or create a new one. No login needed.</p>
+	<p class="text-sm opacity-50 mb-6">Pick a board or create a new one. No login needed. Boards expire after 1 hour of inactivity.</p>
 
 	<form onsubmit={handleCreate} class="flex gap-2 mb-6">
 		<input

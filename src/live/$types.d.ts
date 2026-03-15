@@ -45,5 +45,6 @@ declare module '$live/boards' {
   import type { RpcError } from 'svelte-realtime/client';
 
   export const createBoard: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'SERVER_ERROR';
   export const boards: Readable<any>;
 }

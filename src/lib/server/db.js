@@ -33,7 +33,7 @@ async function sql(query, params = []) {
 
 function pgGetBoard(boardId) {
 	return sql(`
-		SELECT board_id, title, slug, background
+		SELECT board_id, title, slug, background, last_activity
 		  FROM board
 		 WHERE board_id = $1
 	`, [boardId]).then(rows => rows[0])
@@ -41,7 +41,7 @@ function pgGetBoard(boardId) {
 
 function pgGetBoardBySlug(slug) {
 	return sql(`
-		SELECT board_id, title, slug, background
+		SELECT board_id, title, slug, background, last_activity
 		  FROM board
 		 WHERE slug = $1
 	`, [slug]).then(rows => rows[0])
@@ -50,11 +50,53 @@ function pgGetBoardBySlug(slug) {
 /** Returns the 100 most recent boards. Capped to prevent unbounded queries. */
 function pgListBoards() {
 	return sql(`
-		SELECT board_id, title, slug
+		SELECT board_id, title, slug, last_activity
 		  FROM board
 	  ORDER BY created_at DESC
 	  LIMIT 100
 	`)
+}
+
+/**
+ * Bump a board's last_activity timestamp to now.
+ * Called on every meaningful user action (note CRUD, settings, arrangements).
+ * Returns the updated board so callers can broadcast the new timestamp.
+ */
+function pgTouchBoard(boardId) {
+	return sql(`
+		UPDATE board SET last_activity = now()
+		 WHERE board_id = $1
+	 RETURNING board_id, title, slug, last_activity
+	`, [boardId]).then(rows => rows[0])
+}
+
+/**
+ * Delete a board and all its notes (notes cascade via FK).
+ * Used by the cleanup job to remove stale boards.
+ */
+function pgDeleteBoard(boardId) {
+	return sql(`DELETE FROM board WHERE board_id = $1`, [boardId])
+}
+
+/**
+ * Find all boards that haven't been active for longer than maxAgeMs.
+ * Skips protected boards (like 'stress-me-out') by slug.
+ */
+function pgListStaleBoards(maxAgeMs, protectedSlugs = []) {
+	const cutoff = new Date(Date.now() - maxAgeMs)
+	if (protectedSlugs.length === 0) {
+		return sql(`
+			SELECT board_id, title, slug
+			  FROM board
+			 WHERE last_activity < $1
+		`, [cutoff])
+	}
+	return sql(`
+		SELECT board_id, title, slug
+		  FROM board
+		 WHERE last_activity < $1
+		   AND slug != ALL($2)
+	`, [cutoff, protectedSlugs])
 }
 
 /**
@@ -71,7 +113,7 @@ function pgCreateBoard({ title, slug }) {
 	return sql(`
 		INSERT INTO board (title, slug)
 		     VALUES ($1, $2)
-		  RETURNING board_id, title, slug, background
+		  RETURNING board_id, title, slug, background, last_activity
 	`, [title, slug]).then(rows => rows[0])
 }
 
@@ -99,9 +141,9 @@ async function pgUpdateBoard(boardId, fields) {
 	params.push(boardId)
 	const [board] = await sql(`
 		UPDATE board
-		   SET ${sets.join(', ')}
+		   SET ${sets.join(', ')}, last_activity = now()
 		 WHERE board_id = $${i}
-	 RETURNING board_id, title, slug, background
+	 RETURNING board_id, title, slug, background, last_activity
 	`, params)
 	return board
 }
@@ -195,12 +237,12 @@ const notesMap = new Map()
 
 function memGetBoard(boardId) {
 	const b = boardsMap.get(boardId)
-	return b ? { board_id: b.board_id, title: b.title, slug: b.slug, background: b.background } : undefined
+	return b ? { board_id: b.board_id, title: b.title, slug: b.slug, background: b.background, last_activity: new Date(b.last_activity).toISOString() } : undefined
 }
 
 function memGetBoardBySlug(slug) {
 	for (const b of boardsMap.values()) {
-		if (b.slug === slug) return { board_id: b.board_id, title: b.title, slug: b.slug, background: b.background }
+		if (b.slug === slug) return { board_id: b.board_id, title: b.title, slug: b.slug, background: b.background, last_activity: new Date(b.last_activity).toISOString() }
 	}
 	return undefined
 }
@@ -209,6 +251,27 @@ function memListBoards() {
 	return [...boardsMap.values()]
 		.sort((a, b) => b.created_at - a.created_at)
 		.slice(0, 100)
+		.map(({ board_id, title, slug, last_activity }) => ({ board_id, title, slug, last_activity: new Date(last_activity).toISOString() }))
+}
+
+function memTouchBoard(boardId) {
+	const b = boardsMap.get(boardId)
+	if (!b) return undefined
+	b.last_activity = Date.now()
+	return { board_id: b.board_id, title: b.title, slug: b.slug, last_activity: new Date(b.last_activity).toISOString() }
+}
+
+function memDeleteBoard(boardId) {
+	boardsMap.delete(boardId)
+	for (const [id, note] of notesMap) {
+		if (note.board_id === boardId) notesMap.delete(id)
+	}
+}
+
+function memListStaleBoards(maxAgeMs, protectedSlugs = []) {
+	const cutoff = Date.now() - maxAgeMs
+	return [...boardsMap.values()]
+		.filter(b => b.last_activity < cutoff && !protectedSlugs.includes(b.slug))
 		.map(({ board_id, title, slug }) => ({ board_id, title, slug }))
 }
 
@@ -224,10 +287,11 @@ function memCreateBoard({ title, slug }) {
 		title,
 		slug,
 		background: '#f5f5f4',
+		last_activity: Date.now(),
 		created_at: Date.now()
 	}
 	boardsMap.set(board.board_id, board)
-	return { board_id: board.board_id, title: board.title, slug: board.slug, background: board.background }
+	return { board_id: board.board_id, title: board.title, slug: board.slug, background: board.background, last_activity: new Date(board.last_activity).toISOString() }
 }
 
 function memUpdateBoard(boardId, fields) {
@@ -236,7 +300,8 @@ function memUpdateBoard(boardId, fields) {
 	for (const key of ['title', 'background']) {
 		if (fields[key] !== undefined) board[key] = fields[key]
 	}
-	return { board_id: board.board_id, title: board.title, slug: board.slug, background: board.background }
+	board.last_activity = Date.now()
+	return { board_id: board.board_id, title: board.title, slug: board.slug, background: board.background, last_activity: new Date(board.last_activity).toISOString() }
 }
 
 function memGetNote(noteId) {
@@ -306,6 +371,9 @@ export const getBoardBySlug = pool ? pgGetBoardBySlug : memGetBoardBySlug
 export const listBoards = pool ? pgListBoards : memListBoards
 export const createBoard = pool ? pgCreateBoard : memCreateBoard
 export const updateBoard = pool ? pgUpdateBoard : memUpdateBoard
+export const touchBoard = pool ? pgTouchBoard : memTouchBoard
+export const deleteBoard = pool ? pgDeleteBoard : memDeleteBoard
+export const listStaleBoards = pool ? pgListStaleBoards : memListStaleBoards
 export const listNotes = pool ? pgListNotes : memListNotes
 export const createNote = pool ? pgCreateNote : memCreateNote
 export const updateNote = pool ? pgUpdateNote : memUpdateNote

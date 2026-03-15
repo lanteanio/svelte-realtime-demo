@@ -23,9 +23,21 @@ import {
 	createNote as dbCreateNote,
 	updateNote as dbUpdateNote,
 	deleteNote as dbDeleteNote,
-	batchUpdateNotes as dbBatchUpdateNotes
+	batchUpdateNotes as dbBatchUpdateNotes,
+	touchBoard
 } from '$lib/server/db'
 import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
+
+/**
+ * Touch the board's last_activity and broadcast the update to the
+ * boards list so home page timers refresh. Fire-and-forget -- we don't
+ * await this because it's not critical to the note operation.
+ */
+function touch(ctx, boardId) {
+	touchBoard(boardId).then(board => {
+		if (board) ctx.publish('boards', 'updated', board)
+	}).catch(() => {})
+}
 
 /**
  * Verify that a note exists and belongs to the specified board.
@@ -55,6 +67,7 @@ export const createNote = live(async (ctx, boardId, { content, x, y, color }) =>
 	ctx.publish(`board:${boardId}:activity`, 'created', {
 		action: 'added a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
+	touch(ctx, boardId)
 	return note
 })
 
@@ -90,6 +103,7 @@ export const editNote = live(async (ctx, boardId, noteId, fields) => {
 			action: 'recolored a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 		})
 	}
+	touch(ctx, boardId)
 	return note
 })
 
@@ -113,6 +127,7 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 	ctx.publish(`board:${boardId}:activity`, 'created', {
 		action: 'removed a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
+	touch(ctx, boardId)
 })
 
 // --- Batch arrangement actions ---
@@ -138,6 +153,7 @@ export const tidyNotes = live(async (ctx, boardId) => {
 	ctx.publish(`board:${boardId}:activity`, 'created', {
 		action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
+	touch(ctx, boardId)
 	return updated
 })
 
@@ -187,6 +203,7 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 	ctx.publish(`board:${boardId}:activity`, 'created', {
 		action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
+	touch(ctx, boardId)
 	return updated
 })
 
@@ -216,6 +233,7 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 	ctx.publish(`board:${boardId}:activity`, 'created', {
 		action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
+	touch(ctx, boardId)
 	return updated
 })
 
@@ -264,6 +282,7 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 	ctx.publish(`board:${boardId}:activity`, 'created', {
 		action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
+	touch(ctx, boardId)
 	return updated
 })
 

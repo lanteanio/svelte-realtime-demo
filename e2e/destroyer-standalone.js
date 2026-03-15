@@ -48,7 +48,7 @@ function connectUser(index) {
 		}))}`;
 
 		const ws = new WebSocket(WS_URL, { headers: { Cookie: cookie }, rejectUnauthorized: false });
-		const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 20000);
+		const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 60000);
 
 		ws.on('open', () => { clearTimeout(timer); resolve({ ws, index }); });
 		ws.on('error', () => { clearTimeout(timer); reject(new Error('error')); });
@@ -116,8 +116,9 @@ async function run() {
 		let ok = 0, fail = 0;
 		const t0 = Date.now();
 
-		for (let batch = 0; batch < toAdd; batch += 100) {
-			const end = Math.min(batch + 100, toAdd);
+		const BATCH = 25;
+		for (let batch = 0; batch < toAdd; batch += BATCH) {
+			const end = Math.min(batch + BATCH, toAdd);
 			const promises = [];
 			for (let i = batch; i < end; i++) {
 				promises.push(
