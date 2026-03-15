@@ -1,3 +1,15 @@
+/**
+ * Input validation for all RPC calls.
+ *
+ * Every field that comes from a client gets validated here before
+ * touching the database. If validation fails, we throw a LiveError
+ * which the client receives as a structured error (not a raw crash).
+ *
+ * Rule of thumb: never trust client input. Validate type, format,
+ * length, and range. The database has constraints too (foreign keys,
+ * unique indexes), but catching errors here gives better messages.
+ */
+
 import { LiveError } from 'svelte-realtime/server'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -9,6 +21,23 @@ const LIMITS = {
 	COORD_MIN: -10000,
 	COORD_MAX: 10000,
 	BACKGROUND_MAX: 7
+}
+
+// --- Scalar validators ---
+// Each returns the cleaned value or throws a LiveError.
+
+export function validateBoardId(boardId) {
+	if (typeof boardId !== 'string' || !UUID_RE.test(boardId)) {
+		throw new LiveError('VALIDATION', 'Invalid board ID')
+	}
+	return boardId
+}
+
+export function validateNoteId(noteId) {
+	if (typeof noteId !== 'string' || !UUID_RE.test(noteId)) {
+		throw new LiveError('VALIDATION', 'Invalid note ID')
+	}
+	return noteId
 }
 
 export function validateBoardTitle(title) {
@@ -31,6 +60,7 @@ export function validateNoteContent(content) {
 	return content
 }
 
+/** Clamps coordinates to the allowed range. No error -- just caps the value. */
 export function validateCoord(value, name) {
 	const n = Number(value)
 	if (!Number.isFinite(n)) throw new LiveError('VALIDATION', `${name} must be a number`)
@@ -43,31 +73,21 @@ export function validateNoteColor(color) {
 	return color
 }
 
-export function validateBoardFields(fields) {
-	const clean = {}
-	if (fields.title !== undefined) clean.title = validateBoardTitle(fields.title)
-	if (fields.background !== undefined) clean.background = validateBackground(fields.background)
-	return clean
-}
-
 export function validateZIndex(value) {
 	const n = Number(value)
 	if (!Number.isFinite(n) || n < 0) throw new LiveError('VALIDATION', 'z_index must be a non-negative number')
 	return Math.round(n)
 }
 
-export function validateBoardId(boardId) {
-	if (typeof boardId !== 'string' || !UUID_RE.test(boardId)) {
-		throw new LiveError('VALIDATION', 'Invalid board ID')
-	}
-	return boardId
-}
+// --- Object validators ---
+// Validate a bag of fields, returning only the valid ones.
+// Unknown fields are silently dropped (allowlist pattern).
 
-export function validateNoteId(noteId) {
-	if (typeof noteId !== 'string' || !UUID_RE.test(noteId)) {
-		throw new LiveError('VALIDATION', 'Invalid note ID')
-	}
-	return noteId
+export function validateBoardFields(fields) {
+	const clean = {}
+	if (fields.title !== undefined) clean.title = validateBoardTitle(fields.title)
+	if (fields.background !== undefined) clean.background = validateBackground(fields.background)
+	return clean
 }
 
 export function validateNoteFields(fields) {

@@ -1,3 +1,19 @@
+/**
+ * Database abstraction layer.
+ *
+ * Two implementations live in this file:
+ * 1. PostgreSQL (production) -- used when DATABASE_URL is set
+ * 2. In-memory Map (development) -- used when DATABASE_URL is not set
+ *
+ * Both expose the same function signatures. At the bottom of the file,
+ * we export the right implementation based on the environment.
+ *
+ * Why two implementations? So you can run `npm run dev` without
+ * installing Postgres. The in-memory store is ephemeral (data is lost
+ * on restart) and doesn't enforce constraints like unique slugs or
+ * foreign keys, so don't use it for anything serious.
+ */
+
 import pg from 'pg'
 import { env } from '$env/dynamic/private'
 
@@ -5,8 +21,11 @@ const pool = env.DATABASE_URL
 	? new pg.Pool({ connectionString: env.DATABASE_URL })
 	: null
 
-// --- Postgres implementation ---
+// ============================================================
+// PostgreSQL implementation
+// ============================================================
 
+/** Run a parameterized query and return the rows. */
 async function sql(query, params = []) {
 	const { rows } = await pool.query(query, params)
 	return rows
@@ -14,10 +33,7 @@ async function sql(query, params = []) {
 
 function pgGetBoard(boardId) {
 	return sql(`
-		SELECT board_id,
-		       title,
-		       slug,
-		       background
+		SELECT board_id, title, slug, background
 		  FROM board
 		 WHERE board_id = $1
 	`, [boardId]).then(rows => rows[0])
@@ -25,20 +41,16 @@ function pgGetBoard(boardId) {
 
 function pgGetBoardBySlug(slug) {
 	return sql(`
-		SELECT board_id,
-		       title,
-		       slug,
-		       background
+		SELECT board_id, title, slug, background
 		  FROM board
 		 WHERE slug = $1
 	`, [slug]).then(rows => rows[0])
 }
 
+/** Returns the 100 most recent boards. Capped to prevent unbounded queries. */
 function pgListBoards() {
 	return sql(`
-		SELECT board_id,
-		       title,
-		       slug
+		SELECT board_id, title, slug
 		  FROM board
 	  ORDER BY created_at DESC
 	  LIMIT 100
@@ -53,6 +65,12 @@ function pgCreateBoard({ title, slug }) {
 	`, [title, slug]).then(rows => rows[0])
 }
 
+/**
+ * Update specific fields on a board. Uses an allowlist pattern:
+ * only 'title' and 'background' can be updated, everything else
+ * is silently ignored. This prevents clients from modifying fields
+ * like board_id or created_at.
+ */
 async function pgUpdateBoard(boardId, fields) {
 	const allowed = ['title', 'background']
 	const sets = []
@@ -78,19 +96,15 @@ async function pgUpdateBoard(boardId, fields) {
 	return board
 }
 
+/** Minimal query -- only fetches the IDs for ownership verification. */
 function pgGetNote(noteId) {
 	return sql(`SELECT note_id, board_id FROM note WHERE note_id = $1`, [noteId]).then(rows => rows[0])
 }
 
+/** Returns all non-archived notes for a board, ordered by creation time. */
 function pgListNotes(boardId) {
 	return sql(`
-		  SELECT note_id,
-		         board_id,
-		         content,
-		         x,
-		         y,
-		         color,
-		         creator_name,
+		  SELECT note_id, board_id, content, x, y, color, creator_name,
 		         COALESCE(z_index, 0) AS z_index
 		    FROM note
 		   WHERE board_id = $1
@@ -107,6 +121,7 @@ function pgCreateNote({ boardId, content, x, y, color, creatorName }) {
 	`, [boardId, content, x, y, color, creatorName]).then(rows => rows[0])
 }
 
+/** Update specific fields on a note. Same allowlist pattern as pgUpdateBoard. */
 async function pgUpdateNote(noteId, fields) {
 	const allowed = ['content', 'x', 'y', 'color', 'z_index']
 	const sets = []
@@ -132,9 +147,17 @@ async function pgUpdateNote(noteId, fields) {
 	return note
 }
 
+/**
+ * Batch update positions and z-index for multiple notes in a single query.
+ *
+ * Used by the FAB arrangement actions (tidy, rearrange, shuffle, group).
+ * Instead of updating notes one-by-one (N queries for N notes), this uses
+ * PostgreSQL's unnest() to update all notes in one round trip.
+ *
+ * Each entry in `updates` must have: { note_id, x, y, z_index }
+ */
 async function pgBatchUpdateNotes(updates) {
 	if (updates.length === 0) return []
-	// Build a single query using unnest arrays for bulk update
 	const ids = updates.map(u => u.note_id)
 	const xs = updates.map(u => u.x)
 	const ys = updates.map(u => u.y)
@@ -150,13 +173,12 @@ async function pgBatchUpdateNotes(updates) {
 }
 
 function pgDeleteNote(noteId) {
-	return sql(`
-		DELETE FROM note
-		      WHERE note_id = $1
-	`, [noteId])
+	return sql(`DELETE FROM note WHERE note_id = $1`, [noteId])
 }
 
-// --- In-memory dev store ---
+// ============================================================
+// In-memory dev store
+// ============================================================
 
 const boardsMap = new Map()
 const notesMap = new Map()
@@ -258,7 +280,9 @@ function memDeleteNote(noteId) {
 	notesMap.delete(noteId)
 }
 
-// --- Export the right implementation ---
+// ============================================================
+// Export the right implementation based on environment
+// ============================================================
 
 export const getNote = pool ? pgGetNote : memGetNote
 export const getBoard = pool ? pgGetBoard : memGetBoard

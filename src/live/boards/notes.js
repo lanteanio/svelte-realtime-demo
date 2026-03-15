@@ -1,3 +1,21 @@
+/**
+ * Note CRUD and arrangement actions -- live RPCs and streams.
+ *
+ * Notes are the sticky notes on a board. Each note has:
+ * - Position (x, y) for where it sits on the canvas
+ * - Content (text the user types)
+ * - Color (one of 6 preset colors)
+ * - z_index (stacking order -- higher = on top)
+ * - creator_name (captured at creation time, not linked to a user account)
+ *
+ * All mutations publish events to the board's notes topic. Connected
+ * clients see changes in real time via the notes stream.
+ *
+ * The arrangement actions (tidy, rearrange, shuffle, groupByAuthor)
+ * update all notes in a single batch SQL query instead of one-by-one,
+ * turning N+1 queries into 2 queries (1 read + 1 batch write).
+ */
+
 import { live, LiveError } from 'svelte-realtime/server'
 import {
 	listNotes,
@@ -9,6 +27,10 @@ import {
 } from '$lib/server/db'
 import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
 
+/**
+ * Verify that a note exists and belongs to the specified board.
+ * Prevents cross-board note manipulation.
+ */
 async function verifyNoteOwnership(noteId, boardId) {
 	validateNoteId(noteId)
 	validateBoardId(boardId)
@@ -16,6 +38,8 @@ async function verifyNoteOwnership(noteId, boardId) {
 	if (!existing) throw new LiveError('NOT_FOUND', 'Note not found')
 	if (existing.board_id !== boardId) throw new LiveError('FORBIDDEN', 'Note does not belong to this board')
 }
+
+// --- Single-note operations ---
 
 export const createNote = live(async (ctx, boardId, { content, x, y, color }) => {
 	validateBoardId(boardId)
@@ -34,6 +58,11 @@ export const createNote = live(async (ctx, boardId, { content, x, y, color }) =>
 	return note
 })
 
+/**
+ * Move a note to a new position.
+ * Throttled to 50ms -- during a drag, the client fires this on every
+ * mouse move, but the server only processes it every 50ms at most.
+ */
 export const moveNote = live(async (ctx, boardId, noteId, x, y) => {
 	ctx.throttle(`move:${noteId}`, 50)
 	await verifyNoteOwnership(noteId, boardId)
@@ -43,6 +72,7 @@ export const moveNote = live(async (ctx, boardId, noteId, x, y) => {
 	return note
 })
 
+/** Edit note content, color, or other fields. */
 export const editNote = live(async (ctx, boardId, noteId, fields) => {
 	await verifyNoteOwnership(noteId, boardId)
 	const clean = validateNoteFields(fields)
@@ -63,6 +93,10 @@ export const editNote = live(async (ctx, boardId, noteId, fields) => {
 	return note
 })
 
+/**
+ * Bring a note to the front (increase its z-index).
+ * Throttled to 100ms to avoid spamming the DB on rapid clicks.
+ */
 export const focusNote = live(async (ctx, boardId, noteId, zIndex) => {
 	ctx.throttle(`focus:${noteId}`, 100)
 	await verifyNoteOwnership(noteId, boardId)
@@ -81,6 +115,11 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 	})
 })
 
+// --- Batch arrangement actions ---
+// All of these read all notes, compute new positions, then write
+// everything back in a single SQL query using batchUpdateNotes().
+
+/** Sort notes by position (top-left to bottom-right) and reset z-order. */
 export const tidyNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
 	const allNotes = await listNotes(boardId)
@@ -102,20 +141,23 @@ export const tidyNotes = live(async (ctx, boardId) => {
 	return updated
 })
 
+/** Group notes by color into cascading columns. */
 export const rearrangeNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
 	const allNotes = await listNotes(boardId)
 	if (allNotes.length === 0) return []
 
+	// Group by color
 	const groups = new Map()
 	for (const note of allNotes) {
 		if (!groups.has(note.color)) groups.set(note.color, [])
 		groups.get(note.color).push(note)
 	}
 
-	const NOTE_WIDTH = 230
-	const CASCADE_X = 4
-	const CASCADE_Y = 35
+	// Layout constants (px)
+	const NOTE_WIDTH = 230  // w-52 = 208px + gap
+	const CASCADE_X = 4     // slight offset per card in a stack
+	const CASCADE_Y = 35    // vertical gap between stacked cards
 	const START_X = 40
 	const START_Y = 40
 	const COLUMN_GAP = 30
@@ -148,11 +190,13 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 	return updated
 })
 
+/** Scatter notes randomly across the canvas. */
 export const shuffleNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
 	const allNotes = await listNotes(boardId)
 	if (allNotes.length === 0) return []
 
+	// Scale area with note count, but cap at 9000 to stay within coordinate bounds
 	const AREA_W = Math.min(Math.max(800, allNotes.length * 120), 9000)
 	const AREA_H = Math.min(Math.max(600, allNotes.length * 90), 9000)
 	const MARGIN = 40
@@ -175,6 +219,7 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 	return updated
 })
 
+/** Group notes by their creator into cascading columns. */
 export const groupByAuthor = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
 	const allNotes = await listNotes(boardId)
@@ -222,6 +267,18 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 	return updated
 })
 
+// --- Live stream ---
+
+/**
+ * Reactive stream of notes for a given board.
+ *
+ * The topic is dynamic: each board has its own topic (board:{id}:notes).
+ * merge: 'crud' means created/updated/deleted events are automatically
+ * applied to the client's local array, keyed by note_id.
+ *
+ * When any user on the same board creates, edits, moves, or deletes
+ * a note, every other user's notes array updates instantly.
+ */
 export const notes = live.stream((ctx, boardId) => `board:${boardId}:notes`, async (ctx, boardId) => {
 	return listNotes(boardId)
 }, { merge: 'crud', key: 'note_id' })

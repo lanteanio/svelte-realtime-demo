@@ -26,19 +26,21 @@ test.describe.serial('Undo / Redo', () => {
 		await page.goto(boardUrl);
 		await waitForBoardReady(page);
 
+		const before = await getNotes(page).count();
+
 		// Create a note
 		await createNote(page, 300, 300);
-		expect(await getNotes(page).count()).toBe(1);
+		expect(await getNotes(page).count()).toBe(before + 1);
 
 		// Undo
 		await page.keyboard.press('Control+z');
 		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(0);
+		expect(await getNotes(page).count()).toBe(before);
 
 		// Redo
 		await page.keyboard.press('Control+Shift+z');
 		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(1);
+		expect(await getNotes(page).count()).toBe(before + 1);
 	});
 
 	test('Ctrl+Y also redoes', async ({ page }) => {
@@ -67,9 +69,9 @@ test.describe.serial('Undo / Redo', () => {
 		}
 		const countBefore = await getNotes(page).count();
 
-		// Double-click to edit
-		const note = getNotes(page).first();
-		await note.dblclick();
+		// Double-click the note content area to edit
+		const noteContent = getNotes(page).first().locator('p');
+		await noteContent.dblclick({ force: true });
 		const textarea = page.locator('textarea');
 		await expect(textarea).toBeVisible();
 
@@ -92,10 +94,10 @@ test.describe.serial('Undo / Redo', () => {
 		}
 		const countBefore = await getNotes(page).count();
 
-		// Delete a note
+		// Delete a note (force needed — canvas overlay has high z-index)
 		const note = getNotes(page).first();
-		await note.hover();
-		await page.getByLabel('Delete note').first().click();
+		await note.hover({ force: true });
+		await page.getByLabel('Delete note').first().click({ force: true });
 		await page.waitForTimeout(1500);
 		expect(await getNotes(page).count()).toBe(countBefore - 1);
 

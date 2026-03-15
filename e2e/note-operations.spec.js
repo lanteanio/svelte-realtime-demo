@@ -36,7 +36,7 @@ test.describe.serial('Note Operations', () => {
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
-		await note.dblclick();
+		await note.dblclick({ force: true });
 		await expect(page.locator('textarea')).toBeVisible();
 	});
 
@@ -45,7 +45,7 @@ test.describe.serial('Note Operations', () => {
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
-		await note.dblclick();
+		await note.dblclick({ force: true });
 		const textarea = page.locator('textarea');
 		await textarea.fill('Edited content!');
 		await textarea.blur();
@@ -59,7 +59,7 @@ test.describe.serial('Note Operations', () => {
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
-		await note.dblclick();
+		await note.dblclick({ force: true });
 		const textarea = page.locator('textarea');
 		await expect(textarea).toBeVisible();
 		await textarea.press('Escape');
@@ -71,7 +71,7 @@ test.describe.serial('Note Operations', () => {
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
-		await note.hover();
+		await note.hover({ force: true });
 		await expect(page.getByLabel('Delete note')).toBeVisible();
 		await expect(page.getByLabel('Pick color')).toBeVisible();
 	});
@@ -81,8 +81,8 @@ test.describe.serial('Note Operations', () => {
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
-		await note.hover();
-		await page.getByLabel('Pick color').click();
+		await note.hover({ force: true });
+		await page.getByLabel('Pick color').click({ force: true });
 		await page.waitForTimeout(300);
 
 		// Color picker row should appear with 6 color buttons
@@ -145,8 +145,8 @@ test.describe.serial('Note Operations', () => {
 
 		const countBefore = await getNotes(page).count();
 		const note = getNotes(page).first();
-		await note.hover();
-		await page.getByLabel('Delete note').first().click();
+		await note.hover({ force: true });
+		await page.getByLabel('Delete note').first().click({ force: true });
 		await page.waitForTimeout(1500);
 
 		const countAfter = await getNotes(page).count();

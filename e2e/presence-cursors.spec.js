@@ -82,21 +82,20 @@ test.describe('Presence & Cursors', () => {
 	});
 
 	test('moving cursor sends data over WebSocket', async ({ page }) => {
-		await page.goto(boardUrl);
+		// Listen for websocket before navigating so we catch it
+		const wsPromise = page.waitForEvent('websocket', { timeout: 15000 });
+		await page.goto(boardUrl, { waitUntil: 'commit' });
+		const ws = await wsPromise;
 		await waitForBoardReady(page);
 
-		// Listen for WebSocket frames
-		const ws = await page.waitForEvent('websocket');
 		const framePromise = ws.waitForEvent('framesent', { timeout: 5000 });
 
-		// Move mouse across canvas
 		const canvas = getCanvas(page);
 		const box = await canvas.boundingBox();
 		await page.mouse.move(box.x + 100, box.y + 100);
 		await page.mouse.move(box.x + 200, box.y + 200);
 
 		await framePromise;
-		// If we got here without timeout, cursor data was sent
 	});
 
 	test('other user cursor appears in overlay', { timeout: 60000 }, async ({ browser }) => {

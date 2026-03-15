@@ -1,3 +1,21 @@
+<!--
+	PresenceBar -- shows who's currently on this board.
+
+	Displays up to 8 avatar circles with user initials, plus a "+N"
+	overflow badge if there are more users. The "X online" count always
+	shows the real total.
+
+	The $effect handles joining/leaving: when the component mounts,
+	we call joinBoard (which registers us in the board's presence
+	channel). When it unmounts (navigate away), the cleanup function
+	calls leaveBoard.
+
+	maxAge: 90000 (90 seconds) auto-removes stale entries on the
+	client side. The server sends heartbeat events every 30 seconds
+	to keep live users' timestamps fresh. If a user disconnects and
+	the server fails to broadcast a leave event, the client removes
+	them after 90 seconds automatically.
+-->
 <script>
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
 	import { joinBoard, leaveBoard } from '$live/boards/cursors'
@@ -25,6 +43,7 @@
 			<div class="tooltip" data-tip={user.name}>
 				<div class="avatar placeholder">
 					<div class="w-7 h-7 rounded-full flex items-center justify-center" style:background={user.color}>
+						<!-- Initials: "Cosmic Penguin" -> "CP" -->
 						<span class="text-xs text-white font-bold leading-none">{(user.name ?? '').split(' ').map(w => w[0]).join('')}</span>
 					</div>
 				</div>
