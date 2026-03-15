@@ -1,13 +1,16 @@
 <!--
 	Canvas -- the scrollable board area where notes live.
 
-	Handles two things:
-	1. Pointer tracking for cursor sharing (onPointerMove)
-	2. Double-click to create notes (ondblclick, passed from parent)
+	The outer div is a fixed-height scrollable viewport. The inner div
+	is a large virtual surface (minimum 3000x2000, grows to fit notes).
+	On desktop, scrollbars appear when notes exceed the viewport.
+	On mobile, touch-drag on empty space pans the view (native scroll).
+	Touch-drag on a note moves the note (handled by StickyNote's
+	touch-action:none + pointer capture).
 
-	Cursor updates are throttled with requestAnimationFrame so we send
-	at most one cursor position per frame (~60/sec), even though the
-	browser fires pointermove events much more frequently.
+	Also handles:
+	1. Pointer tracking for cursor sharing (onPointerMove)
+	2. Double-click/tap to create notes (ondblclick, passed from parent)
 -->
 <script>
 	import { batch } from 'svelte-realtime/client'
@@ -17,7 +20,6 @@
 	let canvasEl = $state()
 
 	// Coalesce rapid pointer events into one RPC per frame.
-	// Without this, every pixel of mouse movement sends a WebSocket message.
 	let pendingCursor = null
 	let rafScheduled = false
 
@@ -31,8 +33,12 @@
 
 	function onPointerMove(e) {
 		if (!canvasEl) return
-		const rect = canvasEl.getBoundingClientRect()
-		pendingCursor = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+		// Use scroll-adjusted coordinates so cursor positions are
+		// relative to the virtual surface, not the viewport.
+		pendingCursor = {
+			x: e.clientX - canvasEl.getBoundingClientRect().left + canvasEl.scrollLeft,
+			y: e.clientY - canvasEl.getBoundingClientRect().top + canvasEl.scrollTop
+		}
 		if (!rafScheduled) {
 			rafScheduled = true
 			requestAnimationFrame(flushCursor)
@@ -45,15 +51,21 @@
 	bind:this={canvasEl}
 	class="relative w-full overflow-auto"
 	style:background
-	style:height="calc(100vh - 7rem)"
+	style:height="calc(100dvh - 7rem)"
 	onpointermove={onPointerMove}
 	{ondblclick}
 >
-	{#if noteCount === 0}
-		<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-			<p class="text-lg opacity-30 select-none">Double-click anywhere to add a note</p>
-		</div>
-	{/if}
+	<!--
+		Inner surface: minimum 3000x2000 so there's always room to scroll.
+		Notes are absolutely positioned within this surface.
+	-->
+	<div class="relative min-w-[3000px] min-h-[2000px]">
+		{#if noteCount === 0}
+			<div class="fixed inset-0 flex items-center justify-center pointer-events-none" style:top="7rem">
+				<p class="text-lg opacity-30 select-none">Double-click anywhere to add a note</p>
+			</div>
+		{/if}
 
-	{@render children?.()}
+		{@render children?.()}
+	</div>
 </div>
