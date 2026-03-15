@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
 
 const WS_URL = 'wss://svelte-realtime-demo.lantean.io/ws';
-const BOARD_URL = '/board/bouncy-llama-854';
+const BOARD_URL = '/board/dizzy-cactus-686';
 const BOARD_SLUG = 'plucky-jellyfish-209';
 
 let msgIdCounter = 0;
@@ -237,7 +237,7 @@ test.describe('Stress Test', () => {
 		// Health check
 		await page.reload();
 		await page.waitForTimeout(2000);
-		const alive = await page.locator('.navbar').isVisible();
+		const alive = await page.locator('.navbar').first().isVisible();
 
 		console.log(`\n=== FINAL RESULTS ===`);
 		console.log(`Connected:         ${connected}/${TOTAL} (${(connected / TOTAL * 100).toFixed(1)}%)`);

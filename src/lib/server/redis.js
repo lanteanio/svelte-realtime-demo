@@ -16,5 +16,6 @@ export const presence = createPresence(redis, {
 
 export const cursor = createCursor(redis, {
 	throttle: 50,
+	topicThrottle: 16,
 	select: (u) => ({ id: u.id, name: u.name, color: u.color })
 })
