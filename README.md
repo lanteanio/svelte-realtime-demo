@@ -113,6 +113,8 @@ npm start
 
 The included `docker-compose.yml` sets up everything you need: app, Postgres, Redis, and a certbot container that automatically obtains and renews a Let's Encrypt TLS certificate. You get HTTPS out of the box.
 
+The app runs as 2 independent replicas using `network_mode: host` and `SO_REUSEPORT`. The Linux kernel distributes incoming connections across both processes. Redis handles cross-process pub/sub. No load balancer needed.
+
 1. Point a domain at your server (A record)
 2. Create a `.env` file:
 
@@ -133,7 +135,13 @@ docker compose run --rm certbot certonly --standalone -d your-domain.com
 docker compose up -d
 ```
 
-The app serves HTTPS on port 443. Certbot renews the certificate automatically every 12 hours. Postgres and Redis data are persisted in Docker volumes.
+The app listens on port 443 directly (host networking). Certbot renews the certificate automatically every 12 hours. Postgres and Redis data are persisted in Docker volumes.
+
+To scale to more replicas (if your machine has more cores):
+
+```bash
+docker compose up -d --scale app=4
+```
 
 ---
 
