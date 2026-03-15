@@ -11,9 +11,14 @@
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
 	import CountdownTimer from './CountdownTimer.svelte'
 
-	let { board } = $props()
+	let { board, onpresence } = $props()
 	const presenceStore = $derived(presence(`board:${board.board_id}`))
 	const users = $derived($presenceStore ?? [])
+
+	// Report presence count to parent for sorting
+	$effect(() => {
+		onpresence?.(users.length)
+	})
 
 	const isProtected = $derived(board.slug === 'stress-me-out')
 </script>
