@@ -4,7 +4,9 @@ import adapter from 'svelte-adapter-uws'
 const config = {
 	kit: {
 		adapter: adapter({
-			websocket: true
+			websocket: {
+				upgradeRateLimit: 0
+			}
 		})
 	},
 	vitePlugin: {
