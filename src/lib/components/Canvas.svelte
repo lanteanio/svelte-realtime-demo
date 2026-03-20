@@ -21,7 +21,7 @@
 
 	function flushCursor() {
 		rafScheduled = false
-		if (!pendingCursor) return
+		if (!pendingCursor || !boardId) return
 		const pos = pendingCursor
 		pendingCursor = null
 		batch(() => [moveCursor(boardId, pos)])

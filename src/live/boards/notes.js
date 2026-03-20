@@ -151,13 +151,10 @@ export const tidyNotes = live(async (ctx, boardId) => {
 	}))
 
 	const updated = await dbBatchUpdateNotes(updates)
-	for (const note of updated) {
-		ctx.publish(`board:${boardId}:notes`, 'updated', note)
-	}
-
-	ctx.publish(`board:${boardId}:activity`, 'created', {
-		action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-	})
+	ctx.batch([
+		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
+		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	])
 	touch(ctx, boardId)
 	return updated
 })
@@ -201,13 +198,10 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 	}
 
 	const updated = await dbBatchUpdateNotes(updates)
-	for (const note of updated) {
-		ctx.publish(`board:${boardId}:notes`, 'updated', note)
-	}
-
-	ctx.publish(`board:${boardId}:activity`, 'created', {
-		action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-	})
+	ctx.batch([
+		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
+		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	])
 	touch(ctx, boardId)
 	return updated
 })
@@ -231,13 +225,10 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 	}))
 
 	const updated = await dbBatchUpdateNotes(updates)
-	for (const note of updated) {
-		ctx.publish(`board:${boardId}:notes`, 'updated', note)
-	}
-
-	ctx.publish(`board:${boardId}:activity`, 'created', {
-		action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-	})
+	ctx.batch([
+		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
+		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	])
 	touch(ctx, boardId)
 	return updated
 })
@@ -280,13 +271,10 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 	}
 
 	const updated = await dbBatchUpdateNotes(updates)
-	for (const note of updated) {
-		ctx.publish(`board:${boardId}:notes`, 'updated', note)
-	}
-
-	ctx.publish(`board:${boardId}:activity`, 'created', {
-		action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-	})
+	ctx.batch([
+		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
+		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	])
 	touch(ctx, boardId)
 	return updated
 })

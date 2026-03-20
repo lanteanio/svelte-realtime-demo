@@ -5,7 +5,7 @@ declare module '$live/boards/activity' {
   import type { Readable } from 'svelte/store';
   import type { RpcError } from 'svelte-realtime/client';
 
-  export const activity: Readable<any>;
+  export const activity: (...args: any[]) => Readable<any>;
 }
 
 declare module '$live/boards/cursors' {
@@ -28,7 +28,7 @@ declare module '$live/boards/notes' {
   export const shuffleNotes: (...args: any[]) => Promise<any>;
   export const groupByAuthor: (...args: any[]) => Promise<any>;
   export type ErrorCode = 'FORBIDDEN' | 'NOT_FOUND' | 'VALIDATION';
-  export const notes: Readable<any>;
+  export const notes: (...args: any[]) => Readable<any>;
 }
 
 declare module '$live/boards/settings' {
@@ -37,7 +37,7 @@ declare module '$live/boards/settings' {
 
   export const updateSettings: (...args: any[]) => Promise<any>;
   export type ErrorCode = 'NOT_FOUND' | 'VALIDATION';
-  export const settings: Readable<any>;
+  export const settings: (...args: any[]) => Readable<any>;
 }
 
 declare module '$live/boards' {

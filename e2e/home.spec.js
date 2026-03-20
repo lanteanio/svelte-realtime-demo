@@ -5,7 +5,7 @@ test.describe('Home Page', () => {
 	test('loads and displays board list', async ({ page }) => {
 		await page.goto('/');
 		await expect(page.locator('.navbar')).toBeVisible();
-		await expect(page.getByText('Sticky Notes')).toBeVisible();
+		await expect(page.getByText('Svelte Realtime Demo')).toBeVisible();
 		await expect(page.getByText('Boards')).toBeVisible();
 	});
 

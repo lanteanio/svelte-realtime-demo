@@ -12,10 +12,6 @@ import { createMessage, LiveError } from 'svelte-realtime/server'
 import { bus, limiter, presence, cursor } from '$lib/server/redis'
 import { generateIdentity } from '$lib/names'
 
-// Re-export so the adapter can wire up presence and cursor hooks
-// to the WebSocket subscribe/close lifecycle.
-export { presence, cursor }
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
@@ -70,19 +66,34 @@ export function open(ws, { platform }) {
 
 /**
  * Called when a client subscribes to a live stream topic.
- * We delegate to the presence plugin so it can track who's watching what.
+ * We delegate to the presence and cursor plugins so they can track
+ * who's watching what and send cursor snapshots to new joiners.
  */
 export function subscribe(ws, topic, ctx) {
 	presence.hooks.subscribe(ws, topic, ctx)
+	cursor.hooks.subscribe(ws, topic, ctx)
+}
+
+/**
+ * Called when a client's topic reference count reaches zero.
+ * This fires in real time (the moment the client drops a topic),
+ * not only at socket close. We clean up presence and cursor state
+ * for just that topic so departed users disappear immediately.
+ */
+export function unsubscribe(ws, topic, ctx) {
+	presence.hooks.unsubscribe(ws, topic, ctx)
 }
 
 /**
  * Called when the WebSocket closes (tab closed, network drop, etc).
- * Clean up: remove from all presence channels and delete cursor state.
+ * Clean up: remove from all remaining presence channels and delete
+ * cursor state. The unsubscribe hook already handled any topics the
+ * client explicitly dropped before disconnect, so close only handles
+ * whatever is still active.
  */
-export function close(ws, { platform }) {
-	presence.hooks.close(ws, { platform })
-	cursor.remove(ws, platform)
+export function close(ws, ctx) {
+	presence.hooks.close(ws, ctx)
+	cursor.hooks.close(ws, ctx)
 }
 
 /**
