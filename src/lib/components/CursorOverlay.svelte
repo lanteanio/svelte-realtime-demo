@@ -22,7 +22,7 @@
 	let { boardId, userId } = $props()
 
 	// Subscribe to cursor positions. maxAge auto-removes stale entries.
-	const cursorStore = $derived(cursor(`board:${boardId}`, { maxAge: 10000, interpolate: true }))
+	const cursorStore = $derived(cursor(`board:${boardId}`, { maxAge: 10000 }))
 
 	// Filter out our own cursor -- we don't need to see ourselves.
 	const cursors = $derived([...$cursorStore].filter(([, { user }]) => user.id !== userId))
