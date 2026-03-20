@@ -58,7 +58,7 @@ test.describe.serial('Board Page', () => {
 
 	test('can navigate back to home', async ({ page }) => {
 		await page.goto(boardUrl);
-		await page.getByText('Sticky Notes').first().click();
+		await page.locator('a[href="/"]').first().click();
 		await page.waitForURL('/');
 	});
 });

@@ -83,7 +83,14 @@ export function validateZIndex(value) {
 // Validate a bag of fields, returning only the valid ones.
 // Unknown fields are silently dropped (allowlist pattern).
 
+function assertPlainObject(value) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		throw new LiveError('VALIDATION', 'Invalid update payload')
+	}
+}
+
 export function validateBoardFields(fields) {
+	assertPlainObject(fields)
 	const clean = {}
 	if (fields.title !== undefined) clean.title = validateBoardTitle(fields.title)
 	if (fields.background !== undefined) clean.background = validateBackground(fields.background)
@@ -91,6 +98,7 @@ export function validateBoardFields(fields) {
 }
 
 export function validateNoteFields(fields) {
+	assertPlainObject(fields)
 	const clean = {}
 	if (fields.content !== undefined) clean.content = validateNoteContent(fields.content)
 	if (fields.x !== undefined) clean.x = validateCoord(fields.x, 'x')

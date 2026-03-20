@@ -380,3 +380,23 @@ export const updateNote = pool ? pgUpdateNote : memUpdateNote
 export const batchUpdateNotes = pool ? pgBatchUpdateNotes : memBatchUpdateNotes
 export const ensureBoard = pool ? pgEnsureBoard : memEnsureBoard
 export const deleteNote = pool ? pgDeleteNote : memDeleteNote
+
+/**
+ * Try to acquire a Postgres advisory lock (non-blocking).
+ * Returns true if the lock was acquired, false if another replica holds it.
+ * In dev mode (no Postgres), always returns true so the cron runs normally.
+ */
+export async function tryAdvisoryLock(lockId) {
+	if (!pool) return true
+	const { rows } = await pool.query('SELECT pg_try_advisory_lock($1)', [lockId])
+	return rows[0].pg_try_advisory_lock
+}
+
+/**
+ * Release a Postgres advisory lock.
+ * No-op in dev mode.
+ */
+export async function advisoryUnlock(lockId) {
+	if (!pool) return
+	await pool.query('SELECT pg_advisory_unlock($1)', [lockId])
+}

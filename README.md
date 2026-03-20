@@ -20,6 +20,7 @@ Open the page, get a random name, drop notes on a shared canvas. Every note, cur
 | `live.stream()` latest merge | svelte-realtime | Activity ticker -- ephemeral ring buffer |
 | `live.cron()` | svelte-realtime | Board cleanup -- delete stale boards every minute |
 | `batch()` | svelte-realtime | Coalesce rapid note-drag moves into single WebSocket frames |
+| `ctx.batch()` | svelte-realtime | Server-side batched publish for arrangement actions and cron cleanup |
 | Optimistic updates | svelte-realtime | Note position updates instantly on drag, server confirms async |
 | Undo / redo | svelte-realtime | Ctrl+Z / Ctrl+Shift+Z to undo note actions |
 | `status` store | svelte-adapter-uws | Connection status dot in navbar (green/yellow/red) |
@@ -28,6 +29,9 @@ Open the page, get a random name, drop notes on a shared canvas. Every note, cur
 | Rate limiting | extensions | 100 RPCs per 10 seconds per user (drag/cursor moves are excluded) |
 | Presence | extensions | Who's online globally and on each board, with heartbeat + maxAge cleanup |
 | Cursors | extensions | Live cursor overlay with per-topic throttle (~60 broadcasts/sec) |
+| Cursor snapshots | extensions | Joining users instantly see existing cursor positions |
+| Circuit breaker | extensions | Redis failures degrade gracefully instead of blocking |
+| Real-time unsubscribe | adapter 0.4.0 | Presence and cursors clean up immediately on page navigation |
 | Canvas rendering | demo | 1000 cursors at 60fps via Canvas 2D with bitmap label caching |
 | Batch SQL | demo | FAB actions (tidy, rearrange, shuffle, group) use a single query via `unnest()` |
 | Board TTL | demo | Boards auto-delete after 1 hour of inactivity, with live countdown timer |
@@ -65,6 +69,7 @@ Key optimizations:
 - **rAF cursor throttle** -- outbound cursor moves coalesced to one per animation frame
 - **Per-topic broadcast budget** -- server caps cursor broadcasts at ~60/sec per board regardless of user count
 - **RAF event batching** -- incoming WebSocket events coalesced into one Svelte store update per frame
+- **Batched publish** -- arrangement actions publish all note updates + activity in a single `ctx.batch()` call instead of N+1 individual publishes
 - **Batch SQL** -- arrangement actions update all notes in a single `unnest()` query instead of N+1
 - **Direct DOM drag** -- note dragging bypasses Svelte reactivity during the drag for smooth touch performance
 - **Delayed handoff** -- local drag position held for 300ms after release to avoid snap-back jitter
@@ -78,7 +83,7 @@ For OS-level tuning (sysctl, ulimits, conntrack), see the [svelte-adapter-uws pr
 - **Frontend** -- SvelteKit, Svelte 5 (runes), Tailwind CSS v4, DaisyUI v5
 - **Server** -- svelte-adapter-uws (uWebSockets.js)
 - **Realtime** -- svelte-realtime (RPC + live streams over WebSocket)
-- **Extensions** -- svelte-adapter-uws-extensions (Redis-backed presence, cursors, pub/sub, rate limiting)
+- **Extensions** -- svelte-adapter-uws-extensions (Redis-backed presence, cursors, pub/sub, rate limiting, circuit breaker)
 - **Database** -- PostgreSQL (production) / in-memory Map (dev)
 - **Cache & pub/sub** -- Redis (production) / not needed (dev)
 
@@ -236,7 +241,7 @@ src/
 │   ├── server/
 │   │   ├── db.js                   -- Postgres + in-memory (touch, delete, stale cleanup)
 │   │   ├── validate.js             -- Input validation (UUID, bounds, allowlist)
-│   │   └── redis.js                -- Redis client, pub/sub, rate limiter, presence, cursors
+│   │   └── redis.js                -- Redis client, pub/sub, rate limiter, presence, cursors, breaker
 │   └── components/
 │       ├── StickyNote.svelte       -- Draggable note: edit, color, delete, z-order, touch
 │       ├── Canvas.svelte           -- Board area: pointer tracking with rAF throttle

@@ -14,5 +14,16 @@ import realtime from 'svelte-realtime/vite'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
-	plugins: [sveltekit(), tailwindcss(), uws(), realtime()]
+	plugins: [
+		sveltekit(),
+		tailwindcss(),
+		uws(),
+		realtime(),
+		{
+			name: 'first-load-hint',
+			configureServer() {
+				console.log('[demo] First page load compiles all modules on demand -- expect 5-10 seconds. Subsequent loads are instant.')
+			}
+		}
+	]
 })

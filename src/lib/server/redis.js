@@ -9,6 +9,11 @@
  * Each utility is created once at module load and shared across all
  * connections. The adapter hooks (hooks.ws.js) wire them into the
  * WebSocket lifecycle.
+ *
+ * A circuit breaker wraps all Redis-backed utilities. If Redis goes down
+ * (5 consecutive failures), the breaker trips and operations fail fast
+ * instead of blocking. When Redis recovers, the breaker resets
+ * automatically after 30 seconds.
  */
 
 import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
@@ -16,19 +21,32 @@ import { createPubSubBus } from 'svelte-adapter-uws-extensions/redis/pubsub'
 import { createRateLimit } from 'svelte-adapter-uws-extensions/redis/ratelimit'
 import { createPresence } from 'svelte-adapter-uws-extensions/redis/presence'
 import { createCursor } from 'svelte-adapter-uws-extensions/redis/cursor'
+import { createCircuitBreaker } from 'svelte-adapter-uws-extensions/breaker'
 import { env } from '$env/dynamic/private'
 
 /** Shared Redis connection. All utilities below share this client. */
 export const redis = createRedisClient({ url: env.REDIS_URL })
 
+/**
+ * Circuit breaker for Redis. Trips after 5 consecutive failures,
+ * probes again after 30 seconds. Presence, cursors, and rate limiting
+ * degrade gracefully when Redis is down -- the app stays functional,
+ * just without cross-instance features.
+ */
+export const breaker = createCircuitBreaker({
+	failureThreshold: 5,
+	resetTimeout: 30000,
+	onStateChange: (from, to) => console.log(`[redis breaker] ${from} -> ${to}`)
+})
+
 /** Pub/sub bus for broadcasting events across server instances. */
-export const bus = createPubSubBus(redis)
+export const bus = createPubSubBus(redis, { breaker })
 
 /**
  * Per-user rate limiter: 100 RPC calls per 10 seconds.
  * Throttled RPCs (cursor moves, note drags) are excluded in hooks.ws.js.
  */
-export const limiter = createRateLimit(redis, { points: 100, interval: 10000 })
+export const limiter = createRateLimit(redis, { points: 100, interval: 10000, breaker })
 
 /**
  * Presence tracker -- who's online globally and per-board.
@@ -43,7 +61,8 @@ export const limiter = createRateLimit(redis, { points: 100, interval: 10000 })
 export const presence = createPresence(redis, {
 	key: 'id',
 	heartbeat: 30000,
-	select: (u) => ({ id: u.id, name: u.name, color: u.color })
+	select: (u) => ({ id: u.id, name: u.name, color: u.color }),
+	breaker
 })
 
 /**
@@ -60,5 +79,6 @@ export const presence = createPresence(redis, {
 export const cursor = createCursor(redis, {
 	throttle: 32,
 	topicThrottle: 16,
-	select: (u) => ({ id: u.id, name: u.name, color: u.color })
+	select: (u) => ({ id: u.id, name: u.name, color: u.color }),
+	breaker
 })

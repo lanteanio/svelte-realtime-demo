@@ -10,7 +10,7 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard } from '$lib/server/db'
+import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard, tryAdvisoryLock, advisoryUnlock } from '$lib/server/db'
 import { generateSlug } from '$lib/names'
 import { validateBoardTitle } from '$lib/server/validate'
 
@@ -63,17 +63,27 @@ export const boards = live.stream('boards', async () => {
  * Finds boards that haven't had activity in BOARD_TTL_MS (1 hour)
  * and deletes them. Protected boards (stress-me-out) are exempt.
  *
- * Publishes individual 'deleted' events via ctx.publish so the crud
- * merge on the client removes each board from the list. Returns
- * undefined to skip the automatic 'set' publish.
+ * Uses a Postgres advisory lock so only one replica runs the cleanup
+ * when multiple instances are deployed. The others skip the tick.
+ *
+ * Publishes batched 'deleted' events so the crud merge on the client
+ * removes each board from the list.
  */
+const CLEANUP_LOCK_ID = 900001
+
 export const cleanupStaleBoards = live.cron('* * * * *', 'boards', async (ctx) => {
-	const stale = await listStaleBoards(BOARD_TTL_MS, PROTECTED_SLUGS)
-	for (const board of stale) {
-		await dbDeleteBoard(board.board_id)
-		ctx.publish('boards', 'deleted', { board_id: board.board_id })
-	}
-	if (stale.length > 0) {
-		console.log(`[cleanup] Deleted ${stale.length} stale board(s): ${stale.map(b => b.slug).join(', ')}`)
+	const acquired = await tryAdvisoryLock(CLEANUP_LOCK_ID)
+	if (!acquired) return
+	try {
+		const stale = await listStaleBoards(BOARD_TTL_MS, PROTECTED_SLUGS)
+		for (const board of stale) {
+			await dbDeleteBoard(board.board_id)
+		}
+		if (stale.length > 0) {
+			ctx.batch(stale.map(board => ({ topic: 'boards', event: 'deleted', data: { board_id: board.board_id } })))
+			console.log(`[cleanup] Deleted ${stale.length} stale board(s): ${stale.map(b => b.slug).join(', ')}`)
+		}
+	} finally {
+		await advisoryUnlock(CLEANUP_LOCK_ID)
 	}
 })
