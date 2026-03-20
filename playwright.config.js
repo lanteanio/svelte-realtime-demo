@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-const BASE_URL = 'https://svelte-realtime-demo.lantean.io';
+const BASE_URL = process.env.BASE_URL || 'https://svelte-realtime-demo.lantean.io';
 
 export default defineConfig({
 	testDir: './e2e',

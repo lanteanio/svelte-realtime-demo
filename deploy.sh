@@ -7,7 +7,7 @@ echo "Pulling latest changes..."
 git pull
 
 echo "Rebuilding and restarting app..."
-docker compose up -d --build app
+docker compose build --no-cache app && docker compose up -d app
 
 echo "Deployed successfully!"
 docker compose logs --tail 5 app
