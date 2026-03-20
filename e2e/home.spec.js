@@ -6,7 +6,7 @@ test.describe('Home Page', () => {
 		await page.goto('/');
 		await expect(page.locator('.navbar')).toBeVisible();
 		await expect(page.getByText('Svelte Realtime Demo')).toBeVisible();
-		await expect(page.getByText('Boards')).toBeVisible();
+		await expect(page.getByRole('heading', { name: 'Boards' })).toBeVisible();
 	});
 
 	test('shows create board form', async ({ page }) => {
