@@ -22,7 +22,7 @@ test.describe('Mobile Touch', () => {
 	test('navbar shows "Demo" on mobile width', async ({ page }) => {
 		await page.goto(BASE);
 		// On mobile, the short title should be visible
-		const shortTitle = page.locator('text=Demo').first();
+		const shortTitle = page.locator('.sm\\:hidden', { hasText: 'Demo' });
 		await expect(shortTitle).toBeVisible();
 	});
 
