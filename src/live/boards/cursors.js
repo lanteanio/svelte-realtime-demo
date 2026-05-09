@@ -11,21 +11,25 @@
  * bypass rate limiting (they fire too frequently to be rate-limited).
  */
 
-import { live } from 'svelte-realtime/server'
+import { live, LiveError } from 'svelte-realtime/server'
 import { cursor, presence } from '$lib/server/redis'
+import { TOPICS } from '$lib/server/topics'
 
 /** Register this connection as present on the given board. */
 export const joinBoard = live(async (ctx, boardId) => {
-	await presence.join(ctx.ws, `board:${boardId}`, ctx.platform)
+	if (ctx.shed('background')) throw new LiveError('OVERLOADED', 'Server under pressure, retry shortly')
+	await presence.join(ctx.ws, TOPICS.boardPresence(boardId), ctx.platform)
 })
 
 /** Remove this connection from the board's presence list and cursor overlay. */
 export const leaveBoard = live(async (ctx, boardId) => {
-	await presence.leave(ctx.ws, ctx.platform, `board:${boardId}`)
-	cursor.remove(ctx.ws, ctx.platform, `board:${boardId}`)
+	// leave is not shed -- letting users free resources is always allowed
+	await presence.leave(ctx.ws, ctx.platform, TOPICS.boardPresence(boardId))
+	cursor.remove(ctx.ws, ctx.platform, TOPICS.boardPresence(boardId))
 })
 
 /** Update this user's cursor position on the board canvas. */
 export const moveCursor = live((ctx, boardId, position) => {
-	cursor.update(ctx.ws, `board:${boardId}`, position, ctx.platform)
+	if (ctx.shed('background')) return
+	cursor.update(ctx.ws, TOPICS.boardPresence(boardId), position, ctx.platform)
 })

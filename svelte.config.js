@@ -8,6 +8,13 @@
  * upgradeRateLimit: 0 disables the per-IP WebSocket upgrade rate limit.
  * This is needed for stress testing (1000 connections from one IP).
  * For production, set this to a reasonable value (e.g. 100).
+ *
+ * upgradeAdmission caps in-flight WebSocket upgrades at the handshake
+ * layer. Surplus get a 503 BEFORE TLS / cookie / hook work, so a 10K
+ * connection storm sheds cheap instead of burning CPU on doomed
+ * upgrades. perTickBudget paces res.upgrade() calls so a synchronous
+ * burst does not starve other I/O. 1000 / 64 lets the 1000-cursor
+ * stress test pass through and trips the shed only past that.
  */
 import adapter from 'svelte-adapter-uws'
 
@@ -16,7 +23,11 @@ const config = {
 	kit: {
 		adapter: adapter({
 			websocket: {
-				upgradeRateLimit: 0
+				upgradeRateLimit: 0,
+				upgradeAdmission: {
+					maxConcurrent: 1000,
+					perTickBudget: 64
+				}
 			}
 		})
 	},

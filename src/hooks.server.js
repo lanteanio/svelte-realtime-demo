@@ -11,6 +11,13 @@
 import { ensureBoard } from '$lib/server/db'
 import pg from 'pg'
 import { env } from '$env/dynamic/private'
+import { live } from 'svelte-realtime/server'
+
+// Dev-mode safety net: warn once if a stream subscribes to a topic and
+// no events arrive within 30 seconds. Catches "I forgot ctx.publish"
+// and "the SQL trigger never fired" classes of bug at the framework
+// level. Production-stripped via NODE_ENV gate inside the helper.
+live.silentTopicWarning({ thresholdMs: 30_000 })
 
 if (env.DATABASE_URL) {
 	const pool = new pg.Pool({ connectionString: env.DATABASE_URL })

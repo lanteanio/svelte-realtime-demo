@@ -10,7 +10,8 @@
  */
 
 import { live } from 'svelte-realtime/server'
+import { TOPICS } from '$lib/server/topics'
 
-export const activity = live.stream((ctx, boardId) => `board:${boardId}:activity`, async (ctx, boardId) => {
+export const activity = live.stream((ctx, boardId) => TOPICS.activity(boardId), async (ctx, boardId) => {
 	return []
-}, { merge: 'latest', max: 30 })
+}, { merge: 'latest', max: 30, replay: true })

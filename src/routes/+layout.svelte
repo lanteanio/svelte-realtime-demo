@@ -15,9 +15,10 @@
 -->
 <script>
 	import '../app.css'
-	import { status } from 'svelte-adapter-uws/client'
+	import { status, failure } from 'svelte-adapter-uws/client'
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
-	import { Wifi, WifiOff, Sun, Moon, User, Globe, Github } from 'lucide-svelte'
+	import { health } from 'svelte-realtime/client'
+	import { Wifi, WifiOff, Sun, Moon, User, Globe, Github, AlertTriangle } from 'lucide-svelte'
 
 	let { children, data } = $props()
 	const identity = $derived(data.identity)
@@ -39,9 +40,22 @@
 	const globalUsers = $derived($globalPresence ?? [])
 
 	// --- Connection status ---
+	// 0.5.0 ships a five-state status machine plus a failure store
+	// with the cause of the latest non-open transition. We map each
+	// state to icon + colour + opacity, and render the failure reason
+	// in the tooltip when terminal so users know why we are down.
+	const StatusIcon = $derived($status === 'failed' || $status === 'disconnected' ? WifiOff : Wifi)
 	const statusColor = $derived(
-		$status === 'open' ? 'text-success' :
-		$status === 'connecting' ? 'text-warning' : 'text-error'
+		$status === 'open' || $status === 'suspended' ? 'text-success' :
+		$status === 'connecting' || $status === 'disconnected' ? 'text-warning' :
+		'text-error'
+	)
+	const statusOpacity = $derived($status === 'suspended' ? 'opacity-50' : '')
+	const statusTooltip = $derived(
+		$status === 'failed' && $failure?.reason ? `${$status}: ${$failure.reason}` :
+		$status === 'suspended' ? 'paused (tab in background)' :
+		$status === 'disconnected' ? 'reconnecting' :
+		$status
 	)
 </script>
 
@@ -65,12 +79,8 @@
 			{/if}
 
 			<!-- Connection status -->
-			<div class="tooltip tooltip-bottom" data-tip={$status}>
-				{#if $status === 'open'}
-					<Wifi size={16} class={statusColor} />
-				{:else}
-					<WifiOff size={16} class={statusColor} />
-				{/if}
+			<div class="tooltip tooltip-bottom" data-tip={statusTooltip}>
+				<StatusIcon size={16} class="{statusColor} {statusOpacity}" />
 			</div>
 
 			<!-- Identity -->
@@ -108,6 +118,13 @@
 			</label>
 		</div>
 	</div>
+
+	{#if $health === 'degraded'}
+		<div class="alert alert-warning rounded-none border-x-0 border-t-0 py-2">
+			<AlertTriangle size={16} />
+			<span class="text-sm">Real-time updates paused, reconnecting...</span>
+		</div>
+	{/if}
 
 	{@render children()}
 </div>

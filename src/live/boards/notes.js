@@ -27,6 +27,7 @@ import {
 	touchBoard
 } from '$lib/server/db'
 import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
+import { TOPICS } from '$lib/server/topics'
 
 /**
  * Touch the board's last_activity and broadcast the update to the
@@ -37,10 +38,10 @@ function touch(ctx, boardId) {
 	touchBoard(boardId).then(board => {
 		if (!board) return
 		// Update the home page board list timer
-		ctx.publish('boards', 'updated', board)
+		ctx.publish(TOPICS.boards, 'updated', board)
 		// Update the board page header timer. The settings stream uses 'set'
 		// merge (replaces the whole object), so we send all fields.
-		ctx.publish(`board:${boardId}:settings`, 'set', board)
+		ctx.publish(TOPICS.settings(boardId), 'set', board)
 	}).catch(() => {})
 }
 
@@ -58,7 +59,15 @@ async function verifyNoteOwnership(noteId, boardId) {
 
 // --- Single-note operations ---
 
-export const createNote = live(async (ctx, boardId, { content, x, y, color }) => {
+/**
+ * Create a note on the canvas.
+ *
+ * Wrapped in live.idempotent: a client that double-clicks the canvas in
+ * quick succession or retries through a flaky reconnect with the same
+ * idempotencyKey gets one note, not two. Short TTL because two notes a
+ * minute apart in the same spot are almost always intentional.
+ */
+export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { content, x, y, color }) => {
 	validateBoardId(boardId)
 	const note = await dbCreateNote({
 		boardId,
@@ -68,8 +77,8 @@ export const createNote = live(async (ctx, boardId, { content, x, y, color }) =>
 		color: validateNoteColor(color ?? '#fef08a'),
 		creatorName: ctx.user.name
 	})
-	ctx.publish(`board:${boardId}:notes`, 'created', note)
-	ctx.publish(`board:${boardId}:activity`, 'created', {
+	ctx.publish(TOPICS.notes(boardId), 'created', note)
+	ctx.publish(TOPICS.activity(boardId), 'created', {
 		action: 'added a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
 	touch(ctx, boardId)
@@ -80,56 +89,75 @@ export const createNote = live(async (ctx, boardId, { content, x, y, color }) =>
  * Move a note to a new position.
  * Throttled to 50ms -- during a drag, the client fires this on every
  * mouse move, but the server only processes it every 50ms at most.
+ *
+ * Background-class: silently dropped under any pressure signal. The
+ * client is doing optimistic display via store.mutate so a few dropped
+ * intermediate frames are invisible; the next non-shed move catches up.
  */
 export const moveNote = live(async (ctx, boardId, noteId, x, y) => {
+	if (ctx.shed('background')) return
 	ctx.throttle(`move:${noteId}`, 50)
 	await verifyNoteOwnership(noteId, boardId)
 	const note = await dbUpdateNote(noteId, { x: validateCoord(x, 'x'), y: validateCoord(y, 'y') })
 	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
-	ctx.publish(`board:${boardId}:notes`, 'updated', note)
-	return note
-})
-
-/** Edit note content, color, or other fields. */
-export const editNote = live(async (ctx, boardId, noteId, fields) => {
-	await verifyNoteOwnership(noteId, boardId)
-	const clean = validateNoteFields(fields)
-	if (Object.keys(clean).length === 0) throw new LiveError('VALIDATION', 'No valid fields to update')
-	const note = await dbUpdateNote(noteId, clean)
-	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
-	ctx.publish(`board:${boardId}:notes`, 'updated', note)
-	if (clean.content !== undefined) {
-		ctx.publish(`board:${boardId}:activity`, 'created', {
-			action: 'edited a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-		})
-	}
-	if (clean.color) {
-		ctx.publish(`board:${boardId}:activity`, 'created', {
-			action: 'recolored a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-		})
-	}
-	touch(ctx, boardId)
+	ctx.publish(TOPICS.notes(boardId), 'updated', note)
 	return note
 })
 
 /**
+ * Edit note content, color, or other fields.
+ *
+ * Wrapped in live.lock per noteId: two users editing the same note
+ * serialize FIFO instead of racing. maxWaitMs bounds the queue depth so
+ * a stuck handler does not block other waiters indefinitely; queued
+ * callers reject with LiveError('LOCK_TIMEOUT', ...) after 5s.
+ */
+export const editNote = live.lock(
+	{ key: (ctx, _boardId, noteId) => `note:${noteId}`, maxWaitMs: 5000 },
+	async (ctx, boardId, noteId, fields) => {
+		await verifyNoteOwnership(noteId, boardId)
+		const clean = validateNoteFields(fields)
+		if (Object.keys(clean).length === 0) throw new LiveError('VALIDATION', 'No valid fields to update')
+		const note = await dbUpdateNote(noteId, clean)
+		if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
+		ctx.publish(TOPICS.notes(boardId), 'updated', note)
+		if (clean.content !== undefined) {
+			ctx.publish(TOPICS.activity(boardId), 'created', {
+				action: 'edited a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
+			})
+		}
+		if (clean.color) {
+			ctx.publish(TOPICS.activity(boardId), 'created', {
+				action: 'recolored a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
+			})
+		}
+		touch(ctx, boardId)
+		return note
+	}
+)
+
+/**
  * Bring a note to the front (increase its z-index).
  * Throttled to 100ms to avoid spamming the DB on rapid clicks.
+ *
+ * Background-class: z-order tweaks are nice-to-have. Silently dropped
+ * under pressure; the user can click again when the system recovers.
  */
 export const focusNote = live(async (ctx, boardId, noteId, zIndex) => {
+	if (ctx.shed('background')) return
 	ctx.throttle(`focus:${noteId}`, 100)
 	await verifyNoteOwnership(noteId, boardId)
 	const note = await dbUpdateNote(noteId, { z_index: validateZIndex(zIndex) })
 	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
-	ctx.publish(`board:${boardId}:notes`, 'updated', note)
+	ctx.publish(TOPICS.notes(boardId), 'updated', note)
 	return note
 })
 
 export const deleteNote = live(async (ctx, boardId, noteId) => {
 	await verifyNoteOwnership(noteId, boardId)
 	await dbDeleteNote(noteId)
-	ctx.publish(`board:${boardId}:notes`, 'deleted', { note_id: noteId })
-	ctx.publish(`board:${boardId}:activity`, 'created', {
+	ctx.publish(TOPICS.notes(boardId), 'deleted', { note_id: noteId })
+	ctx.publish(TOPICS.activity(boardId), 'created', {
 		action: 'removed a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 	})
 	touch(ctx, boardId)
@@ -151,9 +179,9 @@ export const tidyNotes = live(async (ctx, boardId) => {
 	}))
 
 	const updated = await dbBatchUpdateNotes(updates)
-	ctx.batch([
-		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
-		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	ctx.platform.publishBatched([
+		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
+		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -198,9 +226,9 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 	}
 
 	const updated = await dbBatchUpdateNotes(updates)
-	ctx.batch([
-		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
-		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	ctx.platform.publishBatched([
+		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
+		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -225,9 +253,9 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 	}))
 
 	const updated = await dbBatchUpdateNotes(updates)
-	ctx.batch([
-		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
-		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	ctx.platform.publishBatched([
+		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
+		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -271,9 +299,9 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 	}
 
 	const updated = await dbBatchUpdateNotes(updates)
-	ctx.batch([
-		...updated.map(note => ({ topic: `board:${boardId}:notes`, event: 'updated', data: note })),
-		{ topic: `board:${boardId}:activity`, event: 'created', data: { action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+	ctx.platform.publishBatched([
+		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
+		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -291,6 +319,6 @@ export const groupByAuthor = live(async (ctx, boardId) => {
  * When any user on the same board creates, edits, moves, or deletes
  * a note, every other user's notes array updates instantly.
  */
-export const notes = live.stream((ctx, boardId) => `board:${boardId}:notes`, async (ctx, boardId) => {
+export const notes = live.stream((ctx, boardId) => TOPICS.notes(boardId), async (ctx, boardId) => {
 	return listNotes(boardId)
-}, { merge: 'crud', key: 'note_id' })
+}, { merge: 'crud', key: 'note_id', replay: true })

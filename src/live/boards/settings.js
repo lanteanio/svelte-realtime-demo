@@ -9,6 +9,7 @@
 import { live, LiveError } from 'svelte-realtime/server'
 import { getBoard, updateBoard } from '$lib/server/db'
 import { validateBoardId, validateBoardFields } from '$lib/server/validate'
+import { TOPICS } from '$lib/server/topics'
 
 export const updateSettings = live(async (ctx, boardId, fields) => {
 	validateBoardId(boardId)
@@ -16,22 +17,22 @@ export const updateSettings = live(async (ctx, boardId, fields) => {
 	if (Object.keys(clean).length === 0) throw new LiveError('VALIDATION', 'No valid fields to update')
 	const board = await updateBoard(boardId, clean)
 	if (!board) throw new LiveError('NOT_FOUND', 'Board not found')
-	ctx.publish(`board:${boardId}:settings`, 'set', board)
+	ctx.publish(TOPICS.settings(boardId), 'set', board)
 	// updateBoard already sets last_activity = now(), broadcast to home page
-	ctx.publish('boards', 'updated', { board_id: board.board_id, title: board.title, slug: board.slug, last_activity: board.last_activity })
+	ctx.publish(TOPICS.boards, 'updated', { board_id: board.board_id, title: board.title, slug: board.slug, last_activity: board.last_activity })
 	if (clean.title !== undefined) {
-		ctx.publish(`board:${boardId}:activity`, 'created', {
+		ctx.publish(TOPICS.activity(boardId), 'created', {
 			action: 'renamed the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 		})
 	}
 	if (clean.background !== undefined) {
-		ctx.publish(`board:${boardId}:activity`, 'created', {
+		ctx.publish(TOPICS.activity(boardId), 'created', {
 			action: 'changed the background', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
 		})
 	}
 	return board
 })
 
-export const settings = live.stream((ctx, boardId) => `board:${boardId}:settings`, async (ctx, boardId) => {
+export const settings = live.stream((ctx, boardId) => TOPICS.settings(boardId), async (ctx, boardId) => {
 	return getBoard(boardId)
-}, { merge: 'set' })
+}, { merge: 'set', replay: true })

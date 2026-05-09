@@ -8,23 +8,127 @@
  * The adapter calls them automatically -- you just export the right names.
  */
 
-import { createMessage, LiveError } from 'svelte-realtime/server'
-import { bus, limiter, presence, cursor } from '$lib/server/redis'
+import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
+import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
+import { bus, limiter, presence, cursor, replay, registry, leader } from '$lib/server/redis'
+import { metrics } from '$lib/server/metrics'
+import { tasks } from '$lib/server/tasks'
 import { generateIdentity } from '$lib/names'
+
+/**
+ * Message-tier admission control. Pairs with the handshake-tier
+ * upgradeAdmission in svelte.config.js.
+ *
+ * background: cursor moves and note drag shed under any pressure
+ * signal (memory, publish-rate, subscriber-ratio). Optional UX,
+ * sacrificed first to keep critical paths responsive.
+ *
+ * critical: note CRUD, board CRUD, settings, arrangement actions only
+ * shed under MEMORY pressure. Publish-rate spikes (cursor storms) do
+ * not stop a user from saving an edit.
+ *
+ * Handlers opt in via `if (ctx.shed('background')) throw new
+ * LiveError('OVERLOADED', '...')`. Handlers without a shed check run
+ * unguarded, which is the right default for non-degradable operations.
+ */
+live.admission({
+	classes: {
+		background: ['MEMORY', 'PUBLISH_RATE', 'SUBSCRIBERS'],
+		critical: ['MEMORY']
+	}
+})
+
+/**
+ * Configure server-initiated push (`live.push({ userId }, ...)`).
+ *
+ * - identify: maps a WebSocket to its userId so realtime's local push
+ *   registry (populated by pushHooks.open/close below) can route
+ *   same-instance pushes via platform.request without any Redis hop.
+ * - remoteRegistry: when the userId isn't on this instance, fall through
+ *   to `registry.request(userId, ...)` -- the extensions cluster
+ *   transport. Single-instance dev sees no behavior change because the
+ *   local registry hit short-circuits first.
+ *
+ * Showcased in /demos/notifications. The cluster path is hard to demo
+ * locally (one instance) but the wiring is identical to production.
+ */
+live.configurePush({
+	identify: (ws) => ws.getUserData()?.id,
+	remoteRegistry: registry
+})
+
+/**
+ * Topics that get replay capture for session-resume support.
+ *
+ * Per-board: `notes`, `settings`, `activity` -- streams a reconnecting
+ * client can fall behind on by a few seconds and visibly notice the
+ * refetch flicker. presence and cursor topics are excluded; those are
+ * inherently latest-state-wins.
+ *
+ * Demo: `demos:counter:tick` for the /demos/counter-resume showcase
+ * (gap-fill of every tick that fired while offline).
+ */
+const REPLAY_TOPIC_RE = /^(board:[^:]+:(notes|settings|activity)|demos:counter:tick|demos:fromseq:events)$/
+
+/**
+ * Wrap the bus-wrapped platform once more so realtime can read replay
+ * buffer state via `platform.replay` and writes to whitelisted topics
+ * land in the buffer. Single-event publishes route through replay.publish
+ * (which fans out via the underlying platform.publish at the end);
+ * publishBatched events on whitelisted topics route per-event through
+ * replay.publish so they get captured too, at the cost of losing the
+ * wire-batched fast path for those specific topics. publishBatched on
+ * non-whitelisted topics keeps the wire-batched fast path.
+ */
+function wrapWithReplay(p) {
+	const wrapped = bus.wrap(p)
+	return new Proxy(wrapped, {
+		get(target, prop, receiver) {
+			if (prop === 'replay') return replay
+			if (prop === 'publish') return (topic, event, data, opts) => {
+				// replay.publish stores in Redis + locally fans out. With
+				// localFanoutOnStorageFailure: true on the replay factory,
+				// it also falls through to local fanout when storage fails.
+				if (REPLAY_TOPIC_RE.test(topic)) return replay.publish(target, topic, event, data)
+				return target.publish(topic, event, data, opts)
+			}
+			if (prop === 'publishBatched') return (messages) => {
+				const passThrough = []
+				for (const m of messages) {
+					if (REPLAY_TOPIC_RE.test(m.topic)) {
+						replay.publish(target, m.topic, m.event, m.data)
+					} else {
+						passThrough.push(m)
+					}
+				}
+				if (passThrough.length > 0) return target.publishBatched(passThrough)
+			}
+			return Reflect.get(target, prop, receiver)
+		}
+	})
+}
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
+const VALID_ORGS = new Set(['acme', 'globex'])
+
 /**
  * Validate an identity object from the cookie. Returns null if invalid.
  * We check every field strictly -- never trust client-provided data.
+ *
+ * `org` is optional. When set, must be one of the demo's two
+ * organizations (`acme` or `globex`); used by /demos/denials to gate
+ * access to org-scoped audit-log streams. Unset is treated as "no org"
+ * and denies every audit:* subscribe.
  */
 function validateIdentity(obj) {
 	if (!obj || typeof obj !== 'object') return null
 	if (typeof obj.id !== 'string' || !UUID_RE.test(obj.id)) return null
 	if (typeof obj.name !== 'string' || obj.name.length < 1 || obj.name.length > 40) return null
 	if (typeof obj.color !== 'string' || !HEX_COLOR_RE.test(obj.color)) return null
-	return { id: obj.id, name: obj.name, color: obj.color }
+	const org = VALID_ORGS.has(obj.org) ? obj.org : null
+	return { id: obj.id, name: obj.name, color: obj.color, org }
 }
 
 /**
@@ -46,6 +150,10 @@ export function upgrade({ cookies }) {
 
 	const identity = {
 		id: crypto.randomUUID(),
+		// Default new visitors to Acme. /demos/denials lets them switch
+		// to Globex via the org-set endpoint, which rewrites the cookie
+		// and reloads so the next WS handshake picks up the new org.
+		org: 'acme',
 		...generateIdentity()
 	}
 
@@ -55,23 +163,170 @@ export function upgrade({ cookies }) {
 }
 
 /**
- * Called once when the WebSocket connection is fully open.
- * We activate the Redis pub/sub bus (so cross-instance messaging works)
- * and register this connection in the "global" presence channel.
+ * Boot-time one-shot setup (adapter next.15+).
+ *
+ * Fires once per worker after the listen socket is bound and BEFORE
+ * any upgrade / open / message hook can run. The deterministic place
+ * to capture a `platform` reference for any code that needs it at
+ * boot rather than on first connect.
+ *
+ * What lives here:
+ * - `bus.activate(platform)` -- the Redis pub/sub subscriber needs the
+ *   platform to fan inbound cluster messages out to local subscribers.
+ * - `setCronPlatform(platform)` -- realtime's cron tick captures a
+ *   platform reference; without this, the 1Hz tick from the
+ *   notifications scheduler fires no-op until first connect.
+ * - `wirePublishRateMetrics(...)` -- one-shot gauge registration
+ *   against the worker-local `platform.pressure` snapshot.
+ * - `live.configureCron({ leader })` -- gates the cron tick on the
+ *   Redis-backed leader-election primitive so cron schedules fire
+ *   ONCE across the cluster instead of N times across N workers.
+ *   Single-instance dev: this worker is always the leader.
+ *
+ * Per-worker in cluster mode (CLUSTER_MODE=reuseport on Linux,
+ * acceptor on macOS/Windows). N workers = N init calls; that's why
+ * the leader-election layer matters for cron singleton semantics.
+ *
+ * Async-allowed; throwing here rejects boot and crashes the worker
+ * (loud failure surfaces as an unhandled rejection). All the work
+ * here is sync today, but `init` is awaited by the adapter so this
+ * shape is forward-compatible.
  */
-export function open(ws, { platform }) {
+export function init({ platform }) {
 	bus.activate(platform)
+	setCronPlatform(platform)
+	// _activateDerived wraps platform.publish + publishBatched so
+	// live.derived / live.aggregate / live.effect watchers fire on
+	// source-topic publishes. Per realtime next.8's recommended
+	// wire-up site, this lives in init({ platform }) -- and per
+	// next.10's late-activation fix it now installs the wrap for
+	// static aggregates / effects / derived too, not just dynamic-
+	// derived. Cron-driven publishes that fire before the first WS
+	// connection (e.g. /demos/topk's firehose) reach the aggregate
+	// watcher correctly.
+	_activateDerived(platform)
+	wirePublishRateMetrics(platform, metrics, { topN: 20 })
+	// `bus` enables cluster-wide cron fan-out (realtime next.12). Without
+	// it, leader-only cron ticks publish on the elected worker only and
+	// remote subscribers see nothing - a cluster-cron tick is invisible
+	// to anyone connected to the follower workers. With it, every cron
+	// fire wraps the platform with `bus.wrap(...)` before publishing so
+	// the publish travels to Redis and fans out to every instance.
+	configureCron({ leader: () => leader.isLeader(), bus })
+}
+
+/**
+ * Teardown one-shot (adapter next.15+).
+ *
+ * Fires once per worker before the listen socket closes and before
+ * existing connections are kicked. Best-effort: throws are logged
+ * and swallowed by the adapter, so cleanup is safe to attempt.
+ *
+ * - `leader.stop()` -- best-effort releases the Redis lease via
+ *   compare-and-delete so a sibling worker can take over within
+ *   `renewMs` (10s) instead of waiting for the full `leaseMs` (30s).
+ * - `registry.destroy()` -- stops the connection registry's
+ *   heartbeat timer and Redis subscriber so the worker can exit
+ *   cleanly.
+ */
+export async function shutdown() {
+	// `tasks` is null when DATABASE_URL is empty; destroy() drops the
+	// dispatch / recovery / cleanup timers so the worker exits promptly.
+	tasks?.destroy()
+	await Promise.allSettled([
+		leader.stop(),
+		registry.destroy()
+	])
+}
+
+/**
+ * Called once when the WebSocket connection is fully open.
+ * Per-connection setup only -- one-shot worker setup lives in `init`
+ * above.
+ */
+export function open(ws, ctx) {
+	const { platform } = ctx
 	presence.join(ws, 'global', platform)
+	// Register the connection in realtime's local push registry (so
+	// live.push routes via platform.request) and in the cluster registry
+	// (so cross-instance pushes find this user via Redis).
+	pushHooks.open(ws, ctx)
+	registry.hooks.open(ws, ctx)
+}
+
+/**
+ * Topic denial gate. Returns a denial reason string, or null if allowed.
+ *
+ * Two surfaces use it today:
+ *
+ * - /demos/chat: one members-only room (`private`) is denied
+ *   unconditionally. Banner appears via the per-stream `error`
+ *   Readable.
+ * - /demos/denials: org-scoped `audit:{orgSlug}` streams. The user's
+ *   identity (set in upgrade) carries `org`; subscribes to a different
+ *   org return FORBIDDEN. Surfaces both on the per-stream error AND on
+ *   the adapter's top-level `denials` Readable, which the page renders
+ *   as a recent-denials list.
+ *
+ * The gate is sync (the wire-level subscribe-batch hook is sync); both
+ * checks are pure topic + ws.userData lookups, no I/O.
+ */
+const PRIVATE_CHAT_RE = /^demos:chat:private(:presence)?$/
+const AUDIT_TOPIC_RE = /^audit:(acme|globex)$/
+
+function denialFor(topic, ws) {
+	if (PRIVATE_CHAT_RE.test(topic)) return 'FORBIDDEN'
+	const auditMatch = AUDIT_TOPIC_RE.exec(topic)
+	if (auditMatch) {
+		const userOrg = ws?.getUserData()?.org
+		if (userOrg !== auditMatch[1]) return 'FORBIDDEN'
+	}
+	return null
 }
 
 /**
  * Called when a client subscribes to a live stream topic.
  * We delegate to the presence and cursor plugins so they can track
  * who's watching what and send cursor snapshots to new joiners.
+ *
+ * Fires for solo subscribes only. Multi-topic subscribes (initial mount,
+ * reconnect resume) land in `subscribeBatch` below as one wire frame.
+ *
+ * Returning a string denies the subscribe with that reason; return
+ * undefined to allow.
  */
 export function subscribe(ws, topic, ctx) {
+	const reason = denialFor(topic, ws)
+	if (reason) return reason
 	presence.hooks.subscribe(ws, topic, ctx)
 	cursor.hooks.subscribe(ws, topic, ctx)
+}
+
+/**
+ * Called once per subscribe-batch wire frame. Microtask-batched initial
+ * mounts coalesce N subscribes into one frame, so a board page that
+ * subscribes to notes / settings / activity / presence / cursor topics
+ * triggers this hook once instead of the per-topic `subscribe` hook
+ * five times.
+ *
+ * Returning a record of `{ topic: reason }` denies those topics with a
+ * structured reason the client renders via the `denials` store. Returning
+ * undefined or {} allows everything.
+ *
+ * Sync only. For async grants, pre-cache them on userData during upgrade.
+ */
+export function subscribeBatch(ws, topics, ctx) {
+	let denials
+	for (const topic of topics) {
+		const reason = denialFor(topic, ws)
+		if (reason) {
+			(denials ??= {})[topic] = reason
+			continue
+		}
+		presence.hooks.subscribe(ws, topic, ctx)
+		cursor.hooks.subscribe(ws, topic, ctx)
+	}
+	return denials
 }
 
 /**
@@ -90,11 +345,25 @@ export function unsubscribe(ws, topic, ctx) {
  * cursor state. The unsubscribe hook already handled any topics the
  * client explicitly dropped before disconnect, so close only handles
  * whatever is still active.
+ *
+ * Wrapped in connectionMetricsHook so per-connection histograms
+ * (duration, messages, bytes) and the close-code counter emit on every
+ * close. The user-supplied close runs first; metrics observation runs
+ * after, so a throw in the user close still misses metrics for that
+ * connection (acceptable -- a thrown close is an exceptional path).
  */
-export function close(ws, ctx) {
+export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	presence.hooks.close(ws, ctx)
 	cursor.hooks.close(ws, ctx)
-}
+	// Pass ctx so pushHooks.close routes through the realtime close
+	// that drains stream-subscription bookkeeping (silent-topic
+	// watchdogs, _topicWsCounts, __onUnsubscribe callbacks). Without
+	// the second arg, next.11's compatibility branch keeps it
+	// push-only and the silent-topic watchdog never disarms when test
+	// pages close, producing 30s-delayed warning floods.
+	pushHooks.close(ws, ctx)
+	registry.hooks.close(ws, ctx)
+})
 
 /**
  * RPCs that should bypass rate limiting. These fire very frequently
@@ -112,10 +381,20 @@ const THROTTLED_RPCS = new Set(['boards/notes/moveNote', 'boards/cursors/moveCur
  * client gets a RATE_LIMITED error with a countdown.
  */
 export const message = createMessage({
-	platform: (p) => bus.wrap(p),
+	platform: wrapWithReplay,
 	async beforeExecute(ws, rpcPath) {
 		if (THROTTLED_RPCS.has(rpcPath)) return
 		const { allowed, resetMs } = await limiter.consume(ws)
 		if (!allowed) throw new LiveError('RATE_LIMITED', `Retry in ${Math.ceil(resetMs / 1000)}s`)
 	}
 })
+
+/**
+ * Adapter session-resume hook. Fires on WebSocket reconnect when the
+ * client presents its previous sessionId + per-topic lastSeenSeqs.
+ * The replay extension's resumeHook iterates the topics and gap-fills
+ * each via the existing __replay:{topic} pipeline. Without this hook,
+ * reconnects fall through to live mode and the client refetches via
+ * initial subscribe (visible flicker on a busy board).
+ */
+export const resume = replay.resumeHook()

@@ -14,7 +14,6 @@
 	- Undo/redo is built into the notes stream (enableHistory)
 -->
 <script>
-	import { batch } from 'svelte-realtime/client'
 	import { notes, createNote, moveNote, editNote, deleteNote, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
 	import { Layers, LayoutGrid, Shuffle, Users, Sparkles, X } from 'lucide-svelte'
 	import { activity } from '$live/boards/activity'
@@ -54,7 +53,10 @@
 	function handleCanvasDoubleClick(e) {
 		const canvas = e.currentTarget
 		const rect = canvas.getBoundingClientRect()
-		createNote(boardId, {
+		// idempotencyKey: a flaky-reconnect retry on this exact intent
+		// returns the same note instead of creating duplicates.
+		const idempotencyKey = crypto.randomUUID()
+		createNote.with({ idempotencyKey })(boardId, {
 			content: '',
 			x: e.clientX - rect.left + canvas.scrollLeft,
 			y: e.clientY - rect.top + canvas.scrollTop,
@@ -63,10 +65,12 @@
 	}
 
 	// --- Drag handling ---
-	// During a drag, we track positions locally (for instant visual feedback)
-	// AND send them to the server (so other users see the movement).
-	// batch() groups the moveNote RPC with other pending calls.
-	let localPositions = $state({})
+	// store.mutate applies the optimistic position to the displayed value
+	// immediately and queues the server roundtrip. The server's confirming
+	// 'updated' event absorbs the queue entry by note_id (crud merge), so
+	// no manual snap-back protection or local-position bookkeeping needed.
+	// pauseHistory/resumeHistory still wraps the drag so undo/redo skips
+	// intermediate positions and only records the final landing spot.
 	let dragging = $state(false)
 
 	function handleMove(noteId, x, y) {
@@ -74,30 +78,18 @@
 			dragging = true
 			notesStore.pauseHistory()
 		}
-		localPositions[noteId] = { x, y }
-		batch(() => [moveNote(boardId, noteId, x, y)])
+		notesStore.mutate(
+			() => moveNote(boardId, noteId, x, y),
+			(current) => current.map(n => n.note_id === noteId ? { ...n, x, y } : n)
+		)
 	}
 
-	function handleMoveEnd(noteId) {
+	function handleMoveEnd() {
 		if (dragging) {
 			dragging = false
 			notesStore.resumeHistory()
 		}
-		// Keep the local position briefly so the note doesn't snap back
-		// to the stale server position while the final moveNote RPC is
-		// in flight. 300ms is enough for the round trip.
-		setTimeout(() => { delete localPositions[noteId] }, 300)
 	}
-
-	// Merge local drag positions with server-confirmed positions.
-	// During a drag, localPositions overrides the server position
-	// for instant feedback. After drag ends, server position takes over.
-	const displayNotes = $derived(
-		($notesStore ?? []).map(note => {
-			const pos = localPositions[note.note_id]
-			return pos ? { ...note, x: pos.x, y: pos.y } : note
-		})
-	)
 
 	// --- Z-ordering ---
 	// Clicking a note brings it to the front by setting z_index = max + 1.
@@ -168,14 +160,14 @@
 		background={$settingsStore?.background ?? '#f5f5f4'}
 		ondblclick={handleCanvasDoubleClick}
 		{boardId}
-		noteCount={displayNotes.length}
+		noteCount={$notesStore?.length ?? 0}
 	>
-		{#each displayNotes as note (note.note_id)}
+		{#each $notesStore ?? [] as note (note.note_id)}
 			<StickyNote
 				{note}
 				zIndex={note.z_index ?? 0}
 				onMove={(x, y) => handleMove(note.note_id, x, y)}
-				onMoveEnd={() => handleMoveEnd(note.note_id)}
+				onMoveEnd={() => handleMoveEnd()}
 				onEdit={(fields) => editNote(boardId, note.note_id, fields)}
 				onDelete={() => deleteNote(boardId, note.note_id)}
 				onFocus={() => bringToFront(note.note_id)}

@@ -4,7 +4,7 @@
  * live() creates an RPC function that clients can call over WebSocket.
  * live.stream() creates a reactive data stream that clients subscribe to.
  *
- * When a board is created, we publish a 'created' event on the 'boards'
+ * When a board is created, we publish a 'created' event on the TOPICS.boards
  * topic. Every client subscribed to the boards stream sees the new board
  * appear instantly (no polling, no refetch).
  */
@@ -13,6 +13,7 @@ import { live, LiveError } from 'svelte-realtime/server'
 import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard, tryAdvisoryLock, advisoryUnlock } from '$lib/server/db'
 import { generateSlug } from '$lib/names'
 import { validateBoardTitle } from '$lib/server/validate'
+import { TOPICS } from '$lib/server/topics'
 
 /** How long a board lives without activity (1 hour). */
 const BOARD_TTL_MS = 60 * 60 * 1000
@@ -26,8 +27,13 @@ const PROTECTED_SLUGS = ['stress-me-out']
  * Slugs are random (e.g. "plucky-taco-576") and must be unique in the
  * database. Since they're generated randomly, collisions can happen.
  * We retry up to 5 times with different slugs before giving up.
+ *
+ * Wrapped in live.idempotent: a client that double-clicks Create or
+ * retries through a flaky reconnect with the same idempotencyKey gets
+ * the same board, not duplicates. Short TTL because beyond a minute the
+ * user almost certainly intended a second board.
  */
-export const createBoard = live(async (ctx, title) => {
+export const createBoard = live.idempotent({ ttl: 60 }, async (ctx, title) => {
 	const cleanTitle = validateBoardTitle(title)
 	let board
 	for (let attempt = 0; attempt < 5; attempt++) {
@@ -42,7 +48,7 @@ export const createBoard = live(async (ctx, title) => {
 		}
 	}
 	if (!board) throw new LiveError('SERVER_ERROR', 'Could not generate a unique board URL, please try again')
-	ctx.publish('boards', 'created', board)
+	ctx.publish(TOPICS.boards, 'created', board)
 	return board
 })
 
@@ -53,7 +59,7 @@ export const createBoard = live(async (ctx, title) => {
  * events to its local array, keyed by board_id. So when any user creates a
  * board, every other user's board list updates in real time.
  */
-export const boards = live.stream('boards', async () => {
+export const boards = live.stream(TOPICS.boards, async () => {
 	return listBoards()
 }, { merge: 'crud', key: 'board_id' })
 
@@ -71,7 +77,7 @@ export const boards = live.stream('boards', async () => {
  */
 const CLEANUP_LOCK_ID = 900001
 
-export const cleanupStaleBoards = live.cron('* * * * *', 'boards', async (ctx) => {
+export const cleanupStaleBoards = live.cron('* * * * *', TOPICS.boards, async (ctx) => {
 	const acquired = await tryAdvisoryLock(CLEANUP_LOCK_ID)
 	if (!acquired) return
 	try {
@@ -80,7 +86,7 @@ export const cleanupStaleBoards = live.cron('* * * * *', 'boards', async (ctx) =
 			await dbDeleteBoard(board.board_id)
 		}
 		if (stale.length > 0) {
-			ctx.batch(stale.map(board => ({ topic: 'boards', event: 'deleted', data: { board_id: board.board_id } })))
+			ctx.platform.publishBatched(stale.map(board => ({ topic: TOPICS.boards, event: 'deleted', data: { board_id: board.board_id } })))
 			console.log(`[cleanup] Deleted ${stale.length} stale board(s): ${stale.map(b => b.slug).join(', ')}`)
 		}
 	} finally {

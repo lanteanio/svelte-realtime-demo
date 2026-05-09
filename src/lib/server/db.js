@@ -254,7 +254,7 @@ function memListBoards() {
 		.map(({ board_id, title, slug, last_activity }) => ({ board_id, title, slug, last_activity: new Date(last_activity).toISOString() }))
 }
 
-function memTouchBoard(boardId) {
+async function memTouchBoard(boardId) {
 	const b = boardsMap.get(boardId)
 	if (!b) return undefined
 	b.last_activity = Date.now()

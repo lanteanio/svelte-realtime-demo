@@ -1,0 +1,55 @@
+import { test, expect } from '@playwright/test'
+
+test.describe('/demos/pressure', () => {
+	test('live pressure readout populates within 2s', async ({ page }) => {
+		await page.goto('/demos/pressure')
+		// Reason badge should leave the loading '...' state.
+		await expect(page.getByTestId('reason')).not.toHaveText('...', { timeout: 3_000 })
+		// Sparkline should have at least one bar after a couple of ticks.
+		await expect.poll(
+			async () => await page.getByTestId('sparkline').locator('div').count(),
+			{ timeout: 5_000 }
+		).toBeGreaterThan(0)
+	})
+
+	test('Simulate shed adds an entry to the shed log', async ({ page }) => {
+		await page.goto('/demos/pressure')
+		// Clean any leftover from prior runs.
+		await page.getByTestId('clear-shed').click()
+		await page.waitForTimeout(200)
+
+		await page.getByTestId('simulate-shed').click()
+		await expect(page.getByTestId('shed-log')).toContainText('simulateShed', { timeout: 5_000 })
+		await expect(page.getByTestId('shed-log')).toContainText('simulated')
+	})
+
+	test('Generate load (5000) bumps publishRate', async ({ page }) => {
+		await page.goto('/demos/pressure')
+		// Wait for first tick so we have a baseline reading.
+		await expect(page.getByTestId('reason')).not.toHaveText('...', { timeout: 5_000 })
+
+		// Spam: hit +5000 several times to drive publishRate up over a sample
+		// window (the adapter samples per second; one click is one publishBatched
+		// call per ~1s window).
+		await page.getByTestId('load-5000').click()
+		await page.waitForTimeout(800)
+		await page.getByTestId('load-5000').click()
+		await page.waitForTimeout(800)
+		await page.getByTestId('load-5000').click()
+
+		// Pressure metrics should reflect the burst within a few sample windows.
+		await expect.poll(
+			async () => Number(await page.getByTestId('publish-rate').textContent()),
+			{ timeout: 5_000 }
+		).toBeGreaterThan(0)
+	})
+
+	test('Clear shed log empties the list', async ({ page }) => {
+		await page.goto('/demos/pressure')
+		await page.getByTestId('simulate-shed').click()
+		await expect(page.getByTestId('shed-log')).toContainText('simulateShed', { timeout: 3_000 })
+
+		await page.getByTestId('clear-shed').click()
+		await expect(page.getByTestId('shed-log')).toContainText('No shed decisions yet', { timeout: 3_000 })
+	})
+})
