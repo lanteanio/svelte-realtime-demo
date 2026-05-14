@@ -27,16 +27,18 @@
 		clearFiles
 	} from '$live/demos/upload'
 
-	// Pin a fixed 64KB chunk size so the dedup story stays clean across
-	// uploads. Without this, live.upload's auto-discovery uses
-	// 12KB on the first upload and ~943KB after the platform's
-	// maxPayloadLength is announced; the chunk boundaries differ between
-	// runs, so the SHA-256 hashes never match and the cache never hits.
-	// Adapter default `maxPayloadLength` raised from 16KB to 1MB in
-	// , so 1MB chunks ride the new default with no extra
-	// adapter config required. 7-8 chunks for a 6.84MB file, dedup
-	// math stays clean.
-	configure({ upload: { chunkSize: 1024 * 1024 } })
+	// Pin a fixed frame size so the dedup story stays clean across
+	// uploads. Without this, live.upload's auto-discovery uses 12KB on
+	// the first upload and the adapter cap (1MB by default) thereafter;
+	// the chunk boundaries differ between runs, so the SHA-256 hashes
+	// never match and the cache never hits.
+	//
+	// `frameSize` is the max wire-frame bytes per chunk -- the framework
+	// subtracts the 10/12+argsLen envelope automatically, so this value
+	// can equal the adapter's maxPayloadLength exactly without overflow.
+	// 512KB picks an interesting middle: ~14 chunks for a 6.84MB file
+	// (clean dedup visualisation), no quibble with the adapter cap.
+	configure({ upload: { frameSize: 512 * 1024 } })
 
 	let { data } = $props()
 	const me = $derived(data.identity)

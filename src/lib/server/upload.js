@@ -148,6 +148,31 @@ export function removeFile(id) {
 export const CHUNK_REDIS_PREFIX = 'demo-upload:chunk:'
 
 /**
+ * In-flight upload counter. Incremented at handler-entry, decremented in
+ * a finally so an abort / throw still releases the slot. Used by the
+ * 5-minute upload purge cron to skip when an upload is actively writing
+ * - clearing chunks mid-stream would yank already-stored bytes from
+ * under the handler.
+ *
+ * Per-instance: a multi-worker deploy would need a Redis-backed
+ * counter to be cluster-aware. Single-instance is the current deploy
+ * mode (see memory project_deployment.md); upgrade when that changes.
+ */
+let _activeUploads = 0
+
+export function beginUpload() {
+	_activeUploads++
+}
+
+export function endUpload() {
+	if (_activeUploads > 0) _activeUploads--
+}
+
+export function activeUploadCount() {
+	return _activeUploads
+}
+
+/**
  * Drop every in-memory file and the chunk buffer. Returns the file
  * count before wipe so the caller can publish 'deleted' events with
  * the ids in scope.

@@ -18,6 +18,7 @@
 -->
 <script>
 	import { onMount } from 'svelte'
+	import { SvelteSet } from 'svelte/reactivity'
 	import {
 		myFromSeqState,
 		eventStream
@@ -36,6 +37,18 @@
 	let subscribed = $state(true)
 	let pausedAt = $state(/** @type {number | null} */ (null))
 
+	// Replay-buffer gap-fill detection. The framework delivers buffered
+	// events with their ORIGINAL `tier: 'live'` tag, indistinguishable
+	// on the wire from real-time ticks. To make tier-1 visible in the
+	// UI we capture (pausedAtSeq, resumedAt) on each pause/resume cycle
+	// and locally tag any incoming event whose seq overshoots
+	// pausedAtSeq AND whose server-side ts predates the resume as
+	// replay-buffer fill. Pure UI - the server data is unchanged.
+	let pausedAtSeq = $state(0)
+	let resumedAt = $state(0)
+	let replayFillSeqs = new SvelteSet()
+	let replayBurstCount = $state(0)
+
 	// Merge incoming SDK values into the local display list by id rather
 	// than replacing wholesale. Without this, a pause+resume cycle that
 	// clears the SDK's cached value mid-flight clobbers the page's
@@ -50,7 +63,20 @@
 			const arr = Array.isArray(v) ? v : []
 			if (arr.length === 0) return
 			const merged = new Map(entries.map((e) => [e.id, e]))
-			for (const e of arr) merged.set(e.id, e)
+			for (const e of arr) {
+				merged.set(e.id, e)
+				if (
+					resumedAt > 0 &&
+					e.tier === 'live' &&
+					e.seq > pausedAtSeq &&
+					e.ts < resumedAt
+				) {
+					if (!replayFillSeqs.has(e.seq)) {
+						replayFillSeqs.add(e.seq)
+						replayBurstCount++
+					}
+				}
+			}
 			entries = [...merged.values()].sort((a, b) => b.seq - a.seq)
 		})
 		return () => off()
@@ -75,11 +101,14 @@
 
 	function togglePause() {
 		if (subscribed) {
+			pausedAtSeq = entries.length > 0 ? entries[0].seq : 0
 			subscribed = false
 			pausedAt = Date.now()
+			replayBurstCount = 0
 		} else {
 			subscribed = true
 			pausedAt = null
+			resumedAt = Date.now()
 		}
 	}
 
@@ -93,6 +122,27 @@
 		if (pausedAt === null) return 0
 		return Math.max(0, Math.round((nowMs - pausedAt) / 1000))
 	}
+
+	// Banner stays up for 5s after resume so a user who looked away
+	// catches the gap-fill confirmation.
+	const showReplayBanner = $derived(
+		subscribed &&
+		resumedAt > 0 &&
+		replayBurstCount > 0 &&
+		(nowMs - resumedAt) < 5000
+	)
+
+	// Live countdown while paused: how many more seconds until the
+	// replay buffer overflows, surfacing the fromSeq tier on resume.
+	const fromSeqHint = $derived.by(() => {
+		if (subscribed) return null
+		const elapsed = pausedFor()
+		const remaining = state.storeRetain - elapsed
+		if (remaining > 0) {
+			return `Pause ${remaining}s more (${remaining + elapsed}s total) to overflow the replay buffer and surface the fromSeq tier on resume.`
+		}
+		return `Buffer overflowed (${elapsed}s paused). Resume to see the fromSeq tier fill the oldest missed events.`
+	})
 
 	function timeOf(ts) {
 		return new Date(ts).toLocaleTimeString()
@@ -144,15 +194,31 @@
 					<span class="badge badge-success badge-sm" data-testid="tier-live">live: {tierCounts.live}</span>
 					<span class="badge badge-info badge-sm" data-testid="tier-rehydrate">rehydrate: {tierCounts.rehydrate}</span>
 					<span class="badge badge-warning badge-sm" data-testid="tier-fromseq">fromSeq: {tierCounts.fromSeq}</span>
+					{#if replayFillSeqs.size > 0}
+						<span class="badge badge-secondary badge-sm" data-testid="tier-replay">replay: {replayFillSeqs.size}</span>
+					{/if}
 				</span>
 			</div>
-			<p class="text-xs opacity-60">
-				Replay buffer covers up to {state.storeRetain} events
-				(roughly {state.storeRetain} seconds at 1Hz). Pause longer
-				than that to surface the <code>fromSeq</code> tier.
-			</p>
+			{#if fromSeqHint}
+				<p class="text-xs opacity-70" data-testid="fromseq-hint">{fromSeqHint}</p>
+			{:else}
+				<p class="text-xs opacity-60">
+					Replay buffer covers up to {state.storeRetain} events
+					(roughly {state.storeRetain} seconds at 1Hz). Pause longer
+					than that to surface the <code>fromSeq</code> tier.
+				</p>
+			{/if}
 		</div>
 	</section>
+
+	{#if showReplayBanner}
+		<div class="alert alert-info py-2 text-sm" data-testid="replay-banner">
+			Filled <strong>{replayBurstCount}</strong> event{replayBurstCount === 1 ? '' : 's'}
+			from the replay buffer (tier 1). Server-side <code>tier: 'live'</code> is preserved;
+			the <span class="badge badge-secondary badge-xs">replay</span> badge below marks
+			which rows arrived via gap-fill rather than real-time.
+		</div>
+	{/if}
 
 	<!-- Events list -->
 	<section class="card bg-base-100 border border-base-300" data-testid="events-section">
@@ -167,6 +233,9 @@
 							<span class="opacity-50 w-20">{timeOf(e.ts)}</span>
 							<span class="opacity-50 w-12 text-right">#{e.seq}</span>
 							<span class="badge badge-xs {tierBadgeClass(e.tier)}" data-testid={'event-tier-' + e.id}>{e.tier}</span>
+							{#if replayFillSeqs.has(e.seq)}
+								<span class="badge badge-xs badge-secondary" data-testid={'event-replay-' + e.id}>replay</span>
+							{/if}
 							<span class="flex-1 truncate" data-testid="event-message">{e.message}</span>
 						</li>
 					{/each}

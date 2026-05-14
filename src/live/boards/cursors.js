@@ -18,14 +18,23 @@ import { TOPICS } from '$lib/server/topics'
 /** Register this connection as present on the given board. */
 export const joinBoard = live(async (ctx, boardId) => {
 	if (ctx.shed('background')) throw new LiveError('OVERLOADED', 'Server under pressure, retry shortly')
-	await presence.join(ctx.ws, TOPICS.boardPresence(boardId), ctx.platform)
+	const topic = TOPICS.boardPresence(boardId)
+	await presence.join(ctx.ws, topic, ctx.platform)
+	// cursor.attach is required as of extensions next.14: the adapter no
+	// longer wire-subscribes clients to `__cursor:` topics, so cross-tab
+	// cursors land in an empty subscriber set without this call. attach
+	// uses platform.subscribe (server-trust path) and folds the initial
+	// snapshot send into the same call.
+	await cursor.attach(ctx.ws, topic, ctx.platform)
 })
 
 /** Remove this connection from the board's presence list and cursor overlay. */
 export const leaveBoard = live(async (ctx, boardId) => {
 	// leave is not shed - letting users free resources is always allowed
-	await presence.leave(ctx.ws, ctx.platform, TOPICS.boardPresence(boardId))
-	cursor.remove(ctx.ws, ctx.platform, TOPICS.boardPresence(boardId))
+	const topic = TOPICS.boardPresence(boardId)
+	await presence.leave(ctx.ws, ctx.platform, topic)
+	cursor.detach(ctx.ws, topic, ctx.platform)
+	cursor.remove(ctx.ws, ctx.platform, topic)
 })
 
 /** Update this user's cursor position on the board canvas. */

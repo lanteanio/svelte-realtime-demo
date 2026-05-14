@@ -60,57 +60,6 @@ live.configurePush({
 	remoteRegistry: registry
 })
 
-/**
- * Topics that get replay capture for session-resume support.
- *
- * Per-board: `notes`, `settings`, `activity` - streams a reconnecting
- * client can fall behind on by a few seconds and visibly notice the
- * refetch flicker. presence and cursor topics are excluded; those are
- * inherently latest-state-wins.
- *
- * Demo: `demos:counter:tick` for the /demos/counter-resume showcase
- * (gap-fill of every tick that fired while offline).
- */
-const REPLAY_TOPIC_RE = /^(board:[^:]+:(notes|settings|activity)|demos:counter:tick|demos:fromseq:events)$/
-
-/**
- * Wrap the bus-wrapped platform once more so realtime can read replay
- * buffer state via `platform.replay` and writes to whitelisted topics
- * land in the buffer. Single-event publishes route through replay.publish
- * (which fans out via the underlying platform.publish at the end);
- * publishBatched events on whitelisted topics route per-event through
- * replay.publish so they get captured too, at the cost of losing the
- * wire-batched fast path for those specific topics. publishBatched on
- * non-whitelisted topics keeps the wire-batched fast path.
- */
-function wrapWithReplay(p) {
-	const wrapped = bus.wrap(p)
-	return new Proxy(wrapped, {
-		get(target, prop, receiver) {
-			if (prop === 'replay') return replay
-			if (prop === 'publish') return (topic, event, data, opts) => {
-				// replay.publish stores in Redis + locally fans out. With
-				// localFanoutOnStorageFailure: true on the replay factory,
-				// it also falls through to local fanout when storage fails.
-				if (REPLAY_TOPIC_RE.test(topic)) return replay.publish(target, topic, event, data)
-				return target.publish(topic, event, data, opts)
-			}
-			if (prop === 'publishBatched') return (messages) => {
-				const passThrough = []
-				for (const m of messages) {
-					if (REPLAY_TOPIC_RE.test(m.topic)) {
-						replay.publish(target, m.topic, m.event, m.data)
-					} else {
-						passThrough.push(m)
-					}
-				}
-				if (passThrough.length > 0) return target.publishBatched(passThrough)
-			}
-			return Reflect.get(target, prop, receiver)
-		}
-	})
-}
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
@@ -196,6 +145,12 @@ export function upgrade({ cookies }) {
  * shape is forward-compatible.
  */
 export function init({ platform }) {
+	// Stash the replay extension on the source platform so realtime's
+	// auto-replay routing (svelte-realtime next.21) can find the buffer
+	// on every wrapped seam. `bus.wrap()` (extensions next.15) forwards
+	// `.replay` via a live getter, so any per-tick / per-message
+	// re-wrap also sees it.
+	platform.replay = replay
 	bus.activate(platform)
 	setCronPlatform(platform)
 
@@ -221,12 +176,10 @@ export function init({ platform }) {
 	// watcher correctly.
 	_activateDerived(platform)
 	wirePublishRateMetrics(platform, metrics, { topN: 20 })
-	// `bus` enables cluster-wide cron fan-out. Without
-	// it, leader-only cron ticks publish on the elected worker only and
-	// remote subscribers see nothing - a cluster-cron tick is invisible
-	// to anyone connected to the follower workers. With it, every cron
-	// fire wraps the platform with `bus.wrap(...)` before publishing so
-	// the publish travels to Redis and fans out to every instance.
+	// `bus` gives cron ticks cluster-wide fan-out. The cron tick wraps
+	// _cronPlatform with bus.wrap on each fire; bus.wrap forwards
+	// `.replay` (since extensions next.15) so the framework's
+	// auto-replay routing finds the buffer on the wrapped seam too.
 	configureCron({ leader: () => leader.isLeader(), bus })
 }
 
@@ -403,7 +356,10 @@ const THROTTLED_RPCS = new Set(['boards/notes/moveNote', 'boards/cursors/moveCur
  * client gets a RATE_LIMITED error with a countdown.
  */
 export const message = createMessage({
-	platform: wrapWithReplay,
+	// bus.wrap fans out to Redis for cluster delivery and (since
+	// extensions next.15) forwards platform.replay so realtime's
+	// auto-replay routing reaches the buffer.
+	platform: (p) => bus.wrap(p),
 	async beforeExecute(ws, rpcPath) {
 		if (THROTTLED_RPCS.has(rpcPath)) return
 		const { allowed, resetMs } = await limiter.consume(ws)

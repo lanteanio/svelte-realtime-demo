@@ -49,6 +49,9 @@ import {
 	statsSnapshot,
 	purgeMemory,
 	purgeRedisChunks,
+	beginUpload,
+	endUpload,
+	activeUploadCount,
 	MAX_FILES,
 	MAX_FILE_BYTES,
 	MAX_CHUNK_BYTES,
@@ -110,87 +113,95 @@ export const uploadFile = live.upload(async (ctx, args) => {
 	const userId = ctx.user?.id ?? null
 	const userName = ctx.user?.name ?? null
 
-	const hashes = []
-	let totalBytes = 0
-	let dedupedChunks = 0
+	// Mark in-flight so the upload purge cron defers while we're writing.
+	// finally runs on every exit path (success, throw, signal abort) so
+	// the counter cannot leak.
+	beginUpload()
+	try {
+		const hashes = []
+		let totalBytes = 0
+		let dedupedChunks = 0
 
-	for await (const chunk of ctx.stream) {
-		if (ctx.signal.aborted) break
-		if (chunk.byteLength === 0) continue
-		if (chunk.byteLength > MAX_CHUNK_BYTES) {
-			throw new LiveError('VALIDATION', `chunk too large (max ${MAX_CHUNK_BYTES})`)
-		}
+		for await (const chunk of ctx.stream) {
+			if (ctx.signal.aborted) break
+			if (chunk.byteLength === 0) continue
+			if (chunk.byteLength > MAX_CHUNK_BYTES) {
+				throw new LiveError('VALIDATION', `chunk too large (max ${MAX_CHUNK_BYTES})`)
+			}
 
-		const hash = sha256Hex(chunk)
-		let dedup = false
+			const hash = sha256Hex(chunk)
+			let dedup = false
 
-		if (chunkIdempotency) {
-			const slot = await chunkIdempotency.acquire(hash)
-			if (slot.acquired) {
-				storeChunk(hash, chunk)
-				await slot.commit({ stored: true, byteLength: chunk.byteLength })
+			if (chunkIdempotency) {
+				const slot = await chunkIdempotency.acquire(hash)
+				if (slot.acquired) {
+					storeChunk(hash, chunk)
+					await slot.commit({ stored: true, byteLength: chunk.byteLength })
+				} else {
+					dedup = true
+				}
 			} else {
-				dedup = true
+				if (!storeChunk(hash, chunk)) dedup = true
 			}
-		} else {
-			if (!storeChunk(hash, chunk)) dedup = true
+
+			hashes.push(hash)
+			totalBytes += chunk.byteLength
+			if (dedup) dedupedChunks++
 		}
 
-		hashes.push(hash)
-		totalBytes += chunk.byteLength
-		if (dedup) dedupedChunks++
-	}
+		if (ctx.signal.aborted) {
+			throw new LiveError('CANCELLED', 'upload cancelled')
+		}
+		if (hashes.length === 0) {
+			throw new LiveError('VALIDATION', 'empty upload')
+		}
+		if (totalBytes > MAX_FILE_BYTES) {
+			throw new LiveError('VALIDATION', `file too large (max ${MAX_FILE_BYTES} bytes)`)
+		}
 
-	if (ctx.signal.aborted) {
-		throw new LiveError('CANCELLED', 'upload cancelled')
-	}
-	if (hashes.length === 0) {
-		throw new LiveError('VALIDATION', 'empty upload')
-	}
-	if (totalBytes > MAX_FILE_BYTES) {
-		throw new LiveError('VALIDATION', `file too large (max ${MAX_FILE_BYTES} bytes)`)
-	}
+		const fileId = sha256Hex(Buffer.from(hashes.join(''), 'utf8'))
+		const record = {
+			id: fileId,
+			filename,
+			mime,
+			totalBytes,
+			totalChunks: hashes.length,
+			dedupedChunks,
+			hashes,
+			userId,
+			userName,
+			uploadedAt: Date.now()
+		}
 
-	const fileId = sha256Hex(Buffer.from(hashes.join(''), 'utf8'))
-	const record = {
-		id: fileId,
-		filename,
-		mime,
-		totalBytes,
-		totalChunks: hashes.length,
-		dedupedChunks,
-		hashes,
-		userId,
-		userName,
-		uploadedAt: Date.now()
+		const evictedIds = appendFile(record)
+
+		for (const evictedId of evictedIds) {
+			ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id: evictedId })
+		}
+		const publicRecord = stripHashes(record)
+		ctx.publish(TOPICS.demoUploadFiles, 'created', publicRecord)
+		ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
+
+		if (userId) {
+			live.notify(
+				{ userId },
+				PUSH_EVENT,
+				{
+					fileId: record.id,
+					filename: record.filename,
+					totalBytes: record.totalBytes,
+					dedupedChunks: record.dedupedChunks,
+					totalChunks: record.totalChunks,
+					uploadedAt: record.uploadedAt,
+					senderRequestId: ctx.requestId ?? null
+				}
+			)
+		}
+
+		return publicRecord
+	} finally {
+		endUpload()
 	}
-
-	const evictedIds = appendFile(record)
-
-	for (const evictedId of evictedIds) {
-		ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id: evictedId })
-	}
-	const publicRecord = stripHashes(record)
-	ctx.publish(TOPICS.demoUploadFiles, 'created', publicRecord)
-	ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
-
-	if (userId) {
-		live.notify(
-			{ userId },
-			PUSH_EVENT,
-			{
-				fileId: record.id,
-				filename: record.filename,
-				totalBytes: record.totalBytes,
-				dedupedChunks: record.dedupedChunks,
-				totalChunks: record.totalChunks,
-				uploadedAt: record.uploadedAt,
-				senderRequestId: ctx.requestId ?? null
-			}
-		)
-	}
-
-	return publicRecord
 }, {
 	maxSize: MAX_FILE_BYTES,
 	maxConcurrentPerSession: 4,
@@ -204,15 +215,35 @@ export const uploadFile = live.upload(async (ctx, args) => {
  * the user uploaded survives. Chunk bytes are reproducible per-hash,
  * so dropping the cache only forfeits the cross-restart dedup short-
  * circuit - real correctness is unaffected.
+ *
+ * Skip-if-busy: an upload mid-stream has staged chunks in memory + a
+ * cluster-shared Redis idempotency receipt for each. Clearing both
+ * would yank already-committed chunks from under the handler, leaving
+ * a file record on finalize that references missing bytes. So when
+ * activeUploadCount() > 0 we defer to the next 5-min tick. Bounded by
+ * MAX_CONSECUTIVE_SKIPS so a sustained upload-attack can't starve the
+ * purge - after ~30min of skips we force-wipe regardless.
  */
+const MAX_CONSECUTIVE_SKIPS = 6
+let _consecutiveSkips = 0
+
 export async function purge(ctx) {
+	const active = activeUploadCount()
+	if (active > 0 && _consecutiveSkips < MAX_CONSECUTIVE_SKIPS) {
+		_consecutiveSkips++
+		return { skipped: true, activeUploads: active, skipsSoFar: _consecutiveSkips }
+	}
+	const forced = active > 0
+	_consecutiveSkips = 0
 	const ids = purgeMemory()
 	for (const id of ids) {
 		ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id })
 	}
 	ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
 	const redisDeleted = await purgeRedisChunks()
-	return { files: ids.length, redisKeys: redisDeleted }
+	return forced
+		? { files: ids.length, redisKeys: redisDeleted, forced: true, activeUploads: active }
+		: { files: ids.length, redisKeys: redisDeleted }
 }
 
 /**
