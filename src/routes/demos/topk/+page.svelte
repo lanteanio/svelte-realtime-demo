@@ -1,5 +1,5 @@
 <!--
-	/demos/topk -- four leaderboards from one event firehose,
+	/demos/topk - four leaderboards from one event firehose,
 	declared in one config via live.aggregate({ windows }).
 
 	Open the page; the firehose ticks at 1Hz publishing N events per
@@ -67,11 +67,11 @@
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Top-K leaderboards: four windows, one config</h1>
 		<p class="text-sm opacity-70 mt-1">
 			One firehose, four leaderboards. Sliding (10s and 1min), tumbling (per-minute), and lifetime,
-			all declared in a single <code>live.aggregate(&#123; windows &#125;)</code> block (next.9). Crank
+			all declared in a single <code>live.aggregate(&#123; windows &#125;)</code> block. Crank
 			the speed slider; watch sliding twitch while the minute window resets sharply on the boundary
 			and lifetime drifts up.
 		</p>

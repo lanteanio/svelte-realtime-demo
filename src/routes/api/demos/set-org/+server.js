@@ -1,5 +1,5 @@
 /**
- * POST /api/demos/set-org -- rewrite the identity cookie's org field.
+ * POST /api/demos/set-org - rewrite the identity cookie's org field.
  *
  * Used by /demos/denials to switch the user between Acme and Globex
  * for the denials demo. The cookie is the source of truth for
@@ -28,7 +28,7 @@ export async function POST({ request, cookies }) {
 		identity = null
 	}
 	if (!identity || typeof identity !== 'object') {
-		error(400, 'No identity cookie -- visit a page first to bootstrap one')
+		error(400, 'No identity cookie - visit a page first to bootstrap one')
 	}
 
 	identity.org = org

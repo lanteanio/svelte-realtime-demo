@@ -1,5 +1,5 @@
 /**
- * Board page server load -- resolves a URL slug to a board UUID.
+ * Board page server load - resolves a URL slug to a board UUID.
  *
  * The slug is the human-readable part of the URL (e.g. "plucky-taco-576").
  * The board_id (UUID) is what all the RPCs use internally. This load

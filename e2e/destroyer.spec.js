@@ -1,5 +1,5 @@
 /**
- * Destroyer test -- find the absolute ceiling of what the server can handle.
+ * Destroyer test - find the absolute ceiling of what the server can handle.
  *
  * Ramps up connections in waves: 1K, 2K, 3K, 5K, 7K, 10K.
  * At each plateau, all users move cursors for 10 seconds while we measure:
@@ -82,7 +82,7 @@ function startCursorMovement(user, boardId) {
 				}));
 			}
 		} catch {}
-	}, 32); // Match server's per-connection throttle -- no wasted messages
+	}, 32); // Match server's per-connection throttle - no wasted messages
 }
 
 async function measureFrames(page) {
@@ -114,7 +114,7 @@ async function measureFrames(page) {
 test.describe('Destroyer Test', () => {
 	test.setTimeout(1200_000); // 20 minutes
 
-	test('ramp to 10K users -- find the ceiling', async ({ browser }) => {
+	test('ramp to 10K users - find the ceiling', async ({ browser }) => {
 		const ctx = await browser.newContext();
 		const page = await ctx.newPage();
 
@@ -134,7 +134,7 @@ test.describe('Destroyer Test', () => {
 		if (!boardId) throw new Error('Could not extract boardId from page');
 
 		console.log(`\n${'='.repeat(60)}`);
-		console.log(`  DESTROYER TEST -- finding the ceiling`);
+		console.log(`  DESTROYER TEST - finding the ceiling`);
 		console.log(`  Board: ${BOARD_URL}`);
 		console.log(`  UUID:  ${boardId}`);
 		console.log(`  Levels: ${LEVELS.join(', ')}`);

@@ -1,5 +1,5 @@
 <!--
-	Board page -- the main collaborative canvas.
+	Board page - the main collaborative canvas.
 
 	This is where all the action happens. Users see a shared canvas with
 	sticky notes they can create, drag, edit, delete, and rearrange.

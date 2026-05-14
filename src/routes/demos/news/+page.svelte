@@ -125,7 +125,7 @@
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Newsroom: cron + windowed aggregate + derived + webhook</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Four realtime primitives in one page. A 1Hz <code>live.cron</code> firehose feeds a windowed

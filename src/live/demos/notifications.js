@@ -1,34 +1,34 @@
 /**
- * /demos/notifications -- live.push request/reply + cluster registry
+ * /demos/notifications - live.push request/reply + cluster registry
  * + 6-field live.cron scheduler.
  *
  * The pitch: pick another connected user, type a one-liner, hit Send.
  * The server calls `live.push({ userId }, 'demos:notification', ...)`
- * and AWAITS a reply -- the recipient's tab pops a card with two
+ * and AWAITS a reply - the recipient's tab pops a card with two
  * buttons (Got it / Dismiss); the value they click comes back as the
  * sender's RPC return. With "schedule N seconds" checked, the message
  * lands in an in-memory queue drained by a `live.cron('* * * * * *')`
- * tick (next.7 6-field cron, fires every second). Cancel removes a
+ * tick (6-field cron, fires every second). Cancel removes a
  * pending entry before it fires.
  *
  * Three feature primitives in one demo:
  *
  *  - live.push(target, event, data, { timeoutMs })
- *      -- realtime's server-initiated request/reply. Local-instance
+ *      - realtime's server-initiated request/reply. Local-instance
  *      hits go through `platform.request(ws, ...)` (no Redis hop);
  *      cross-instance hits fall through `live.configurePush({
  *      remoteRegistry })` to `registry.request(userId, ...)`. Wired
  *      in src/hooks.ws.js.
  *
  *  - The extensions cluster connection registry
- *      -- src/lib/server/redis.js exports `registry`; hooks.ws.js
+ *      - src/lib/server/redis.js exports `registry`; hooks.ws.js
  *      runs `registry.hooks.open` / `.close` per connection so the
  *      Redis-backed userId -> instance map stays current. Single-
  *      instance dev never hits the cluster path, but the wiring is
  *      production-shaped.
  *
  *  - live.cron with a 6-field schedule
- *      -- next.7 added seconds-resolution cron expressions. Once any
+ *      - added seconds-resolution cron expressions. Once any
  *      6-field schedule is registered, the engine's tick adapts from
  *      60s to 1Hz (sticky). Single-flight: a long-running tick won't
  *      overlap with itself; pushes inside the tick are fire-and-forget
@@ -51,7 +51,7 @@ const MAX_SCHEDULE_SEC = 120
 /** @type {Map<string, { id: string, fromUserId: string, fromUserName: string, fromUserColor: string, toUserId: string, toUserName: string, text: string, fireAt: number }>} */
 const scheduled = new Map()
 
-/** @type {Array<object>} -- newest first, capped at ACTIVITY_CAP. */
+/** @type {Array<object>} - newest first, capped at ACTIVITY_CAP. */
 const activity = []
 
 function appendActivity(entry, ctx) {
@@ -109,6 +109,27 @@ async function deliverPush(entry, ctx) {
 		}, ctx)
 		return { ok: false, kind, error: err?.message ?? String(err) }
 	}
+}
+
+/**
+ * Wipe the scheduler queue and the activity log. A scheduled push that
+ * was queued 25 minutes ago and would have fired into a stale UI is
+ * worse than cancelling it, so we drop pending entries on purge.
+ * In-flight live.push awaiters (immediate sends) are not affected;
+ * those resolve naturally.
+ */
+export async function purge(ctx) {
+	const scheduledCount = scheduled.size
+	for (const id of Array.from(scheduled.keys())) {
+		ctx.publish(TOPICS.demoNotificationsScheduled, 'deleted', { id })
+	}
+	scheduled.clear()
+	const activityCount = activity.length
+	for (const entry of activity) {
+		ctx.publish(TOPICS.demoNotificationsActivity, 'deleted', { id: entry.id })
+	}
+	activity.length = 0
+	return { scheduled: scheduledCount, activity: activityCount }
 }
 
 /**
@@ -225,11 +246,11 @@ export const recentActivity = live.stream(
  *
  * Scans for due entries, removes them from the queue, and fires each
  * push fire-and-forget. The push's reply (or timeout / offline) lands
- * in the activity stream when it resolves -- the tick itself does NOT
+ * in the activity stream when it resolves - the tick itself does NOT
  * await individual deliveries, so a recipient with the inbox closed
  * can't block the next tick.
  *
- * Single-flight in next.7: if a tick body somehow runs longer than
+ * Single-flight: if a tick body somehow runs longer than
  * 1s, the next tick is skipped (visible as `cronCount{status:'skipped'}`
  * in metrics) instead of overlapping. Returning undefined suppresses
  * the cron's automatic 'set' publish; we use ctx.publish per affected

@@ -36,10 +36,22 @@
 	let subscribed = $state(true)
 	let pausedAt = $state(/** @type {number | null} */ (null))
 
+	// Merge incoming SDK values into the local display list by id rather
+	// than replacing wholesale. Without this, a pause+resume cycle that
+	// clears the SDK's cached value mid-flight clobbers the page's
+	// history to [] on the first callback firing of the resubscribe,
+	// even though the wire-level gap-fill (replay buffer / fromSeq)
+	// delivers the missed entries a moment later. By merging we preserve
+	// the older rows the user has already seen and stamp the new ones
+	// with whatever tier the server tagged them.
 	$effect(() => {
 		if (!subscribed) return
 		const off = eventStream.subscribe((v) => {
-			entries = Array.isArray(v) ? v.slice().sort((a, b) => b.seq - a.seq) : []
+			const arr = Array.isArray(v) ? v : []
+			if (arr.length === 0) return
+			const merged = new Map(entries.map((e) => [e.id, e]))
+			for (const e of arr) merged.set(e.id, e)
+			entries = [...merged.values()].sort((a, b) => b.seq - a.seq)
 		})
 		return () => off()
 	})
@@ -89,7 +101,7 @@
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Reconnect: three-tier gap fill via delta.fromSeq</h1>
 		<p class="text-sm opacity-70 mt-1">
 			A 1Hz <code>live.cron</code> publishes events tagged

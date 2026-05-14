@@ -25,3 +25,4 @@ vite.config.ts.timestamp-*
 test-results
 playwright-report
 source
+_screenshots

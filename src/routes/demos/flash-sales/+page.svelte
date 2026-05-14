@@ -210,7 +210,7 @@
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Flash sales: atomic inventory under contention</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Three products with limited stock. Click Buy and watch the count

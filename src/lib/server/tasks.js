@@ -5,7 +5,7 @@
  *
  *  - createPgClient  : the runner needs a PgClient (Pool + query
  *                      shorthand + lifecycle). We open a separate pool
- *                      from the one in db.js for now; the next.8
+ *                      from the one in db.js for now; the 
  *                      `createPgClient({ pool })` overload would let
  *                      us share, but that requires exposing db.js's
  *                      module-scope pool first. Two-pool footprint is
@@ -13,14 +13,14 @@
  *                      into SvelteKit's lifecycle.
  *
  *  - createTaskRunner: the durable task framework. Auto-migrates
- *                      `svti_tasks` at construction (next.8); runs
+ *                      `svti_tasks` at construction; runs
  *                      internal dispatch + recovery + cleanup sweeps.
  *                      Demo time scales (fenceTtl 10s, heartbeat 1.5s,
  *                      recovery 2s, dispatch 1s) so force-takeover and
  *                      retry flows are visible inside an e2e test run.
  *
  *  - createRedisFence: optional second source of truth for fence
- *                      validity. `tasks.takeover(taskId)` (next.8) uses
+ *                      validity. `tasks.takeover(taskId)` uses
  *                      both: expires the Postgres fence AND releases
  *                      the Redis mirror so the in-flight handler aborts
  *                      on the very next heartbeat tick.
@@ -131,7 +131,7 @@ if (tasks) {
 			backoff: (attempt) => 250 * attempt
 		}
 	})
-	// next.8 fires autoMigrate at construction, but the cron tick may
+	// fires autoMigrate at construction, but the cron tick may
 	// run before it lands. Surface a clean "ready" log so any boot-time
 	// migration error is visible; downstream code uses tasks.list() /
 	// tasks.counts() which await the same migration internally.

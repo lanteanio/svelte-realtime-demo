@@ -2,8 +2,8 @@
  * Database abstraction layer.
  *
  * Two implementations live in this file:
- * 1. PostgreSQL (production) -- used when DATABASE_URL is set
- * 2. In-memory Map (development) -- used when DATABASE_URL is not set
+ * 1. PostgreSQL (production) - used when DATABASE_URL is set
+ * 2. In-memory Map (development) - used when DATABASE_URL is not set
  *
  * Both expose the same function signatures. At the bottom of the file,
  * we export the right implementation based on the environment.
@@ -148,7 +148,7 @@ async function pgUpdateBoard(boardId, fields) {
 	return board
 }
 
-/** Minimal query -- only fetches the IDs for ownership verification. */
+/** Minimal query - only fetches the IDs for ownership verification. */
 function pgGetNote(noteId) {
 	return sql(`SELECT note_id, board_id FROM note WHERE note_id = $1`, [noteId]).then(rows => rows[0])
 }

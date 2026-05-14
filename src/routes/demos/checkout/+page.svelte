@@ -1,5 +1,5 @@
 <!--
-	/demos/checkout -- idempotency demo.
+	/demos/checkout - idempotency demo.
 
 	Two buttons:
 	- "Place Order" generates a fresh idempotencyKey per click.
@@ -56,7 +56,7 @@
 
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Idempotency under double-click</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Click "Retry x5 (same key)" to fire five rapid RPCs with the same

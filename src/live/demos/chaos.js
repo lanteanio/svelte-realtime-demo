@@ -1,11 +1,11 @@
 /**
- * /demos/chaos -- deterministic chaos with seed + drop rate.
+ * /demos/chaos - deterministic chaos with seed + drop rate.
  *
  * The pitch: with a (seed, dropRate) pair, the decision sequence is
  * fully reproducible. Run twice with the same seed; get the same
  * green/red drop pattern. This is the property that
  * `realtime`'s `createTestEnv({ chaos: { dropRate, seed } })` test
- * harness gives you in unit tests -- captured here as a runtime
+ * harness gives you in unit tests - captured here as a runtime
  * surface so you can SEE the determinism before relying on it in
  * a test that asserts "this seq fails this way".
  *
@@ -19,7 +19,7 @@
  * - Per-user state: { seed, dropRate, tickN, deliveredN, rng }
  *   keyed by `ctx.user.id`. Module-level Map; cleared on
  *   stopChaos or implicit on connection close (we don't track
- *   close here -- demo accepts the leak).
+ *   close here - demo accepts the leak).
  * - One module-level 100ms ticker arms on first subscribe and
  *   iterates every active user. For each, advance the RNG, decide
  *   drop, publish a record on `demos:chaos:tick:{userId}`. The
@@ -38,7 +38,7 @@ import { TOPICS } from '$lib/server/topics'
 const TICK_MS = 100
 const HISTORY_MAX = 60
 
-// Mulberry32 -- compact, well-distributed, 32-bit-state seedable PRNG.
+// Mulberry32 - compact, well-distributed, 32-bit-state seedable PRNG.
 function makeRng(seedInput) {
 	let s = (Number(seedInput) | 0) >>> 0
 	return function rng() {
@@ -78,10 +78,10 @@ function armTicker(platform) {
 
 /**
  * Per-user tick stream. Single-arity topic-fn (`(ctx) => topic(...)`)
- * is classified as STATIC by the realtime vite plugin (next.8+) so
+ * is classified as STATIC by the realtime vite plugin so
  * the client stub is a `StreamStore`, not a `(...args) => StreamStore`
  * factory. Topic is computed server-side from the authenticated
- * `ctx.user.id` -- secure-by-construction, no client-tamperable arg.
+ * `ctx.user.id` - secure-by-construction, no client-tamperable arg.
  */
 export const chaosTicks = live.stream(
 	(ctx) => TOPICS.demoChaosTick(ctx.user.id),

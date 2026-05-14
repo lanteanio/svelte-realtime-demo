@@ -111,7 +111,7 @@
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Jobs: durable task runner with fence + retry + force-takeover</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Postgres-backed task framework via <code>createTaskRunner</code>. Per-attempt fence in

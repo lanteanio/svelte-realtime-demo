@@ -1,5 +1,5 @@
 /**
- * /demos/pressure -- live admission-shedding control panel.
+ * /demos/pressure - live admission-shedding control panel.
  *
  * The pitch: the destroyer test (e2e/destroyer-standalone.js) ramps
  * 10K connections to find the ceiling. With Phase 3.1's two-tier
@@ -9,19 +9,19 @@
  * recent shed decisions.
  *
  * Streams:
- * - `demos:pressure:tick` -- 500ms heartbeat publishing the current
+ * - `demos:pressure:tick` - 500ms heartbeat publishing the current
  *   pressure snapshot. `merge: 'set'`. Self-arms on first subscribe
  *   the same way /demos/counter-resume does (no static import of
  *   live modules from hooks.ws.js).
- * - `demos:pressure:shed` -- crud merge of recent shed decisions.
+ * - `demos:pressure:shed` - crud merge of recent shed decisions.
  *   Capped at 50 entries client-side via `max`.
  *
  * RPCs:
- * - `generateLoad(count)` -- publishes `count` no-op events to
+ * - `generateLoad(count)` - publishes `count` no-op events to
  *   `demos:pressure:noise` (capped at 5000 to keep the demo from
  *   self-DOSing). Checks `ctx.shed('background')` after; if shed,
  *   publishes a real shed event with the actual pressure reason.
- * - `simulateShed()` -- always publishes a synthetic shed event,
+ * - `simulateShed()` - always publishes a synthetic shed event,
  *   regardless of actual pressure. Lets the page demonstrate the
  *   surface even when the demo's load isn't enough to drive
  *   PUBLISH_RATE past the admission threshold.
@@ -45,12 +45,23 @@ function armTicker(platform) {
 		const snap = platform.pressure
 		// Snapshot getter returns a fresh object each call; safe to
 		// publish directly. Ignore topPublishers in the demo wire
-		// shape -- the readout only needs the four scalar fields.
+		// shape - the readout only needs the scalar fields. Heap
+		// usage is sampled independently here because the adapter's
+		// pressure snapshot only exposes `memoryMB` (RSS), and the
+		// MEMORY reason is computed from `heapUsed / heapTotal` -
+		// surfacing both lets the page explain WHY MEMORY fires.
+		const mem = process.memoryUsage()
+		const heapTotalMB = mem.heapTotal / (1024 * 1024)
+		const heapUsedMB = mem.heapUsed / (1024 * 1024)
+		const heapPct = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0
 		const payload = {
 			active: !!snap.active,
 			subscriberRatio: snap.subscriberRatio ?? 0,
 			publishRate: snap.publishRate ?? 0,
 			memoryMB: snap.memoryMB ?? 0,
+			heapUsedMB,
+			heapTotalMB,
+			heapPct,
 			reason: snap.reason ?? 'NONE',
 			ts: Date.now()
 		}
@@ -80,16 +91,63 @@ function pushShed(ctx, entry) {
 	ctx.publish(TOPICS.demoPressureShed, 'created', entry)
 }
 
+/**
+ * Spread the burst over ~1.5 seconds in 100ms chunks. The adapter's
+ * pressure sampler runs at 1 Hz; a single-tick `publishBatched(5000)`
+ * spikes `publishCountWindow` to 5000 then resets at the next sample,
+ * giving the snapshot publisher one 500ms tick where it could observe
+ * the spike - easy to miss on a sparkline. Spreading turns the burst
+ * into a sustained rate of `count / 1.5` per second across ~15 chunks,
+ * which the sampler reads as the steady rate for the whole window.
+ *
+ * The `ctx.shed` check fires AFTER the final chunk so it observes the
+ * peak rate the burst drove the platform to. A real shed (reason
+ * surfaces from the pressure snapshot's `reason` field) appends to the
+ * log; a same-tick recovery is normal because the burst stops.
+ */
 export const generateLoad = live(async (ctx, count) => {
 	const safe = Math.min(Math.max(parseInt(count) || 100, 1), LOAD_CAP)
-	const messages = Array.from({ length: safe }, (_, i) => ({
-		topic: TOPICS.demoPressureNoise,
-		event: 'tick',
-		data: { i, ts: Date.now() }
-	}))
-	ctx.platform.publishBatched(messages)
 
-	// Did the burst push us into a shed-able state?
+	// Small bursts (<=200) fire in a single tick so the +100 button
+	// stays snappy. Larger bursts spread over ~1.5s in 100ms chunks
+	// so the adapter's 1Hz pressure sampler observes a sustained rate
+	// across multiple sample windows instead of a microsecond spike
+	// that decays before the snapshot publisher's next 500ms tick.
+	const SMALL_THRESHOLD = 200
+	const SPREAD_MS = 1500
+	const CHUNK_MS = 100
+
+	function buildChunk(start, n) {
+		const messages = new Array(n)
+		for (let i = 0; i < n; i++) {
+			messages[i] = {
+				topic: TOPICS.demoPressureNoise,
+				event: 'tick',
+				data: { i: start + i, ts: Date.now() }
+			}
+		}
+		return messages
+	}
+
+	let sent = 0
+	if (safe <= SMALL_THRESHOLD) {
+		ctx.platform.publishBatched(buildChunk(0, safe))
+		sent = safe
+	} else {
+		const chunks = Math.max(1, Math.round(SPREAD_MS / CHUNK_MS))
+		const perChunk = Math.ceil(safe / chunks)
+		for (let c = 0; c < chunks && sent < safe; c++) {
+			const n = Math.min(perChunk, safe - sent)
+			ctx.platform.publishBatched(buildChunk(sent, n))
+			sent += n
+			if (c < chunks - 1 && sent < safe) {
+				await new Promise((resolve) => setTimeout(resolve, CHUNK_MS))
+			}
+		}
+	}
+
+	// Check pressure AFTER the final chunk so the shed observation
+	// reflects the peak the burst drove the platform to.
 	if (ctx.shed('background')) {
 		const snap = ctx.platform.pressure
 		pushShed(ctx, {
@@ -101,7 +159,7 @@ export const generateLoad = live(async (ctx, count) => {
 			source: 'real'
 		})
 	}
-	return { generated: safe }
+	return { generated: sent }
 })
 
 export const simulateShed = live(async (ctx) => {

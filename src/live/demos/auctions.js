@@ -223,6 +223,16 @@ export const createAuction = live(async (ctx, args) => {
 		}
 	}))
 
+	// Honor the listed duration as a minimum even when all replies land
+	// early. Without this, a single-bidder reply collapses the lot in
+	// milliseconds and reads visually as "click Bid = item sold." The
+	// per-bid `ctx.publish` already fired inside the map, so spectators
+	// keep watching the live waterfall + countdown while we wait here.
+	const remaining = deadlineAt - Date.now()
+	if (remaining > 0) {
+		await new Promise((resolve) => setTimeout(resolve, remaining))
+	}
+
 	activeLots.delete(id)
 	ctx.publish(TOPICS.demoAuctionsActive, 'deleted', { id })
 
@@ -249,6 +259,24 @@ export const createAuction = live(async (ctx, args) => {
 		winnerName: winner.name
 	}
 })
+
+/**
+ * Wipe the recent-results list. Active lots are intentionally NOT
+ * purged: an in-flight createAuction is awaiting Promise.allSettled
+ * over per-bidder live.push calls, and yanking the lot out from under
+ * those awaiters would orphan the seller's RPC. Active lots already
+ * self-evict at their deadline (durationSec, max MAX_DURATION_SEC =
+ * 30s), so the worst case is a 30s wait before the in-memory map
+ * drains itself.
+ */
+export async function purge(ctx) {
+	const count = recentAuctions.length
+	for (const lot of recentAuctions) {
+		ctx.publish(TOPICS.demoAuctionsRecent, 'deleted', { id: lot.id })
+	}
+	recentAuctions.length = 0
+	return { recent: count, activeKept: activeLots.size }
+}
 
 /** Live stream of in-flight lots. */
 export const activeAuctions = live.stream(

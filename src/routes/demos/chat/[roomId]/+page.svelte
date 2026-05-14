@@ -1,5 +1,5 @@
 <!--
-	/demos/chat/[roomId] -- room surface.
+	/demos/chat/[roomId] - room surface.
 
 	Three things on one page:
 

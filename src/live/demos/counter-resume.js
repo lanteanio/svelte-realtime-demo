@@ -1,5 +1,5 @@
 /**
- * /demos/counter-resume -- session resume + replay buffer demo.
+ * /demos/counter-resume - session resume + replay buffer demo.
  *
  * The pitch: drop the network for 10 seconds; counter keeps ticking
  * server-side; reconnect; UI catches up to the latest value with no
@@ -20,7 +20,7 @@
  *   via __replay frames.
  *
  * The ticker arms lazily from the stream's loader on first subscribe.
- * Putting it at module top-level would not work -- the module loads
+ * Putting it at module top-level would not work - the module loads
  * via the realtime registry's lazy import only when a client first
  * touches the stream, and we need a captured platform to publish to.
  */

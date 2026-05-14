@@ -1,19 +1,18 @@
 <!--
-	/demos/denials -- subscribe-denied banner with org switcher.
+	/demos/denials - subscribe-denied banner with org switcher.
 
 	You are an employee of either Acme or Globex (set in your identity
 	cookie). Two audit-log streams render side-by-side; only your own
 	org's stream is allowed. The other returns FORBIDDEN at subscribe
-	time -- via the wire-level subscribe gate in src/hooks.ws.js, which
-	now properly fires for stream subscribes (after the trio bump
-	to adapter@0.5.0-next.14 / extensions@0.5.0-next.6 /
-	realtime@0.5.0-next.6).
+	time - via the wire-level subscribe gate in src/hooks.ws.js, which
+	fires for both wire-level subscribe-batch frames and realtime
+	stream RPCs.
 
 	The page reads denials from two surfaces:
 	- Per-stream `.error` Readable: drives the inline banner on each
 	  card so the denied stream renders contextually.
 	- Adapter-level `denials` Readable: drives the "Recent denials"
-	  list at the bottom. Same reasons, different presentation -- pick
+	  list at the bottom. Same reasons, different presentation - pick
 	  whichever fits the app's UX.
 -->
 <script>
@@ -116,7 +115,7 @@
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Subscribe denials with org switcher</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Two organizations, one identity cookie. Each org's audit log
@@ -245,7 +244,7 @@
 			<code>ws.userData.org</code> doesn't match. The same gate
 			fires for both wire-level <code>subscribe-batch</code> frames
 			(adapter <code>on(topic)</code>) and realtime stream RPCs
-			(via <code>platform.checkSubscribe</code> in next.14+).
+			(via <code>platform.checkSubscribe</code>).
 		</p>
 		<p>
 			Client: per-stream <code>store.error</code> for the inline

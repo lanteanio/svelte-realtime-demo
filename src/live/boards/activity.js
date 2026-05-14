@@ -1,7 +1,7 @@
 /**
- * Activity feed -- live stream only (no RPCs).
+ * Activity feed - live stream only (no RPCs).
  *
- * Activity events are ephemeral -- they're not stored in the database.
+ * Activity events are ephemeral - they're not stored in the database.
  * The initial data is always an empty array. Events arrive via pub/sub
  * as users perform actions on the board.
  *

@@ -2,3 +2,10 @@
 @plugin "daisyui" {
 	themes: light --default, dark;
 }
+
+/* Reserve the vertical scrollbar gutter so demo pages with different
+ * content heights don't shift the sidebar horizontally as they swap
+ * the scrollbar on and off. */
+html {
+	scrollbar-gutter: stable;
+}

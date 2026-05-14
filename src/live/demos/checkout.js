@@ -1,5 +1,5 @@
 /**
- * /demos/checkout -- idempotency under double-click.
+ * /demos/checkout - idempotency under double-click.
  *
  * The pitch: rapid double-clicks (or flaky-reconnect retries) on the
  * same intent fire N RPCs, but only ONE side effect happens. The
@@ -11,7 +11,7 @@
  * Identical keys within the ttl window return the cached result
  * without re-running the handler.
  *
- * Counter is in-memory (demo only -- not durable across restarts).
+ * Counter is in-memory (demo only - not durable across restarts).
  */
 
 import { live } from 'svelte-realtime/server'

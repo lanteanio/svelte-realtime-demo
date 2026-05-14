@@ -1,5 +1,5 @@
 <!--
-	PresenceBar -- shows who's currently on this board.
+	PresenceBar - shows who's currently on this board.
 
 	Displays up to 8 avatar circles with user initials, plus a "+N"
 	overflow badge if there are more users. The "X online" count always

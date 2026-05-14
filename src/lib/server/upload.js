@@ -20,7 +20,7 @@ import { metrics } from '$lib/server/metrics'
 export const MAX_FILES = 30
 export const MAX_FILE_BYTES = 50 * 1024 * 1024
 export const CHUNK_SIZE_BYTES = 64 * 1024
-export const MAX_CHUNK_BYTES = 256 * 1024
+export const MAX_CHUNK_BYTES = 1024 * 1024
 export const MAX_FILENAME_LEN = 200
 
 /**
@@ -143,4 +143,43 @@ export function removeFile(id) {
 	if (at >= 0) fileOrder.splice(at, 1)
 	gcOrphanChunks()
 	return true
+}
+
+export const CHUNK_REDIS_PREFIX = 'demo-upload:chunk:'
+
+/**
+ * Drop every in-memory file and the chunk buffer. Returns the file
+ * count before wipe so the caller can publish 'deleted' events with
+ * the ids in scope.
+ */
+export function purgeMemory() {
+	const ids = fileOrder.slice()
+	files.clear()
+	fileOrder.length = 0
+	chunks.clear()
+	totalBytesStored = 0
+	return ids
+}
+
+/**
+ * Walk every Redis key under the demo-upload chunk prefix and DEL them.
+ * Uses SCAN to avoid blocking the server on KEYS for large keyspaces.
+ * No-op when REDIS_URL is empty (chunkIdempotency null, no keys to
+ * clear). Goes through the wrapper's `key()` helper so any outer
+ * keyPrefix the deployment configures is honored.
+ */
+export async function purgeRedisChunks() {
+	if (!chunkIdempotency || !redis?.redis) return 0
+	const pattern = redis.key(CHUNK_REDIS_PREFIX + '*')
+	let cursor = '0'
+	let total = 0
+	do {
+		const [next, keys] = await redis.redis.scan(cursor, 'MATCH', pattern, 'COUNT', 200)
+		cursor = next
+		if (keys.length > 0) {
+			await redis.redis.del(...keys)
+			total += keys.length
+		}
+	} while (cursor !== '0')
+	return total
 }

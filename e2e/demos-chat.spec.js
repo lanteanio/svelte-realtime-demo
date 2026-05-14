@@ -28,7 +28,7 @@ test.describe('/demos/chat', () => {
 			await a.goto(`/demos/chat/${room}`)
 			await b.goto(`/demos/chat/${room}`)
 
-			// Both contexts subscribed -- presence list reports two users.
+			// Both contexts subscribed - presence list reports two users.
 			await expect.poll(
 				async () => Number((await a.getByTestId('presence-count').textContent())?.split(' ')[0] ?? 0),
 				{ timeout: 5_000 }

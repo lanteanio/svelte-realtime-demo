@@ -1,5 +1,5 @@
 /**
- * Presence-only destroyer -- find the pure connection ceiling.
+ * Presence-only destroyer - find the pure connection ceiling.
  *
  * Same ramp pattern as the cursor destroyer, but users only connect
  * and join board presence. No cursor movement, no continuous messages.
@@ -57,7 +57,7 @@ function connectAndJoin(boardId, index) {
 test.describe('Presence Destroyer', () => {
 	test.setTimeout(1200_000);
 
-	test('ramp to 10K connections -- find presence ceiling', async ({ browser }) => {
+	test('ramp to 10K connections - find presence ceiling', async ({ browser }) => {
 		const ctx = await browser.newContext();
 		const page = await ctx.newPage();
 
@@ -76,10 +76,10 @@ test.describe('Presence Destroyer', () => {
 		if (!boardId) throw new Error('Could not extract boardId from page');
 
 		console.log(`\n${'='.repeat(60)}`);
-		console.log(`  PRESENCE DESTROYER -- finding the connection ceiling`);
+		console.log(`  PRESENCE DESTROYER - finding the connection ceiling`);
 		console.log(`  Board: ${BOARD_URL}`);
 		console.log(`  UUID:  ${boardId}`);
-		console.log(`  No cursor movement -- pure connection + presence joins`);
+		console.log(`  No cursor movement - pure connection + presence joins`);
 		console.log(`${'='.repeat(60)}\n`);
 
 		const allUsers = [];

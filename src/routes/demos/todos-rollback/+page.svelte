@@ -1,5 +1,5 @@
 <!--
-	/demos/todos-rollback -- optimistic mutate + concurrent-failure rollback.
+	/demos/todos-rollback - optimistic mutate + concurrent-failure rollback.
 
 	Three things to film here:
 
@@ -14,7 +14,7 @@
 	   instantly, then disappear independently as five FORCED errors
 	   land. No phantom traces; the displayed list returns cleanly to
 	   server state. This is the always-on queue-replay rewrite from
-	   realtime next.1 doing its job.
+	   realtime doing its job.
 
 	Mechanism: rpc.createOptimistic(store, callArgs, change) ties the
 	UI mutation to the RPC. Rollback happens automatically on reject.
@@ -43,7 +43,7 @@
 
 	async function tryMutate(label, fn) {
 		try { await fn() }
-		catch (err) { pushToast(`${label}: ${err?.code ?? 'ERROR'} -- ${err?.message ?? err}`) }
+		catch (err) { pushToast(`${label}: ${err?.code ?? 'ERROR'} - ${err?.message ?? err}`) }
 	}
 
 	async function handleAdd() {
@@ -104,7 +104,7 @@
 
 <div class="max-w-2xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Optimistic mutate with rollback</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Each add, toggle, and remove applies optimistically and rolls
@@ -124,7 +124,7 @@
 					data-testid="force-fail-toggle"
 				/>
 				<span class="label-text">
-					<strong>Force fail</strong> -- when on, every mutate
+					<strong>Force fail</strong> - when on, every mutate
 					rejects with <code>LiveError('FORCED')</code>.
 				</span>
 			</label>

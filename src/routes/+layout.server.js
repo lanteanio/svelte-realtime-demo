@@ -1,5 +1,5 @@
 /**
- * Layout server load -- runs on every page request.
+ * Layout server load - runs on every page request.
  *
  * Manages the user's identity via a cookie. On first visit, generates
  * a random identity (UUID + fun name + color). On subsequent visits,
@@ -7,7 +7,7 @@
  *
  * The cookie is NOT httpOnly because the client-side JS needs to read
  * it (the WebSocket upgrade handler in hooks.ws.js also reads it).
- * This is fine because the identity is not a secret -- it's just a
+ * This is fine because the identity is not a secret - it's just a
  * random display name and color.
  */
 
@@ -39,7 +39,7 @@ export function load({ cookies }) {
 	const existing = parseIdentity(cookies.get('identity'))
 	if (existing) return { identity: existing }
 
-	// First visit -- generate a fresh identity and persist it
+	// First visit - generate a fresh identity and persist it
 	const identity = { id: crypto.randomUUID(), ...generateIdentity() }
 	cookies.set('identity', JSON.stringify(identity), { path: '/', httpOnly: false, maxAge: 60 * 60 * 24 * 365 })
 	return { identity }

@@ -1,13 +1,13 @@
 /**
  * /demos/schema-evolution: live.stream `version` + `migrate` hooks,
  * exercised end-to-end via `subscribeAt` from
- * `svelte-realtime/test-client` (next.15+).
+ * `svelte-realtime/test-client`.
  *
  * The pitch. One stream registered at `version: 2` with a `migrate[1]`
  * forward function. The page subscribes once normally (the wire
  * envelope carries no `schemaVersion`, so the server's loader output
  * goes through unchanged) AND once via `subscribeAt(counter, {
- * schemaVersion: 1 })` -- the wire envelope claims `schemaVersion: 1`,
+ * schemaVersion: 1 })` - the wire envelope claims `schemaVersion: 1`,
  * the server's `_executeStreamRpc` sees `clientSchemaVersion <
  * serverVersion`, runs `_migrateData` forward through the registered
  * chain, and returns the migrated payload to that parallel store.

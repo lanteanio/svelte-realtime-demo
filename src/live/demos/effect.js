@@ -79,6 +79,20 @@ export const placeOrder = live(async (ctx, args) => {
 	return order
 })
 
+/**
+ * Wipe all three feeds. Same fan-out as the existing clearFeeds RPC.
+ */
+export async function purge(ctx) {
+	const counts = { orders: orders.length, audit: auditEntries.length, notifications: notifications.length }
+	for (const o of orders) ctx.publish(TOPICS.demoEffectOrders, 'deleted', { id: o.id })
+	for (const a of auditEntries) ctx.publish(TOPICS.demoEffectAudit, 'deleted', { id: a.id })
+	for (const n of notifications) ctx.publish(TOPICS.demoEffectNotifications, 'deleted', { id: n.id })
+	orders.length = 0
+	auditEntries.length = 0
+	notifications.length = 0
+	return counts
+}
+
 export const clearFeeds = live(async (ctx) => {
 	for (const o of orders.slice()) ctx.publish(TOPICS.demoEffectOrders, 'deleted', { id: o.id })
 	for (const a of auditEntries.slice()) ctx.publish(TOPICS.demoEffectAudit, 'deleted', { id: a.id })

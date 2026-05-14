@@ -1,12 +1,12 @@
 <!--
-	/demos/counter-resume -- session resume + replay buffer demo.
+	/demos/counter-resume - session resume + replay buffer demo.
 
 	The server ticks a counter every second. Open this page, watch the
 	counter advance live. Then DevTools -> Network -> Offline. Wait
 	10 seconds. The counter freezes (the WS is dead). Toggle back to
 	Online. The counter jumps to the latest value AND the event ledger
 	below shows every tick that fired during the gap, delivered via
-	__replay frames -- no full refetch, no flicker.
+	__replay frames - no full refetch, no flicker.
 
 	Without the resume protocol, the reconnect would refetch the
 	stream's initial value and skip every event in between. Resume
@@ -45,7 +45,7 @@
 
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Reconnect-resume with no flicker</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Server ticks every second. Drop the WebSocket via DevTools

@@ -1,5 +1,5 @@
 /**
- * Board settings -- live RPC and stream.
+ * Board settings - live RPC and stream.
  *
  * Settings are board-level properties like title and background color.
  * merge: 'set' means the entire settings object is replaced on each

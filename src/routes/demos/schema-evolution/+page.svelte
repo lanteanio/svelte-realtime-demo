@@ -1,6 +1,6 @@
 <!--
 	/demos/schema-evolution: live.stream version + migrate hooks via
-	subscribeAt (next.15+).
+	subscribeAt.
 
 	One stream registered at `version: 2` with `migrate: { 1: v1ToV2 }`.
 	The left panel subscribes normally; the wire envelope carries no
@@ -99,7 +99,7 @@
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Schema evolution: subscribe-time migrate hooks</h1>
 		<p class="text-sm opacity-70 mt-1">
 			One stream registered at <code>version: 2</code> with
@@ -107,7 +107,7 @@
 			normally (no <code>schemaVersion</code> on the wire, loader output
 			passes through). Right panel uses
 			<code>subscribeAt(counter, &#123; schemaVersion: 1 &#125;)</code>
-			from <code>svelte-realtime/test-client</code> -- the server's
+			from <code>svelte-realtime/test-client</code> - the server's
 			<code>migrate[1]</code> runs end-to-end on the initial subscribe
 			response. Increment a counter and watch the right panel's row
 			flip its provenance badge back to <code>loader</code>: the live

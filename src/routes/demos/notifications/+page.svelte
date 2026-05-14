@@ -1,5 +1,5 @@
 <!--
-	/demos/notifications -- live.push request/reply + cluster registry
+	/demos/notifications - live.push request/reply + cluster registry
 	+ 6-field live.cron scheduler.
 
 	Open this page in two tabs (separate identities). In tab A: pick the
@@ -12,8 +12,8 @@
 	Cancel removes a pending entry before it fires.
 
 	Three primitives in one page: live.push (request/reply), the
-	extensions cluster connection registry (hidden but wired), and
-	next.7's 6-field live.cron expression.
+	extensions cluster connection registry (hidden but wired), and a
+	6-field live.cron expression.
 -->
 <script>
 	import { onMount, onDestroy } from 'svelte'
@@ -207,7 +207,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Notifications: push, reply, schedule</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Open this page in two browsers, pick the other user as recipient,
@@ -314,7 +314,7 @@
 				<div class="alert {outcomeClass(outcome.kind)} py-2" data-testid="outcome">
 					<span class="text-sm">
 						<strong data-testid="outcome-kind">{activityLabel(outcome.kind)}</strong>
-						{#if outcome.detail} -- {outcome.detail}{/if}
+						{#if outcome.detail} - {outcome.detail}{/if}
 					</span>
 				</div>
 			{/if}
@@ -391,7 +391,7 @@
 		</p>
 		<p>
 			Scheduler: a single <code>live.cron('* * * * * *', ...)</code> tick
-			drains the in-memory queue every second (next.7's 6-field
+			drains the in-memory queue every second (6-field cron
 			schedule). Pushes inside the tick are fire-and-forget so a slow
 			recipient can't block the next tick; per-push outcomes land in the
 			activity stream when they resolve.

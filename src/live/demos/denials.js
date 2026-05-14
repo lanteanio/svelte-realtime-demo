@@ -1,11 +1,11 @@
 /**
- * /demos/denials -- subscribe-denied banner with org switcher.
+ * /demos/denials - subscribe-denied banner with org switcher.
  *
- * Two "orgs" -- Acme and Globex. Each has its own audit-log stream on
+ * Two "orgs" - Acme and Globex. Each has its own audit-log stream on
  * topic `audit:{orgSlug}`. The user's identity carries `org` (set in
  * the cookie at upgrade); subscribes to the wrong org return FORBIDDEN
  * via the wire-level subscribe gate in src/hooks.ws.js (which now
- * properly fires on stream subscribes too, after adapter-uws@0.5.0-next.14).
+ * properly fires on stream subscribes too).
  *
  * Switching orgs goes through the SvelteKit endpoint at
  * src/routes/api/demos/set-org/+server.js, which rewrites the cookie
@@ -45,6 +45,24 @@ function pushEntry(orgSlug, entry) {
 	list.push(entry)
 	if (list.length > MAX_ENTRIES) list.shift()
 	auditLogs.set(orgSlug, list)
+}
+
+/**
+ * Wipe every org's audit log. Seeds are deliberately NOT restored so
+ * the next purge cycle does not republish them; subsequent fresh
+ * visitors see an empty log, which still demonstrates the access gate
+ * (the FORBIDDEN banner is what the demo is actually selling).
+ */
+export async function purge(ctx) {
+	const counts = {}
+	for (const [orgSlug, list] of auditLogs) {
+		counts[orgSlug] = list.length
+		for (const entry of list) {
+			ctx.publish(TOPICS.demoAuditLog(orgSlug), 'deleted', { id: entry.id })
+		}
+		auditLogs.set(orgSlug, [])
+	}
+	return counts
 }
 
 export const auditLog = live.stream(

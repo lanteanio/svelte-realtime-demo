@@ -1,7 +1,7 @@
 /**
- * /demos/chat -- rooms + presence + idempotent send + denials banner.
+ * /demos/chat - rooms + presence + idempotent send + denials banner.
  *
- * The pitch: a focused chat surface that bundles four 0.5.0 ideas on
+ * The pitch: a focused chat surface that bundles four ideas on
  * one page.
  *
  * - live.room() declares the room as one export with two sub-streams:
@@ -19,9 +19,9 @@
  * a small bounded message list. /demos/counter-resume is the showcase
  * for replay buffer + session resume.
  *
- * Storage is an in-memory Map (demo only -- not durable across server
+ * Storage is an in-memory Map (demo only - not durable across server
  * restarts and not shared across instances). Single-server presence
- * is bootstrapped via realtime's _presenceRef fallback (next.5+); a
+ * is bootstrapped via realtime's _presenceRef fallback; a
  * cluster deployment would wire `platform.presence.list` to a Redis
  * registry, same shape.
  */
@@ -49,6 +49,27 @@ export const chat = live.room({
 	init: async (ctx, roomId) => loadMessages(roomId),
 	presence: (ctx) => ({ name: ctx.user.name, color: ctx.user.color })
 })
+
+/**
+ * Wipe every room's message log. Publishes 'deleted' per message on
+ * each room topic so currently-subscribed clients drain their lists
+ * via the room data stream's default crud merge. Idempotency cache
+ * keys for sendMessage retries are NOT touched; their 30s TTL handles
+ * itself. Returns counts for the orchestrator log.
+ */
+export async function purge(ctx) {
+	let messageCount = 0
+	const roomIds = Array.from(messages.keys())
+	for (const roomId of roomIds) {
+		const list = messages.get(roomId) ?? []
+		for (const msg of list) {
+			ctx.publish(TOPICS.demoChatRoom(roomId), 'deleted', { id: msg.id })
+			messageCount++
+		}
+	}
+	messages.clear()
+	return { rooms: roomIds.length, messages: messageCount }
+}
 
 export const sendMessage = live.idempotent(
 	{ ttl: 30 },

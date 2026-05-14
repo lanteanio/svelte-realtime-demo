@@ -23,7 +23,7 @@ export const joinBoard = live(async (ctx, boardId) => {
 
 /** Remove this connection from the board's presence list and cursor overlay. */
 export const leaveBoard = live(async (ctx, boardId) => {
-	// leave is not shed -- letting users free resources is always allowed
+	// leave is not shed - letting users free resources is always allowed
 	await presence.leave(ctx.ws, ctx.platform, TOPICS.boardPresence(boardId))
 	cursor.remove(ctx.ws, ctx.platform, TOPICS.boardPresence(boardId))
 })

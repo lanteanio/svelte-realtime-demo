@@ -1,5 +1,5 @@
 <!--
-	Canvas -- the board area where notes live.
+	Canvas - the board area where notes live.
 
 	On desktop: notes are positioned absolutely, scrollbars appear
 	if notes go beyond the viewport.

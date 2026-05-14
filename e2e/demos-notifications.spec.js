@@ -93,7 +93,7 @@ test.describe('/demos/notifications', () => {
 				{ timeout: 8_000 }
 			).toBeGreaterThanOrEqual(1)
 
-			// Schedule 2 seconds out -- short enough to keep the test fast,
+			// Schedule 2 seconds out - short enough to keep the test fast,
 			// long enough to assert the entry sits in the queue first.
 			const text = `sched-${RUN}-fire`
 			await a.getByTestId('text-input').fill(text)

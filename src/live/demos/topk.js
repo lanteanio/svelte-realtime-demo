@@ -1,6 +1,6 @@
 /**
- * /demos/topk -- four leaderboards from one event firehose, declared in
- * one config via `live.aggregate({ windows })` (realtime next.9+).
+ * /demos/topk - four leaderboards from one event firehose, declared in
+ * one config via `live.aggregate({ windows })`.
  *
  * The pitch: one source topic, one reducer, one `windows` block that
  * spawns four parallel state slices with their own output topics.
@@ -11,7 +11,7 @@
  *
  * Three primitives in one page:
  *
- *  - live.aggregate({ windows }) -- new in next.9. Declarative window
+ *  - live.aggregate({ windows }) - new. Declarative window
  *    config replaces the four-aggregates-and-hand-rolled-bucketing
  *    dance every prior leaderboard / trending surface had to write.
  *    Three window types ship: lifetime (never resets), tumbling
@@ -19,8 +19,8 @@
  *    or durationMs + anchor for arbitrary fixed periods), and
  *    sliding (hop-window with durationMs + slideMs).
  *
- *  - combineCounts -- one of the new built-in `combine` helpers
- *    that ship with next.9 (alongside combineSum / combineMax /
+ *  - combineCounts - one of the new built-in `combine` helpers
+ *    that ship with (alongside combineSum / combineMax /
  *    combineMin / combineMerge). Required on every reducer that
  *    has `reduce` when used with a sliding window, since hop-bucket
  *    state has to merge across N buckets at compute time and the
@@ -28,13 +28,13 @@
  *    combineCounts handles `Record<string, number>` aggregation,
  *    which is exactly what our per-item counter produces.
  *
- *  - live.cron('* * * * * *') -- 1Hz firehose tick driving N events
+ *  - live.cron('* * * * * *') - 1Hz firehose tick driving N events
  *    per second based on the current `speed` setting. Demos the
- *    6-field cron from next.7 alongside the next.9 windowed
+ *    6-field cron alongside the windowed
  *    aggregate; the two compose without ceremony.
  *
  * Demo-friendly time scales (10s / 1min / minute / lifetime) instead
- * of the spec's 10min / daily / monthly / lifetime -- visible diff in
+ * of the spec's 10min / daily / monthly / lifetime - visible diff in
  * test-runtime instead of "wait until midnight." Educational pitch is
  * identical; values are tunable.
  */
@@ -135,7 +135,7 @@ export const myTopkState = live(async () => ({ speed, bias, items: ITEMS }))
  * events into the source topic. The aggregate watches the same topic
  * and reduces them into per-window state.
  *
- * Single-flight in next.7+ -- a slow tick doesn't overlap with itself.
+ * Single-flight - a slow tick doesn't overlap with itself.
  * In single-instance dev (no Redis configured) the leader check via
  * configureCron returns truthy, so the firehose runs. In a multi-
  * worker cluster, only the leader fires; non-leaders skip with
@@ -152,12 +152,12 @@ export const firehoseTick = live.cron('* * * * * *', TOPICS.demoTopkEvent, async
  * The headline declaration. One reducer (counts per item), one
  * compute (top-5 derived from counts), four window slices.
  *
- * - last10s:    sliding 10s with 1s hops -- 10 buckets in the ring.
+ * - last10s:    sliding 10s with 1s hops - 10 buckets in the ring.
  *               Most twitchy view; shows immediate effect of speed
  *               and bias changes.
- * - last1min:   sliding 60s with 5s hops -- 12 buckets. Smoother;
+ * - last1min:   sliding 60s with 5s hops - 12 buckets. Smoother;
  *               averages out the noise in last10s.
- * - thisMinute: tumbling on minute boundary -- resets to {} every
+ * - thisMinute: tumbling on minute boundary - resets to {} every
  *               wall-clock minute. Sharp drop at the boundary; counts
  *               climb back up over the next minute.
  * - lifetime:   monotonic counter; never resets. The "hall of fame"
@@ -171,7 +171,7 @@ export const firehoseTick = live.cron('* * * * * *', TOPICS.demoTopkEvent, async
  * `trending` and accesses `trending.last10s.subscribe(...)` etc.
  *
  * `combine: combineCounts` is mandatory on the `counts` reducer for
- * the sliding windows -- the framework needs a deterministic way to
+ * the sliding windows - the framework needs a deterministic way to
  * merge hop-bucket states into the full-window state. The built-in
  * helper handles `Record<string, number>` summation. `top` has no
  * `reduce` (only `compute`), so it doesn't need `combine`.

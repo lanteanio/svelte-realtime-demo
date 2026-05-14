@@ -1,5 +1,5 @@
 <!--
-	CursorOverlay -- renders all other users' cursors on the board.
+	CursorOverlay - renders all other users' cursors on the board.
 
 	Uses Canvas 2D instead of SVG for performance. With 1000 cursors,
 	SVG requires 1000 DOM nodes that Svelte diffs every frame. Canvas
@@ -8,7 +8,7 @@
 
 	Each user's name label is pre-rendered to an offscreen canvas once
 	(text shaping is expensive). On each frame, we just blit the cached
-	bitmaps with drawImage() -- about 2-5ms for 1000 cursors vs ~35ms
+	bitmaps with drawImage() - about 2-5ms for 1000 cursors vs ~35ms
 	for live strokeText/fillText.
 
 	The cursor store has maxAge: 10000 (10 seconds). If a cursor hasn't
@@ -24,7 +24,7 @@
 	// Subscribe to cursor positions. maxAge auto-removes stale entries.
 	const cursorStore = $derived(cursor(`board:${boardId}`, { maxAge: 10000 }))
 
-	// Filter out our own cursor -- we don't need to see ourselves.
+	// Filter out our own cursor - we don't need to see ourselves.
 	const cursors = $derived([...$cursorStore].filter(([, { user }]) => user.id !== userId))
 
 	let canvas = $state()
@@ -64,7 +64,7 @@
 		const w = textW + pad * 2
 		const h = 16
 
-		// Scale for retina -- draw at 2x, display at 1x
+		// Scale for retina - draw at 2x, display at 1x
 		offscreen.width = w * dpr
 		offscreen.height = h * dpr
 		ctx.scale(dpr, dpr)
@@ -83,7 +83,7 @@
 		return cached
 	}
 
-	/** Main draw loop -- called once per animation frame when cursors change. */
+	/** Main draw loop - called once per animation frame when cursors change. */
 	function draw() {
 		raf = 0
 		if (!canvas) return
@@ -118,7 +118,7 @@
 	}
 
 	// Schedule a repaint whenever the cursor data changes.
-	// Only one rAF is scheduled at a time -- if cursors update faster
+	// Only one rAF is scheduled at a time - if cursors update faster
 	// than the screen refreshes, intermediate states are skipped.
 	$effect(() => {
 		void cursors

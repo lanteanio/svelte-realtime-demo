@@ -1,5 +1,5 @@
 <!--
-	CountdownTimer -- shows time remaining before a board expires.
+	CountdownTimer - shows time remaining before a board expires.
 
 	Uses DaisyUI's countdown component for the animated digit transition.
 	Updates every second. Changes color as the deadline approaches:

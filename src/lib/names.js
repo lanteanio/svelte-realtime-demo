@@ -8,7 +8,7 @@
  * because names are just for display, not authentication. The UUID in the
  * identity cookie is what uniquely identifies a user.
  *
- * Slug collisions ARE handled -- see boards.js which retries up to 5 times
+ * Slug collisions ARE handled - see boards.js which retries up to 5 times
  * with different random slugs if a duplicate is generated.
  */
 

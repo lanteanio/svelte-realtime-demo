@@ -33,7 +33,7 @@ test.describe('/demos/todos-rollback', () => {
 		await page.getByTestId('add-button').click()
 
 		// Optimistic placeholder appears, then rolls back. After ~500ms it
-		// should be gone -- the FORCED reject from the server triggers
+		// should be gone - the FORCED reject from the server triggers
 		// rollback, restoring the displayed list to server state.
 		await expect(page.getByTestId('todos')).not.toContainText(text, { timeout: 3_000 })
 	})

@@ -1,5 +1,5 @@
 /**
- * GET /metrics -- Prometheus text exposition format.
+ * GET /metrics - Prometheus text exposition format.
  *
  * Scrape-time, no continuous accounting on the publish hot path.
  * Production deployments should gate this endpoint behind their

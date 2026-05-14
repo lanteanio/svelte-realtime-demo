@@ -1,11 +1,11 @@
 /**
- * Note CRUD and arrangement actions -- live RPCs and streams.
+ * Note CRUD and arrangement actions - live RPCs and streams.
  *
  * Notes are the sticky notes on a board. Each note has:
  * - Position (x, y) for where it sits on the canvas
  * - Content (text the user types)
  * - Color (one of 6 preset colors)
- * - z_index (stacking order -- higher = on top)
+ * - z_index (stacking order - higher = on top)
  * - creator_name (captured at creation time, not linked to a user account)
  *
  * All mutations publish events to the board's notes topic. Connected
@@ -31,7 +31,7 @@ import { TOPICS } from '$lib/server/topics'
 
 /**
  * Touch the board's last_activity and broadcast the update to the
- * boards list so home page timers refresh. Fire-and-forget -- we don't
+ * boards list so home page timers refresh. Fire-and-forget - we don't
  * await this because it's not critical to the note operation.
  */
 function touch(ctx, boardId) {
@@ -87,7 +87,7 @@ export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { co
 
 /**
  * Move a note to a new position.
- * Throttled to 50ms -- during a drag, the client fires this on every
+ * Throttled to 50ms - during a drag, the client fires this on every
  * mouse move, but the server only processes it every 50ms at most.
  *
  * Background-class: silently dropped under any pressure signal. The

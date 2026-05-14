@@ -27,6 +27,18 @@ const config = {
 				upgradeAdmission: {
 					maxConcurrent: 1000,
 					perTickBudget: 64
+				},
+				// Demo pressure thresholds. The adapter ships production-
+				// tuned defaults (publishRatePerSec: 10000, memoryHeapUsedRatio:
+				// 0.85) which never trip in a single-user dev / demo. We
+				// lower publishRatePerSec to 500 so the +1000 / +5000
+				// burst reliably trips PUBLISH_RATE, and raise
+				// memoryHeapUsedRatio to 0.97 so the tiny V8 heap at
+				// startup (~32 MB heap_total, ~28 MB heap_used = 87%)
+				// does not permanently pin the reason at MEMORY.
+				pressure: {
+					publishRatePerSec: 500,
+					memoryHeapUsedRatio: 0.97
 				}
 			}
 		})

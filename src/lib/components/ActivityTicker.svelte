@@ -1,8 +1,8 @@
 <!--
-	ActivityTicker -- fixed bar at the bottom showing recent board activity.
+	ActivityTicker - fixed bar at the bottom showing recent board activity.
 
 	Shows the 5 most recent actions (note created, edited, deleted, etc).
-	Items are ephemeral -- they come from the activity live stream, not
+	Items are ephemeral - they come from the activity live stream, not
 	from the database. If you refresh the page, the ticker starts empty.
 
 	Each entry has a colored dot (matching the user's identity color),
@@ -24,6 +24,6 @@
 		</span>
 	{/each}
 	{#if latest.length === 0}
-		<span class="opacity-40">No activity yet -- double-click the canvas to add a note</span>
+		<span class="opacity-40">No activity yet - double-click the canvas to add a note</span>
 	{/if}
 </div>

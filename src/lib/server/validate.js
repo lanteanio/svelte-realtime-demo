@@ -60,7 +60,7 @@ export function validateNoteContent(content) {
 	return content
 }
 
-/** Clamps coordinates to the allowed range. No error -- just caps the value. */
+/** Clamps coordinates to the allowed range. No error - just caps the value. */
 export function validateCoord(value, name) {
 	const n = Number(value)
 	if (!Number.isFinite(n)) throw new LiveError('VALIDATION', `${name} must be a number`)

@@ -1,5 +1,5 @@
 /**
- * Standalone destroyer -- runs without Playwright.
+ * Standalone destroyer - runs without Playwright.
  * Pure Node.js + ws library. Connect, join presence, optionally move cursors.
  * Ramps through levels and reports results.
  *
@@ -96,7 +96,7 @@ async function checkServer() {
 
 async function run() {
 	console.log('='.repeat(60));
-	console.log(`  DESTROYER (standalone) -- ${WITH_CURSORS ? 'with cursors' : 'presence only'}`);
+	console.log(`  DESTROYER (standalone) - ${WITH_CURSORS ? 'with cursors' : 'presence only'}`);
 	console.log(`  Target: ${WS_URL}`);
 	console.log(`  Board:  ${BOARD_SLUG}`);
 	console.log(`  Levels: ${LEVELS.join(', ')}`);

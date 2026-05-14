@@ -1,6 +1,6 @@
 <!--
 	/demos/upload - cross-device file uploads with content-addressed
-	chunk dedup, on top of `live.upload` (realtime next.13).
+	chunk dedup, on top of `live.upload`.
 
 	Pick a file. The page hands it to `uploadFile(file, args)` and
 	the framework streams it server-side as a sequence of binary
@@ -28,12 +28,15 @@
 	} from '$live/demos/upload'
 
 	// Pin a fixed 64KB chunk size so the dedup story stays clean across
-	// uploads. Without this, live.upload's auto-discovery (next.13) uses
+	// uploads. Without this, live.upload's auto-discovery uses
 	// 12KB on the first upload and ~943KB after the platform's
 	// maxPayloadLength is announced; the chunk boundaries differ between
 	// runs, so the SHA-256 hashes never match and the cache never hits.
-	// 200KB at 64KB chunks = 4 chunks, visible dedup math.
-	configure({ upload: { chunkSize: 64 * 1024 } })
+	// Adapter default `maxPayloadLength` raised from 16KB to 1MB in
+	// , so 1MB chunks ride the new default with no extra
+	// adapter config required. 7-8 chunks for a 6.84MB file, dedup
+	// math stays clean.
+	configure({ upload: { chunkSize: 1024 * 1024 } })
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -165,7 +168,7 @@
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Upload: streaming uploads with content-addressed dedup</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Pick a file. The page hands it to <code>live.upload</code>; the framework streams it to the

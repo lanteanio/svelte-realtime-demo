@@ -1,5 +1,5 @@
 <!--
-	/demos/chat -- room picker.
+	/demos/chat - room picker.
 
 	Three rooms. Two are open; one is members-only. Picking the
 	private room demonstrates the wire-level subscribe denial: the
@@ -15,7 +15,7 @@
 
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Chat rooms</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Pick a room. <code>live.room()</code> bundles the message

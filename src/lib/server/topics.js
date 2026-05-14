@@ -58,5 +58,6 @@ export const TOPICS = defineTopics({
 	demoEffectOrders: 'demos:effect:orders',
 	demoEffectAudit: 'demos:effect:audit',
 	demoEffectNotifications: 'demos:effect:notifications',
-	demoFromSeqEvents: 'demos:fromseq:events'
+	demoFromSeqEvents: 'demos:fromseq:events',
+	demoPurgeTick: 'demos:purge:tick'
 })

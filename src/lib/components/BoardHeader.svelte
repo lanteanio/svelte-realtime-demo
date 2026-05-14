@@ -1,5 +1,5 @@
 <!--
-	BoardHeader -- board title, background picker, TTL timer, presence.
+	BoardHeader - board title, background picker, TTL timer, presence.
 
 	On mobile:
 	- Title truncates to prevent overflow

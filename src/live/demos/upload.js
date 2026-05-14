@@ -1,6 +1,6 @@
 /**
  * /demos/upload - cross-device file uploads with content-addressed
- * chunk dedup, on top of `live.upload` (realtime next.13).
+ * chunk dedup, on top of `live.upload`.
  *
  * The pitch: pick a file. The page hands it to `uploadFile(file, args)`
  * and the framework streams it server-side as a sequence of binary
@@ -13,11 +13,11 @@
  *
  * Three primitives in one demo:
  *
- *  - live.upload(handler) - streaming upload primitive (next.13).
+ *  - live.upload(handler) - streaming upload primitive.
  *      Wire format is one 0x01 chunk frame per chunk plus a 0x02
  *      cancel frame; the handler consumes `for await chunk of
  *      ctx.stream`. Auto-discovers the adapter's `maxPayloadLength`
- *      (1MB default in next.19) and sizes the client pump to 90% of
+ *      (1MB default) and sizes the client pump to 90% of
  *      it; backpressure-paced via `conn.bufferedAmount`. Replaces the
  *      manual live.binary chunked-RPC pattern this demo originally
  *      shipped with.
@@ -29,7 +29,7 @@
  *      chunk exactly once.
  *
  *  - live.notify({ userId }, ...) - fire-and-forget cross-device push
- *      (next.13). Counterpart to live.push for cases where the caller
+ *     . Counterpart to live.push for cases where the caller
  *      doesn't need a reply. Returns Promise<void>; never rejects on
  *      offline / timeout / handler-error - silent by design.
  *
@@ -47,6 +47,8 @@ import {
 	appendFile,
 	removeFile,
 	statsSnapshot,
+	purgeMemory,
+	purgeRedisChunks,
 	MAX_FILES,
 	MAX_FILE_BYTES,
 	MAX_CHUNK_BYTES,
@@ -194,6 +196,24 @@ export const uploadFile = live.upload(async (ctx, args) => {
 	maxConcurrentPerSession: 4,
 	maxBufferedChunks: 64
 })
+
+/**
+ * Wipe in-memory files + chunks AND the redis chunk idempotency keys.
+ * Unlike clearFiles below (which keeps the Redis cache so a test can
+ * still assert dedup), purge is the public-deployment cleanup: nothing
+ * the user uploaded survives. Chunk bytes are reproducible per-hash,
+ * so dropping the cache only forfeits the cross-restart dedup short-
+ * circuit - real correctness is unaffected.
+ */
+export async function purge(ctx) {
+	const ids = purgeMemory()
+	for (const id of ids) {
+		ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id })
+	}
+	ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
+	const redisDeleted = await purgeRedisChunks()
+	return { files: ids.length, redisKeys: redisDeleted }
+}
 
 /**
  * Test-only escape hatch. Wipes the in-memory file list so e2e tests

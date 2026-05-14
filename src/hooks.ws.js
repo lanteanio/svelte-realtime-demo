@@ -5,7 +5,7 @@
  * is established, receives a message, subscribes to a topic, or closes.
  * Think of them as middleware for your WebSocket layer.
  *
- * The adapter calls them automatically -- you just export the right names.
+ * The adapter calls them automatically - you just export the right names.
  */
 
 import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
@@ -14,6 +14,9 @@ import { bus, limiter, presence, cursor, replay, registry, leader } from '$lib/s
 import { metrics } from '$lib/server/metrics'
 import { tasks } from '$lib/server/tasks'
 import { generateIdentity } from '$lib/names'
+// Side-effect import: eagerly loads every demo with a purge surface and
+// registers the orchestrator cron at boot. See src/lib/server/demo-purge.js.
+import '$lib/server/demo-purge'
 
 /**
  * Message-tier admission control. Pairs with the handshake-tier
@@ -45,7 +48,7 @@ live.admission({
  *   registry (populated by pushHooks.open/close below) can route
  *   same-instance pushes via platform.request without any Redis hop.
  * - remoteRegistry: when the userId isn't on this instance, fall through
- *   to `registry.request(userId, ...)` -- the extensions cluster
+ *   to `registry.request(userId, ...)` - the extensions cluster
  *   transport. Single-instance dev sees no behavior change because the
  *   local registry hit short-circuits first.
  *
@@ -60,7 +63,7 @@ live.configurePush({
 /**
  * Topics that get replay capture for session-resume support.
  *
- * Per-board: `notes`, `settings`, `activity` -- streams a reconnecting
+ * Per-board: `notes`, `settings`, `activity` - streams a reconnecting
  * client can fall behind on by a few seconds and visibly notice the
  * refetch flicker. presence and cursor topics are excluded; those are
  * inherently latest-state-wins.
@@ -115,7 +118,7 @@ const VALID_ORGS = new Set(['acme', 'globex'])
 
 /**
  * Validate an identity object from the cookie. Returns null if invalid.
- * We check every field strictly -- never trust client-provided data.
+ * We check every field strictly - never trust client-provided data.
  *
  * `org` is optional. When set, must be one of the demo's two
  * organizations (`acme` or `globex`); used by /demos/denials to gate
@@ -163,7 +166,7 @@ export function upgrade({ cookies }) {
 }
 
 /**
- * Boot-time one-shot setup (adapter next.15+).
+ * Boot-time one-shot setup.
  *
  * Fires once per worker after the listen socket is bound and BEFORE
  * any upgrade / open / message hook can run. The deterministic place
@@ -171,14 +174,14 @@ export function upgrade({ cookies }) {
  * boot rather than on first connect.
  *
  * What lives here:
- * - `bus.activate(platform)` -- the Redis pub/sub subscriber needs the
+ * - `bus.activate(platform)` - the Redis pub/sub subscriber needs the
  *   platform to fan inbound cluster messages out to local subscribers.
- * - `setCronPlatform(platform)` -- realtime's cron tick captures a
+ * - `setCronPlatform(platform)` - realtime's cron tick captures a
  *   platform reference; without this, the 1Hz tick from the
  *   notifications scheduler fires no-op until first connect.
- * - `wirePublishRateMetrics(...)` -- one-shot gauge registration
+ * - `wirePublishRateMetrics(...)` - one-shot gauge registration
  *   against the worker-local `platform.pressure` snapshot.
- * - `live.configureCron({ leader })` -- gates the cron tick on the
+ * - `live.configureCron({ leader })` - gates the cron tick on the
  *   Redis-backed leader-election primitive so cron schedules fire
  *   ONCE across the cluster instead of N times across N workers.
  *   Single-instance dev: this worker is always the leader.
@@ -195,18 +198,30 @@ export function upgrade({ cookies }) {
 export function init({ platform }) {
 	bus.activate(platform)
 	setCronPlatform(platform)
+
+	// Tune the dev-mode warnings to match the demo gallery's
+	// intentional shapes. `/demos/pressure` purposefully bursts at
+	// ~3.3K events/sec for 1.5s to drive PUBLISH_RATE shedding;
+	// raise the publish-rate warning threshold above that so the
+	// rate warning only surfaces on genuinely surprising bursts.
+	// Suppress silent-topic warnings on the two demo topics that
+	// are subscribed continuously but only publish on user action
+	// (`boards`) or via a self-arming ticker that may briefly idle
+	// (`demos:pressure:tick`).
+	live.publishRateWarning({ threshold: 10000 })
+	live.silentTopicWarning({ suppress: ['boards', 'demos:pressure:tick'] })
 	// _activateDerived wraps platform.publish + publishBatched so
 	// live.derived / live.aggregate / live.effect watchers fire on
-	// source-topic publishes. Per realtime next.8's recommended
-	// wire-up site, this lives in init({ platform }) -- and per
-	// next.10's late-activation fix it now installs the wrap for
+	// source-topic publishes. Per realtime's recommended
+	// wire-up site, this lives in init({ platform }) - and per
+	// the late-activation fix it now installs the wrap for
 	// static aggregates / effects / derived too, not just dynamic-
 	// derived. Cron-driven publishes that fire before the first WS
 	// connection (e.g. /demos/topk's firehose) reach the aggregate
 	// watcher correctly.
 	_activateDerived(platform)
 	wirePublishRateMetrics(platform, metrics, { topN: 20 })
-	// `bus` enables cluster-wide cron fan-out (realtime next.12). Without
+	// `bus` enables cluster-wide cron fan-out. Without
 	// it, leader-only cron ticks publish on the elected worker only and
 	// remote subscribers see nothing - a cluster-cron tick is invisible
 	// to anyone connected to the follower workers. With it, every cron
@@ -216,16 +231,16 @@ export function init({ platform }) {
 }
 
 /**
- * Teardown one-shot (adapter next.15+).
+ * Teardown one-shot.
  *
  * Fires once per worker before the listen socket closes and before
  * existing connections are kicked. Best-effort: throws are logged
  * and swallowed by the adapter, so cleanup is safe to attempt.
  *
- * - `leader.stop()` -- best-effort releases the Redis lease via
+ * - `leader.stop()` - best-effort releases the Redis lease via
  *   compare-and-delete so a sibling worker can take over within
  *   `renewMs` (10s) instead of waiting for the full `leaseMs` (30s).
- * - `registry.destroy()` -- stops the connection registry's
+ * - `registry.destroy()` - stops the connection registry's
  *   heartbeat timer and Redis subscriber so the worker can exit
  *   cleanly.
  */
@@ -241,11 +256,18 @@ export async function shutdown() {
 
 /**
  * Called once when the WebSocket connection is fully open.
- * Per-connection setup only -- one-shot worker setup lives in `init`
+ * Per-connection setup only - one-shot worker setup lives in `init`
  * above.
  */
 export function open(ws, ctx) {
 	const { platform } = ctx
+	// Put the connection into the pub/sub bus's `systemChannel`
+	// subscriber set via `platform.subscribe` (which bypasses the
+	// wire-level `__`-deny gate). Without this, the bus publishes
+	// degraded / recovered events into an empty set and the layout's
+	// `{#if $health === 'degraded'}` banner is silently dead. Required
+	// as of `svelte-adapter-uws-extensions@0.5.0-next.13`.
+	bus.hooks.open(ws, ctx)
 	presence.join(ws, 'global', platform)
 	// Register the connection in realtime's local push registry (so
 	// live.push routes via platform.request) and in the cluster registry
@@ -350,7 +372,7 @@ export function unsubscribe(ws, topic, ctx) {
  * (duration, messages, bytes) and the close-code counter emit on every
  * close. The user-supplied close runs first; metrics observation runs
  * after, so a throw in the user close still misses metrics for that
- * connection (acceptable -- a thrown close is an exceptional path).
+ * connection (acceptable - a thrown close is an exceptional path).
  */
 export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	presence.hooks.close(ws, ctx)
@@ -358,7 +380,7 @@ export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	// Pass ctx so pushHooks.close routes through the realtime close
 	// that drains stream-subscription bookkeeping (silent-topic
 	// watchdogs, _topicWsCounts, __onUnsubscribe callbacks). Without
-	// the second arg, next.11's compatibility branch keeps it
+	// the second arg, the compatibility branch keeps it
 	// push-only and the silent-topic watchdog never disarms when test
 	// pages close, producing 30s-delayed warning floods.
 	pushHooks.close(ws, ctx)

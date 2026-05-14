@@ -70,6 +70,21 @@ let entrySeq = 0
 	}
 })()
 
+/**
+ * Drop entries appended past the seeded TOTAL=200. The original seed
+ * is left in place (it is not user content). entrySeq is intentionally
+ * not reset so a subsequent appendLogEntry produces ids beyond the
+ * highest one any current subscriber has cached.
+ */
+export async function purge(ctx) {
+	if (logEntries.length <= TOTAL) return { trimmed: 0 }
+	const overflow = logEntries.splice(TOTAL)
+	for (const entry of overflow) {
+		ctx.publish(TOPICS.demoPaginationLog, 'deleted', { id: entry.id })
+	}
+	return { trimmed: overflow.length }
+}
+
 export const myPaginationState = live(async () => ({
 	totalAtBoot: TOTAL,
 	pageSize: PAGE_SIZE,

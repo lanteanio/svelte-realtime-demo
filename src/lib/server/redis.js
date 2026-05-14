@@ -3,7 +3,7 @@
  *
  * All realtime features (presence, cursors, pub/sub, rate limiting) are
  * backed by Redis so they work across multiple server instances. If you
- * run a single instance, everything still works -- Redis just acts as
+ * run a single instance, everything still works - Redis just acts as
  * local state in that case.
  *
  * Each utility is created once at module load and shared across all
@@ -34,7 +34,7 @@ export const redis = createRedisClient({ url: env.REDIS_URL })
 /**
  * Circuit breaker for Redis. Trips after 5 consecutive failures,
  * probes again after 30 seconds. Presence, cursors, and rate limiting
- * degrade gracefully when Redis is down -- the app stays functional,
+ * degrade gracefully when Redis is down - the app stays functional,
  * just without cross-instance features.
  */
 export const breaker = createCircuitBreaker({
@@ -53,11 +53,11 @@ export const bus = createPubSubBus(redis, { breaker })
 export const limiter = createRateLimit(redis, { points: 100, interval: 10000, breaker })
 
 /**
- * Presence tracker -- who's online globally and per-board.
+ * Presence tracker - who's online globally and per-board.
  *
  * - key: 'id' means we deduplicate by the user's UUID (so multiple
  *   tabs from the same user count as one presence entry)
- * - heartbeat: 30s -- server pings clients every 30 seconds so the
+ * - heartbeat: 30s - server pings clients every 30 seconds so the
  *   client-side maxAge timer doesn't expire live users
  * - select: only expose id/name/color to other users (not the full
  *   userData which could contain private fields)
@@ -72,9 +72,9 @@ export const presence = createPresence(redis, {
 /**
  * Cursor position tracker for live cursor overlays.
  *
- * - throttle: 16ms per-connection -- one user can broadcast their
+ * - throttle: 16ms per-connection - one user can broadcast their
  *   cursor position at most ~60 times/second
- * - topicThrottle: 16ms per-topic world-state tick -- pending positions
+ * - topicThrottle: 16ms per-topic world-state tick - pending positions
  *   per cursor are kept in a Map; every 16ms the server emits one bulk
  *   frame per topic with the latest position for every cursor that
  *   moved. Per-peer wire frames per topic per second = 1000 / 16 = 60,
@@ -109,7 +109,7 @@ export const cursor = createCursor(redis, {
  * frequency for ops visibility.
  *
  * Captured topics are gated in hooks.ws.js by topic-name regex; this
- * factory has no per-topic knowledge -- it just provides the buffer.
+ * factory has no per-topic knowledge - it just provides the buffer.
  */
 export const replay = createReplay(redis, {
 	size: 200,
@@ -130,7 +130,7 @@ export const replay = createReplay(redis, {
  *   so realtime's local pushRegistry miss falls through to
  *   `registry.request(userId, ...)` (cluster hop).
  *
- * Single-instance setups still work with the same wiring -- the local
+ * Single-instance setups still work with the same wiring - the local
  * pushRegistry hit short-circuits before the cluster hop, so no Redis
  * round-trip cost. No `attributes` option: the demo only uses
  * `registry.request`, not the attribute-filtered `sendTo`.
@@ -141,7 +141,7 @@ export const registry = createConnectionRegistry(redis, {
 })
 
 /**
- * Cluster-wide leader-election primitive (extensions next.7+).
+ * Cluster-wide leader-election primitive.
  *
  * One worker across the cluster holds the Redis lease at any moment;
  * the synchronous `isLeader()` getter is microsecond-cost. Plugged
@@ -153,7 +153,7 @@ export const registry = createConnectionRegistry(redis, {
  * only one), so behavior is identical to no-leader-config. The
  * wiring is production-shaped.
  *
- * Defaults: 30s lease, 10s renew. Fail-closed on errors -- a Redis
+ * Defaults: 30s lease, 10s renew. Fail-closed on errors - a Redis
  * blip drops `_isLeader` to false and the cron tick skips with a
  * `cron{status:'not-leader'}` metric increment until the next renew
  * succeeds.

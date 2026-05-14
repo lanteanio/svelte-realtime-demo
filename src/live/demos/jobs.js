@@ -8,7 +8,7 @@
  * the `demos_jobs_tasks` Postgres table; a dispatch sweep claims it
  * and runs the registered handler. While it runs, a heartbeat refreshes
  * the per-attempt fence in Postgres AND in Redis. Click "Force takeover"
- * on a running row and `tasks.takeover(taskId)` (next.8) expires the
+ * on a running row and `tasks.takeover(taskId)` expires the
  * Postgres fence + releases the Redis mirror; the original handler
  * aborts via AbortSignal on its very next heartbeat tick. The retry
  * policy then re-arms the task; if mode = fail-once, the second
@@ -20,7 +20,7 @@
  *    policy. run() is inline; enqueue() lets the dispatch sweep claim
  *    rows asynchronously so the page stays responsive while the
  *    handler runs. tasks.list() / tasks.counts() / tasks.takeover()
- *    are next.8's public observability + operator surface; we use them
+ *    are the public observability + operator surface; we use them
  *    instead of raw SQL so the demo is decoupled from the runner's
  *    internal column names.
  *
@@ -35,12 +35,12 @@
  *
  *  - live.cron (svelte-realtime): 1Hz tick that re-reads the table
  *    via tasks.list() / tasks.counts() and publishes both snapshots.
- *    Polling beats LISTEN/NOTIFY plumbing for a demo; the next.8
+ *    Polling beats LISTEN/NOTIFY plumbing for a demo; the 
  *    `onStateChange` callback would replace the polling pattern in
  *    production for instant per-row reactivity.
  *
  * Storage is in `demos_jobs_tasks` (auto-migrated at construction
- * by the runner; next.8). Demo-friendly: rowTtl = 10 minutes,
+ * by the runner; ). Demo-friendly: rowTtl = 10 minutes,
  * cleanup every 5 minutes.
  */
 
@@ -69,7 +69,7 @@ export const myJobsState = live(async () => ({
 }))
 
 /**
- * Read the most recent N task rows. Wraps `tasks.list()` (next.8's
+ * Read the most recent N task rows. Wraps `tasks.list()` (the
  * public observability API) with the JSON-friendly transform the
  * client expects: Date instances become ms numbers so the wire
  * payload survives JSON.stringify without ISO-string drift in the
@@ -170,6 +170,20 @@ export const clearJobs = live(async (ctx) => {
 })
 
 /**
+ * DELETE every simulate-work row. Same SQL as clearJobs; safe even
+ * when a row is mid-run because the registered handler's heartbeat
+ * detects the missing fence on the next tick and aborts. Postgres
+ * unavailable -> no-op (the demo never wrote anything).
+ */
+export async function purge(ctx) {
+	if (!pgClient) return { available: false }
+	const res = await pgClient.query(`DELETE FROM ${TASKS_TABLE} WHERE name = $1`, [TASK_NAME])
+	ctx.publish(TOPICS.demoJobsList, 'set', [])
+	ctx.publish(TOPICS.demoJobsStats, 'set', await readStats())
+	return { deleted: res?.rowCount ?? 0 }
+}
+
+/**
  * Live stream of the recent task list. `merge: 'set'` because each
  * publish replaces the entire list - simpler than tracking per-row
  * crud events when the runner's state machine is internal.
@@ -195,7 +209,7 @@ export const jobsStats = live.stream(
  * tasks.list() / tasks.counts() API and publishes both snapshots
  * so subscribers see status transitions (pending -> running ->
  * committed/failed) without a per-event trigger. Polling is fine
- * for a demo at this scale; the next.8 `onStateChange` callback
+ * for a demo at this scale; the `onStateChange` callback
  * is the production-shape alternative for instant per-row updates.
  *
  * The cron always runs (no postgresAvailable() gate) so the stream

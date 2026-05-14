@@ -122,15 +122,20 @@ export const buyProduct = live.lock(
 		if (typeof productId !== 'string' || !products.has(productId)) {
 			throw new LiveError('VALIDATION', 'unknown productId')
 		}
+
+		// Artificial work BEFORE the stock check so every call (success
+		// or sold-out) holds the lock for the same duration. Without
+		// this, sold-out callers short-circuit in microseconds and
+		// queue depth never grows enough to surface LOCK_TIMEOUT. With
+		// it, 20 stress calls at 80ms = 1.6s of lock-held time;
+		// callers waiting past maxWaitMs (1500ms) reject with
+		// LOCK_TIMEOUT, which is the pitch.
+		await new Promise((resolve) => setTimeout(resolve, PER_BUY_DELAY_MS))
+
 		const p = products.get(productId)
 		if (p.stock <= 0) {
 			throw new LiveError('SOLD_OUT', 'no stock remaining')
 		}
-
-		// Artificial work to make contention observable. Sub-tick
-		// holders surface the queue depth on the page; without it
-		// the lock does its job too fast to see.
-		await new Promise((resolve) => setTimeout(resolve, PER_BUY_DELAY_MS))
 
 		p.stock -= 1
 		p.sold += 1

@@ -1,5 +1,5 @@
 /**
- * /demos/todos-rollback -- optimistic mutate with concurrent-failure rollback.
+ * /demos/todos-rollback - optimistic mutate with concurrent-failure rollback.
  *
  * The pitch: rapid mutates apply optimistically and roll back independently
  * when the server says no. With `forceFail` flipped on, every add / toggle /
@@ -14,7 +14,7 @@
  * - `forceFail` is a per-call flag, NOT server-side state. Each user's tab
  *   has its own toggle; concurrent users don't fight over it.
  *
- * Storage: in-memory array (demo only -- not durable across restart, not
+ * Storage: in-memory array (demo only - not durable across restart, not
  * shared across instances).
  */
 
@@ -61,6 +61,20 @@ export const removeTodo = live(async (ctx, { id, forceFail }) => {
 	ctx.publish(TOPICS.demoTodos, 'deleted', removed)
 	return removed
 })
+
+/**
+ * Wipe the todos array. Same shape as clearAll but as a plain function
+ * the orchestrator can call.
+ */
+export async function purge(ctx) {
+	const count = todos.length
+	const snapshot = todos.slice()
+	todos.length = 0
+	for (const t of snapshot) {
+		ctx.publish(TOPICS.demoTodos, 'deleted', t)
+	}
+	return { todos: count }
+}
 
 export const clearAll = live(async (ctx) => {
 	const snapshot = todos.slice()

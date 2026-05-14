@@ -12,7 +12,7 @@
  *
  * Three primitives showcased:
  *
- *  - createLeader(redis, options?) - extensions next.7+. The Redis-
+ *  - createLeader(redis, options?) - extensions . The Redis-
  *    lease primitive that elects exactly one worker across the cluster.
  *    `leader.isLeader()` is a microsecond-cost cached boolean check
  *    suitable for calling at the top of every cron tick. Wired once
@@ -92,7 +92,7 @@ export const clusterTicks = live.stream(
  * the latest entry's instanceId to highlight which worker is currently
  * the leader.
  *
- * Single-flight in next.7+; cluster-singleton via configureCron({
+ * Single-flight; cluster-singleton via configureCron({
  * leader }) wired in src/hooks.ws.js init.
  */
 export const cronTick = live.cron('* * * * * *', TOPICS.demoClusterCronTick, async (ctx) => {

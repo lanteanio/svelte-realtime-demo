@@ -1,5 +1,5 @@
 <!--
-	BoardCard -- a single board in the home page list.
+	BoardCard - a single board in the home page list.
 
 	Shows the board title, a live presence badge ("X here") if
 	anyone is currently on that board, and a countdown timer showing

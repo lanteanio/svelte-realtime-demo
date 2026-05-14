@@ -1,5 +1,5 @@
 <!--
-	StickyNote -- a draggable, editable sticky note card.
+	StickyNote - a draggable, editable sticky note card.
 
 	Interaction model:
 	- Click: brings to front (z-index)
@@ -8,7 +8,7 @@
 	- Escape or blur: exits edit mode and saves
 	- Hover: shows delete (X) and color picker (palette) buttons
 
-	The note doesn't own its data -- it receives everything via props
+	The note doesn't own its data - it receives everything via props
 	and calls parent callbacks (onMove, onEdit, onDelete, onFocus) to
 	request changes. The parent then sends RPCs to the server, which
 	publishes events to all connected clients.

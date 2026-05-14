@@ -1,5 +1,5 @@
 /**
- * Board CRUD -- live RPCs and streams.
+ * Board CRUD - live RPCs and streams.
  *
  * live() creates an RPC function that clients can call over WebSocket.
  * live.stream() creates a reactive data stream that clients subscribe to.
@@ -64,7 +64,7 @@ export const boards = live.stream(TOPICS.boards, async () => {
 }, { merge: 'crud', key: 'board_id' })
 
 /**
- * Cleanup cron -- runs every minute.
+ * Cleanup cron - runs every minute.
  *
  * Finds boards that haven't had activity in BOARD_TTL_MS (1 hour)
  * and deletes them. Protected boards (stress-me-out) are exempt.

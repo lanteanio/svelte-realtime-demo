@@ -22,12 +22,12 @@
  *      shapes the verified payload into a `{ event, data }` pair the
  *      framework publishes to the configured topic.
  *
- *  - live.cron('* * * * * *', topic, fn) - 6-field cron from next.7,
+ *  - live.cron('* * * * * *', topic, fn) - 6-field cron,
  *      1Hz firehose. Emits `speed` view events per tick weighted toward
  *      the three most recently-published stories so a freshly-published
  *      headline crosses the trending leaderboard quickly.
  *
- *  - live.aggregate(source, reducers, { topic, windows }) - the next.9
+ *  - live.aggregate(source, reducers, { topic, windows }) - the 
  *      windowed aggregate. One reducer (counts per story id), one compute
  *      (top-5), three windows: last30s sliding (3s hops), thisMinute
  *      tumbling (per-minute boundary), lifetime (never resets). Demo-
@@ -137,6 +137,26 @@ export const myNewsState = live(async () => ({
 }))
 
 /**
+ * Drop every webhook-sourced story. Seeded entries are kept (they are
+ * not user content). The aggregate's per-story counts are left alone:
+ * those decay out of the sliding (30s) and tumbling (1min) windows
+ * naturally; the lifetime window retains ghost ids until next restart,
+ * which is acceptable for a demo.
+ */
+export async function purge(ctx) {
+	let dropped = 0
+	for (let i = stories.length - 1; i >= 0; i--) {
+		const s = stories[i]
+		if (s.source !== 'seed') {
+			ctx.publish(TOPICS.demoNewsStories, 'deleted', { id: s.id })
+			stories.splice(i, 1)
+			dropped++
+		}
+	}
+	return { dropped, kept: stories.length }
+}
+
+/**
  * Set the firehose rate (0-50 events/sec). Capped well below the
  * default publish-rate threshold (5000/sec per topic).
  */
@@ -194,7 +214,7 @@ export const newsStories = live.stream(
  * lifetime window holds the same value but per-story, and exposing the
  * scalar avoids re-summing it inside derived's recompute.
  *
- * Single-flight in next.7+; cluster-singleton via configureCron({
+ * Single-flight; cluster-singleton via configureCron({
  * leader }) wired in src/hooks.ws.js init.
  */
 export const firehoseTick = live.cron('* * * * * *', TOPICS.demoNewsView, async (ctx) => {
@@ -215,7 +235,7 @@ export const firehoseTick = live.cron('* * * * * *', TOPICS.demoNewsView, async 
  * `demos:news:topk:thisMinute`, `demos:news:topk:lifetime`.
  *
  * `combine: combineCounts` is mandatory on the reducer for the sliding
- * window (next.9 hop-bucket merge requirement). `top` has no `reduce`
+ * window (hop-bucket merge requirement). `top` has no `reduce`
  * so it does not need `combine`.
  */
 export const trending = live.aggregate(TOPICS.demoNewsView, {

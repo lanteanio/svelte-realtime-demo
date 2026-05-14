@@ -1,10 +1,10 @@
 <!--
-	/demos/chaos -- deterministic chaos with seed + drop rate.
+	/demos/chaos - deterministic chaos with seed + drop rate.
 
 	Pick a seed and a drop rate. Click Start. The strip below paints
 	one cell per server tick (10/sec): green = delivered, red =
 	dropped. Same (seed, dropRate) pair always produces the same
-	pattern. Stop, change one of the inputs, Start again -- watch
+	pattern. Stop, change one of the inputs, Start again - watch
 	the pattern shift. Reproduce by re-entering the same seed.
 
 	This is the property `createTestEnv({ chaos: { dropRate, seed } })`
@@ -23,7 +23,7 @@
 	let ticks = $state([])
 
 	// chaosTicks is a static stream (single-arity topic-fn since
-	// realtime next.8) -- subscribe directly, no factory call shape.
+	// realtime ) - subscribe directly, no factory call shape.
 	$effect(() => {
 		const off = chaosTicks.subscribe((v) => { ticks = v ?? [] })
 		return () => off()
@@ -71,7 +71,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<a href="/" class="link link-hover text-sm opacity-60">&larr; Home</a>
+
 		<h1 class="text-2xl font-bold mt-2">Deterministic chaos</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Seed + drop rate fully determines the decision sequence.
@@ -156,7 +156,7 @@
 			Server: per-user state holds <code>seed</code>,
 			<code>dropRate</code>, and a Mulberry32 PRNG seeded by it.
 			Every 100ms the ticker advances the PRNG, decides drop, and
-			publishes a tick record (always -- the
+			publishes a tick record (always - the
 			<code>dropped</code> flag is the decision, not the wire
 			outcome).
 		</p>

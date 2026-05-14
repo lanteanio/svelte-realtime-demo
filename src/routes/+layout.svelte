@@ -1,5 +1,5 @@
 <!--
-	Root layout -- wraps every page in the app.
+	Root layout - wraps every page in the app.
 
 	Renders the top navbar with:
 	- App logo/name (links to home)
@@ -40,7 +40,7 @@
 	const globalUsers = $derived($globalPresence ?? [])
 
 	// --- Connection status ---
-	// 0.5.0 ships a five-state status machine plus a failure store
+	// The five-state status machine plus a failure store
 	// with the cause of the latest non-open transition. We map each
 	// state to icon + colour + opacity, and render the failure reason
 	// in the tooltip when terminal so users know why we are down.
@@ -63,7 +63,7 @@
 	<div class="navbar bg-base-100 border-b border-base-300 px-2 sm:px-4 min-h-0 h-12">
 		<div class="navbar-start gap-2">
 			<a href="/" class="flex items-center gap-1.5 sm:gap-2 font-bold text-base sm:text-lg">
-				<img src="/Svelte_Logo.svg" alt="Svelte" width="20" height="24" />
+				<img src="/svelte_orange_logo_only.png" alt="Svelte" width="32" height="32" />
 				<span class="hidden sm:inline">Svelte Realtime Demo</span>
 				<span class="sm:hidden">Demo</span>
 			</a>
