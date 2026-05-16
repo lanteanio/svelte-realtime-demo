@@ -1,6 +1,13 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # Build-time stub - vite's analyze step imports news.js which throws
+        # at module load when NODE_ENV=production and the secret is unset.
+        # The stub satisfies the check during build; the runtime value below
+        # is what actually verifies webhook signatures in production.
+        DEMO_NEWS_WEBHOOK_SECRET: build-stub
     # `network_mode: host` removed - the container now runs on the default
     # docker bridge network with explicit port publishing. Trade-offs:
     # (a) the app cannot reach `127.0.0.1:6379` / `:5432` anymore; it talks
@@ -36,6 +43,19 @@ services:
       ORIGIN: https://${DOMAIN:?required}
       SSL_CERT: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
       SSL_KEY: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
+      # Required in production: news.js throws at module load when
+      # NODE_ENV=production and this is unset, because the legacy fallback
+      # was a static string checked into the repo (forgeable webhook events).
+      # Dev keeps the static fallback so a fresh checkout works without env
+      # setup. The build-arg above carries a stub through `vite build` so
+      # the analyze-step import does not throw at image-build time; this
+      # runtime value is what actually verifies inbound webhook signatures.
+      DEMO_NEWS_WEBHOOK_SECRET: ${DEMO_NEWS_WEBHOOK_SECRET:?required}
+      # Optional. When set, /metrics requires the scraper to send a matching
+      # X-Scrape-Token header and 401s otherwise. When unset (default), the
+      # endpoint stays open - no behavior change for existing deployments
+      # scraping without auth.
+      METRICS_SCRAPE_TOKEN: ${METRICS_SCRAPE_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy

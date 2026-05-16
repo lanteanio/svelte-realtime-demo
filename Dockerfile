@@ -14,6 +14,17 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
+
+# vite build + SvelteKit's analyze step imports src/live/demos/news.js at
+# module-load time. That file fail-closes on `NODE_ENV=production` when
+# DEMO_NEWS_WEBHOOK_SECRET is unset (the legacy static fallback was a
+# repo-checked string, so production refuses to start with it). The ARG
+# carries the build-stub value from docker-compose.yml so the analyze
+# import does not throw; the real runtime value lands via the compose
+# `environment:` block and replaces the stub on every fresh container
+# start.
+ARG DEMO_NEWS_WEBHOOK_SECRET
+ENV DEMO_NEWS_WEBHOOK_SECRET=$DEMO_NEWS_WEBHOOK_SECRET
 RUN npm run build
 
 # --- Production stage ---
