@@ -13,7 +13,7 @@ import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uw
 import { bus, limiter, presence, cursor, replay, registry, leader } from '$lib/server/redis'
 import { metrics } from '$lib/server/metrics'
 import { tasks } from '$lib/server/tasks'
-import { generateIdentity } from '$lib/names'
+import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 // Side-effect import: eagerly loads every demo with a purge surface and
 // registers the orchestrator cron at boot. See src/lib/server/demo-purge.js.
 import '$lib/server/demo-purge'
@@ -60,57 +60,37 @@ live.configurePush({
 	remoteRegistry: registry
 })
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
-
-const VALID_ORGS = new Set(['acme', 'globex'])
-
 /**
- * Validate an identity object from the cookie. Returns null if invalid.
- * We check every field strictly - never trust client-provided data.
+ * Called when a client wants to upgrade from HTTP to WebSocket.
+ * Whatever this function returns becomes `ws.getUserData()` for the
+ * lifetime of that connection. We attach the user's identity (looked up
+ * from the session store keyed by the cookie's session-id).
+ *
+ * In the normal flow a session exists from the page-load HTTP visit, so
+ * this hook just reads it from Redis. The legacy / fresh-connection
+ * fallback mints a session on the fly so WS connections that race past
+ * the HTTP cookie-set (unusual, but possible for direct wss:// clients)
+ * still get a usable identity.
  *
  * `org` is optional. When set, must be one of the demo's two
  * organizations (`acme` or `globex`); used by /demos/denials to gate
  * access to org-scoped audit-log streams. Unset is treated as "no org"
  * and denies every audit:* subscribe.
  */
-function validateIdentity(obj) {
-	if (!obj || typeof obj !== 'object') return null
-	if (typeof obj.id !== 'string' || !UUID_RE.test(obj.id)) return null
-	if (typeof obj.name !== 'string' || obj.name.length < 1 || obj.name.length > 40) return null
-	if (typeof obj.color !== 'string' || !HEX_COLOR_RE.test(obj.color)) return null
-	const org = VALID_ORGS.has(obj.org) ? obj.org : null
-	return { id: obj.id, name: obj.name, color: obj.color, org }
-}
+export async function upgrade({ cookies }) {
+	const raw = cookies.identity
 
-/**
- * Called when a client wants to upgrade from HTTP to WebSocket.
- * Whatever this function returns becomes `ws.getUserData()` for the
- * lifetime of that connection. Here we use it to attach the user's identity.
- *
- * If the client has a valid identity cookie, we reuse it.
- * Otherwise, we generate a fresh random identity (no login required).
- */
-export function upgrade({ cookies }) {
-	const existing = cookies.identity
-	if (existing) {
-		try {
-			const parsed = validateIdentity(JSON.parse(existing))
-			if (parsed) return parsed
-		} catch {}
-	}
+	// Fast path: session exists in Redis.
+	const existing = await lookupSession(raw)
+	if (existing) return existing
 
-	const identity = {
-		id: crypto.randomUUID(),
-		// Default new visitors to Acme. /demos/denials lets them switch
-		// to Globex via the org-set endpoint, which rewrites the cookie
-		// and reloads so the next WS handshake picks up the new org.
-		org: 'acme',
-		...generateIdentity()
-	}
-
-	// Set the cookie so the identity persists across page refreshes
-	cookies.identity = JSON.stringify(identity)
+	// Fallback: no session yet (or legacy plain-JSON cookie from before
+	// this change). Migrate legacy contents if possible, otherwise mint
+	// a fresh session. Either way, write the new session-id back into
+	// the cookie so the next request follows the fast path.
+	const legacy = tryParseLegacyJsonCookie(raw)
+	const { sessionId, identity } = await createSession(legacy)
+	cookies.identity = sessionId
 	return identity
 }
 

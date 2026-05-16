@@ -14,6 +14,11 @@ import realtime from 'svelte-realtime/vite'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+	// Explicit `sourcemap: false` so a future config drift cannot ship
+	// server-source maps to production.
+	build: {
+		sourcemap: false
+	},
 	plugins: [
 		sveltekit(),
 		tailwindcss(),

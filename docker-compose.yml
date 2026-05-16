@@ -1,13 +1,38 @@
 services:
   app:
     build: .
-    network_mode: host
+    # `network_mode: host` removed - the container now runs on the default
+    # docker bridge network with explicit port publishing. Trade-offs:
+    # (a) the app cannot reach `127.0.0.1:6379` / `:5432` anymore; it talks
+    # to redis/postgres via docker's embedded DNS (`redis:6379`, `postgres:5432`)
+    # which routes inside the bridge network, never crossing the host loopback,
+    # (b) port 443 is published to the host via docker-proxy (one extra hop;
+    # negligible for SSE/WebSocket workloads), (c) the bind-to-127.0.0.1
+    # mappings on redis/postgres still work because docker-proxy and the
+    # internal docker network are orthogonal - the host-side mapping closes
+    # the public surface, the internal DNS handles same-compose traffic.
+    ports:
+      # Host 443 -> container 3443. The container runs as the unprivileged
+      # `node` user (see Dockerfile) and cannot bind ports below 1024, so we
+      # bind a high port inside and let docker-proxy do the host:443 mapping.
+      - "443:3443"
     volumes:
       - certs:/etc/letsencrypt:ro
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:?required}@127.0.0.1:5432/stickynotes
-      REDIS_URL: redis://127.0.0.1:6379
-      PORT: "443"
+      # Resolve postgres/redis by service name via the docker network's
+      # embedded DNS. Was `127.0.0.1:...` under host networking. The app
+      # connects as the non-superuser `stickynotes_app` role (created on
+      # first init by Dockerfile.postgres; see CHANGELOG for the one-shot
+      # migration step existing deployments must run manually).
+      DATABASE_URL: postgres://stickynotes_app:${STICKYNOTES_APP_PASSWORD:?required}@postgres:5432/stickynotes
+      # The `:${REDIS_PASSWORD:-}@` form expands to bare `redis://:@redis:6379`
+      # when REDIS_PASSWORD is unset (ioredis treats empty password as "none"
+      # and the auth handshake is skipped) and to `redis://:<secret>@redis:6379`
+      # when set. Existing deployments without REDIS_PASSWORD see no behavior
+      # change; setting it enables the AUTH handshake in lockstep with the
+      # redis service's --requirepass below.
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
+      PORT: "3443"
       ORIGIN: https://${DOMAIN:?required}
       SSL_CERT: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
       SSL_KEY: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
@@ -45,11 +70,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgres
+    # Bind to 127.0.0.1 only. The app uses `network_mode: host` so it connects
+    # via the host's loopback at 127.0.0.1:5432 - unchanged by this bind.
+    # External clients (the operator running `psql -h <host> -p 5432` from
+    # another machine) are blocked by this change; use `docker exec
+    # -it <container> psql ...` instead, or temporarily open the port in
+    # a sidecar config. Mirrors the docs repo's pre-existing 127.0.0.1 bind.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
       POSTGRES_DB: stickynotes
+      # Passed to /docker-entrypoint-initdb.d/00-init-app-role.sh on first
+      # init so it can CREATE ROLE stickynotes_app with this password.
+      # Ignored on subsequent container starts (initdb only runs once per
+      # data volume).
+      STICKYNOTES_APP_PASSWORD: ${STICKYNOTES_APP_PASSWORD:?required}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -61,14 +97,41 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7-alpine
-    command: redis-server --protected-mode no --appendonly yes
+    # redis:7-alpine pinned by digest. Bump manually when pulling in upstream
+    # patches; the operator owns the cadence.
+    image: redis:7-alpine@sha256:b1addbe72465a718643cff9e60a58e6df1841e29d6d7d60c9a85d8d72f08d1a7
+    # `--protected-mode no` removed: the container is now bound to
+    # 127.0.0.1 (see ports below) so the protected-mode default fail-closed
+    # behavior never fires from a real-world external connection anyway,
+    # but dropping the override keeps the defense layer intact for the case
+    # someone accidentally exposes the container to a public interface in
+    # the future.
+    #
+    # AUTH support is opt-in. When REDIS_PASSWORD is set in the env, the
+    # server starts with --requirepass; the app's REDIS_URL above carries
+    # the matching password. When unset, redis runs unauthenticated as it
+    # always did - no behavior change for existing deployments.
+    command:
+      - sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes
+        else
+          exec redis-server --appendonly yes
+        fi
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Healthcheck also needs the password when set, otherwise redis-cli
+      # ping fails with NOAUTH and the container loops on unhealthy.
+      test:
+        - CMD-SHELL
+        - if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping; else redis-cli ping; fi
       interval: 5s
       timeout: 3s
       retries: 5

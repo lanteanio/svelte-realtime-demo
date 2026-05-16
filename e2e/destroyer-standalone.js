@@ -10,6 +10,7 @@
  */
 
 import { WebSocket } from 'ws';
+import { Agent } from 'undici';
 const args = process.argv.slice(2);
 const WITH_CURSORS = args.includes('--cursors');
 const WS_URL = args.find(a => a.startsWith('wss://')) || 'wss://svelte-realtime-demo.lantean.io/ws';
@@ -17,8 +18,11 @@ const HTTP_URL = WS_URL.replace('wss://', 'https://').replace('/ws', '');
 const BOARD_SLUG = 'stress-me-out';
 const LEVELS = [1000, 2000, 3000, 5000, 7000, 10000];
 
-// Disable TLS verification for self-signed certs
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// Per-request TLS-skip dispatcher for fetch. Scoped to this Agent instance
+// so other fetch / https calls in the process still verify certificates.
+// The WebSocket connections use the ws library's scoped rejectUnauthorized
+// option at construction time.
+const insecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
 
 let msgId = 0;
 const nextId = () => 'x' + (msgId++).toString(36);
@@ -26,7 +30,7 @@ const nextId = () => 'x' + (msgId++).toString(36);
 // Resolve board UUID from the page HTML
 async function getBoardId() {
 	try {
-		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`);
+		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { dispatcher: insecureDispatcher });
 		const body = await res.text();
 		const match = body.match(/boardId[:"]\s*"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
 		if (match) return match[1];
@@ -84,7 +88,7 @@ async function checkServer() {
 	try {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 10000);
-		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { signal: controller.signal });
+		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { signal: controller.signal, dispatcher: insecureDispatcher });
 		clearTimeout(timer);
 		return res.status === 200;
 	} catch (err) {

@@ -1,46 +1,47 @@
 /**
  * Layout server load - runs on every page request.
  *
- * Manages the user's identity via a cookie. On first visit, generates
- * a random identity (UUID + fun name + color). On subsequent visits,
- * reads it back from the cookie.
+ * Manages the user's identity via a session cookie. The cookie carries
+ * only a 128-bit opaque session-id; the identity itself lives in Redis
+ * under `identity-session:<id>`. See $lib/server/identity-session for
+ * the storage contract.
  *
  * The cookie is NOT httpOnly because the client-side JS needs to read
- * it (the WebSocket upgrade handler in hooks.ws.js also reads it).
- * This is fine because the identity is not a secret - it's just a
- * random display name and color.
+ * it (the WebSocket upgrade handler in hooks.ws.js also reads it). The
+ * cookie value itself is not sensitive - it is a lookup key into the
+ * server-side store, not the identity itself.
  */
 
-import { generateIdentity } from '$lib/names'
+import { dev } from '$app/environment'
+import {
+	lookupSession,
+	createSession,
+	tryParseLegacyJsonCookie,
+	SESSION_COOKIE_MAX_AGE
+} from '$lib/server/identity-session'
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
-
-/** Strictly validate the identity cookie. Returns null if anything is off. */
-function parseIdentity(raw) {
-	if (!raw) return null
-	try {
-		const obj = JSON.parse(raw)
-		if (
-			!obj || typeof obj !== 'object' ||
-			typeof obj.id !== 'string' || !UUID_RE.test(obj.id) ||
-			typeof obj.name !== 'string' || obj.name.length < 1 || obj.name.length > 40 ||
-			typeof obj.color !== 'string' || !HEX_COLOR_RE.test(obj.color)
-		) {
-			return null
-		}
-		return { id: obj.id, name: obj.name, color: obj.color }
-	} catch {
-		return null
-	}
+const COOKIE_OPTS = {
+	path: '/',
+	httpOnly: false,
+	secure: !dev,
+	sameSite: 'lax',
+	maxAge: SESSION_COOKIE_MAX_AGE
 }
 
-export function load({ cookies }) {
-	const existing = parseIdentity(cookies.get('identity'))
+export async function load({ cookies }) {
+	const raw = cookies.get('identity')
+
+	// Fast path: cookie holds a valid session-id and the session exists.
+	const existing = await lookupSession(raw)
 	if (existing) return { identity: existing }
 
-	// First visit - generate a fresh identity and persist it
-	const identity = { id: crypto.randomUUID(), ...generateIdentity() }
-	cookies.set('identity', JSON.stringify(identity), { path: '/', httpOnly: false, maxAge: 60 * 60 * 24 * 365 })
+	// Migration path: legacy plain-JSON cookies from before this change.
+	// Mint a session populated with the legacy values so the visitor
+	// keeps their displayed name across the upgrade. Runs at most once
+	// per pre-existing visitor; after the first hit they have a real
+	// session and follow the fast path.
+	const legacy = tryParseLegacyJsonCookie(raw)
+	const { sessionId, identity } = await createSession(legacy)
+	cookies.set('identity', sessionId, COOKIE_OPTS)
 	return { identity }
 }

@@ -1,3 +1,12 @@
+-- Tables, indexes, and functions are owned by stickynotes_app (the non-
+-- superuser application role created by 00-init-app-role.sh) so the app
+-- can run runtime DDL on its own schema (the ALTER TABLE in hooks.server.js)
+-- without holding superuser privileges. SET ROLE / RESET ROLE is the
+-- least-magic way to do this; the surrounding init runs as POSTGRES_USER
+-- (a superuser by docker-entrypoint convention), and SET ROLE temporarily
+-- switches the executor to stickynotes_app for the duration of the file.
+SET ROLE stickynotes_app;
+
 CREATE TABLE board (
     board_id       uuid         DEFAULT gen_random_uuid() PRIMARY KEY,
     title          text         NOT NULL,
@@ -56,3 +65,5 @@ $$;
 
 -- Uncomment if pg_cron is available:
 -- SELECT cron.schedule('archive-notes', '*/5 * * * *', 'SELECT archive_old_notes()');
+
+RESET ROLE;

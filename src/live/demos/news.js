@@ -54,11 +54,23 @@ const MAX_HEADLINE_LEN = 80
 const MAX_SUMMARY_LEN = 200
 
 /**
- * HMAC secret. Real deployments would bind this to an external publisher;
- * the demo defaults to a hard-coded value so a fresh checkout works
- * without env setup. Override with DEMO_NEWS_WEBHOOK_SECRET in production.
+ * HMAC secret. Real deployments must override with DEMO_NEWS_WEBHOOK_SECRET.
+ * Dev defaults to a hard-coded value so a fresh checkout works without env
+ * setup; in production the fallback is fail-closed because shipping a known
+ * static secret means any attacker can forge `created` stories.
  */
-const WEBHOOK_SECRET = process.env.DEMO_NEWS_WEBHOOK_SECRET || 'demo-news-secret'
+const WEBHOOK_SECRET = (() => {
+	const fromEnv = process.env.DEMO_NEWS_WEBHOOK_SECRET
+	if (fromEnv) return fromEnv
+	if (process.env.NODE_ENV === 'production') {
+		throw new Error(
+			'DEMO_NEWS_WEBHOOK_SECRET must be set in production. The demo\'s ' +
+			'static fallback is unsafe outside dev because it is checked into ' +
+			'the repo - anyone could forge webhook events.'
+		)
+	}
+	return 'demo-news-secret'
+})()
 
 /**
  * Seed stories so the page is non-empty on first load and the firehose

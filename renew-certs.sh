@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "Renewing certificates..."
 docker compose exec certbot certbot renew --standalone

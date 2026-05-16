@@ -26,3 +26,12 @@ test-results
 playwright-report
 source
 _screenshots
+
+# Certificates and private keys (Let's Encrypt artifacts, self-signed dev certs,
+# Windows certificate bundles). Never commit these - even dev-only material can
+# tip an attacker about deployment shape and leak ACL-relevant identifiers.
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12

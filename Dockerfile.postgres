@@ -1,2 +1,12 @@
-FROM postgres:17-alpine
+# postgres:17-alpine pinned by digest. Bump manually when pulling in
+# upstream patches; the operator owns the cadence.
+FROM postgres:17-alpine@sha256:5a6fcbc5d93831991d2386fa634509b3c49a1ac5ffb70c13c2322840f821d7e7
+
+# 00-init-app-role.sh creates the non-superuser `stickynotes_app` role from
+# $STICKYNOTES_APP_PASSWORD; 01-schema.sql creates the schema as that role
+# (so the app owns its tables and can run runtime DDL without superuser).
+# docker-entrypoint-initdb.d runs files in lexicographic order, so 00- runs
+# before 01-.
+COPY init-app-role.sh /docker-entrypoint-initdb.d/00-init-app-role.sh
 COPY schema.sql /docker-entrypoint-initdb.d/01-schema.sql
+RUN chmod +x /docker-entrypoint-initdb.d/00-init-app-role.sh

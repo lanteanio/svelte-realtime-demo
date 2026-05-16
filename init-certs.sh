@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 DOMAIN=${1:?Usage: ./init-certs.sh <domain> <email>}
 EMAIL=${2:?Usage: ./init-certs.sh <domain> <email>}
