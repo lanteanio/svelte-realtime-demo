@@ -33,7 +33,16 @@ FROM node:22-trixie-slim@sha256:19e006436508fe491c9f9f0e673b3bf9a68a6946b5d27308
 
 # gosu lets the entrypoint drop from root to the `node` user after the
 # cert-copy step. The official node image already ships a `node` UID 1000.
-RUN apt-get update && apt-get install -y --no-install-recommends gosu && rm -rf /var/lib/apt/lists/*
+#
+# libcap2-bin gives us `setcap`, used below to grant the node binary the
+# CAP_NET_BIND_SERVICE file capability so the unprivileged `node` user can
+# bind host:443 directly under `network_mode: host`. Both halves are
+# required: the compose service adds `cap_add: NET_BIND_SERVICE` so the
+# cap is available inside the container's user namespace, and the
+# filecaps bit below makes the cap usable by a non-root caller.
+RUN apt-get update && apt-get install -y --no-install-recommends gosu libcap2-bin && \
+    setcap 'cap_net_bind_service=+ep' "$(readlink -f "$(command -v node)")" && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -50,9 +59,11 @@ COPY --from=build /app/build ./build
 COPY entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
-# Non-privileged port; docker-compose maps the host's 443 here.
-ENV PORT=3443
-EXPOSE 3443
+# Bind directly on host:443. Host networking (see docker-compose.yml) means
+# the app shares the host's net namespace, and the file capability set on
+# the node binary above lets the unprivileged `node` user bind below 1024.
+ENV PORT=443
+EXPOSE 443
 
 # Runs as root initially so entrypoint.sh can copy the letsencrypt privkey
 # (mode 0600 root) into a node-readable location, then `exec gosu node` to

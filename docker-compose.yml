@@ -8,38 +8,39 @@ services:
         # The stub satisfies the check during build; the runtime value below
         # is what actually verifies webhook signatures in production.
         DEMO_NEWS_WEBHOOK_SECRET: build-stub
-    # `network_mode: host` removed - the container now runs on the default
-    # docker bridge network with explicit port publishing. Trade-offs:
-    # (a) the app cannot reach `127.0.0.1:6379` / `:5432` anymore; it talks
-    # to redis/postgres via docker's embedded DNS (`redis:6379`, `postgres:5432`)
-    # which routes inside the bridge network, never crossing the host loopback,
-    # (b) port 443 is published to the host via docker-proxy (one extra hop;
-    # negligible for SSE/WebSocket workloads), (c) the bind-to-127.0.0.1
-    # mappings on redis/postgres still work because docker-proxy and the
-    # internal docker network are orthogonal - the host-side mapping closes
-    # the public surface, the internal DNS handles same-compose traffic.
-    ports:
-      # Host 443 -> container 3443. The container runs as the unprivileged
-      # `node` user (see Dockerfile) and cannot bind ports below 1024, so we
-      # bind a high port inside and let docker-proxy do the host:443 mapping.
-      - "443:3443"
+    # Host networking is load-bearing here: both replicas bind host:443 via
+    # SO_REUSEPORT clustering, and the host kernel distributes inbound
+    # connections across them at the network-stack level. Bridge networking
+    # with explicit port publishing would let only one container hold 443,
+    # collapsing the multi-replica architecture. See `cap_add` below for how
+    # the non-root `node` user retains the ability to bind 443 directly.
+    network_mode: host
+    cap_add:
+      # Lets the non-root `node` user bind privileged ports (443) inside the
+      # container. The Dockerfile sets the matching file capability on the
+      # node binary; both layers are required - kernel needs `cap_add` to
+      # surface the cap inside the namespace, AND the binary needs the
+      # filecaps bit so a non-root caller can use it.
+      - NET_BIND_SERVICE
     volumes:
       - certs:/etc/letsencrypt:ro
     environment:
-      # Resolve postgres/redis by service name via the docker network's
-      # embedded DNS. Was `127.0.0.1:...` under host networking. The app
+      # Host networking means the app shares the host's loopback. Postgres
+      # and redis publish only to `127.0.0.1:5432` / `127.0.0.1:6379` (see
+      # below), so the app reaches them via the host loopback - same DNS
+      # the operator's `psql` / `redis-cli` shell would use. The app
       # connects as the non-superuser `stickynotes_app` role (created on
       # first init by Dockerfile.postgres; see CHANGELOG for the one-shot
       # migration step existing deployments must run manually).
-      DATABASE_URL: postgres://stickynotes_app:${STICKYNOTES_APP_PASSWORD:?required}@postgres:5432/stickynotes
-      # The `:${REDIS_PASSWORD:-}@` form expands to bare `redis://:@redis:6379`
+      DATABASE_URL: postgres://stickynotes_app:${STICKYNOTES_APP_PASSWORD:?required}@127.0.0.1:5432/stickynotes
+      # The `:${REDIS_PASSWORD:-}@` form expands to bare `redis://:@127.0.0.1:6379`
       # when REDIS_PASSWORD is unset (ioredis treats empty password as "none"
-      # and the auth handshake is skipped) and to `redis://:<secret>@redis:6379`
+      # and the auth handshake is skipped) and to `redis://:<secret>@127.0.0.1:6379`
       # when set. Existing deployments without REDIS_PASSWORD see no behavior
       # change; setting it enables the AUTH handshake in lockstep with the
       # redis service's --requirepass below.
-      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
-      PORT: "3443"
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@127.0.0.1:6379
+      PORT: "443"
       ORIGIN: https://${DOMAIN:?required}
       SSL_CERT: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
       SSL_KEY: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
@@ -90,12 +91,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.postgres
-    # Bind to 127.0.0.1 only. The app uses `network_mode: host` so it connects
-    # via the host's loopback at 127.0.0.1:5432 - unchanged by this bind.
-    # External clients (the operator running `psql -h <host> -p 5432` from
-    # another machine) are blocked by this change; use `docker exec
-    # -it <container> psql ...` instead, or temporarily open the port in
-    # a sidecar config. Mirrors the docs repo's pre-existing 127.0.0.1 bind.
+    # Bind to 127.0.0.1 only. The app uses `network_mode: host` so it
+    # connects via the host's loopback at 127.0.0.1:5432 - this bind is
+    # exactly the reachability surface the app needs. External clients
+    # (the operator running `psql -h <host> -p 5432` from another machine)
+    # are blocked; use `docker exec -it <container> psql ...` instead, or
+    # temporarily open the port in a sidecar config. Mirrors the docs repo's
+    # pre-existing 127.0.0.1 bind.
     ports:
       - "127.0.0.1:5432:5432"
     environment:
