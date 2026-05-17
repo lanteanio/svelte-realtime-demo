@@ -13,18 +13,23 @@
  * return value, no derived stream; just a hook that runs whenever
  * any of the source topics emits an event.
  *
- * The effect's handler can `platform.publish(...)` to fan out, call
- * external services (email, SMS, webhooks), write to durable
- * stores, or any combination. In production this is the canonical
- * shape for orchestration: "when X happens, do Y, Z, W in parallel
- * without coupling them to the X publisher."
+ * Cluster note: live.effect fires on every replica that received the
+ * source publish (the bus subscriber's local fan-out re-triggers the
+ * framework's effect wrap). For a pure side-effect handler (one that
+ * has external consequences like writing to a durable store, sending
+ * a notification, calling a webhook), this means N replicas = N
+ * duplicate side effects per source event. The fix is to leader-gate
+ * the handler so it runs exactly once cluster-wide. Aggregates and
+ * derived streams do not need this gate - they read shared state and
+ * produce idempotent output.
  *
- * Storage is in-memory. Each adjacent stream caps at FEED_CAP
- * entries, FIFO-evicted.
+ * Storage is cluster-shared via Redis LISTs. Each adjacent stream caps
+ * at FEED_CAP entries, FIFO-evicted on LTRIM.
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis, leader } from '$lib/server/redis'
 
 const FEED_CAP = 30
 
@@ -35,17 +40,39 @@ const PRODUCT_PRICES = {
 	muffin: 6
 }
 
-/** @type {Array<{ id: string, productName: string, qty: number, total: number, ts: number, buyerName: string, buyerColor: string }>} */
-const orders = []
+const ORDERS_KEY = 'demos:effect:orders'
+const AUDIT_KEY = 'demos:effect:audit'
+const NOTIF_KEY = 'demos:effect:notifications'
 
-/** @type {Array<{ id: string, orderId: string, level: string, message: string, ts: number }>} */
-const auditEntries = []
+/**
+ * Append entry to a capped LIST (newest first). Captures any entries
+ * the LTRIM is about to drop so the caller can publish 'deleted' per
+ * evicted id, then publishes 'created' for the new entry.
+ */
+async function appendCapped(key, topic, entry, ctx) {
+	const raw = JSON.stringify(entry)
+	const pipeline = redis.redis.multi()
+	pipeline.lpush(key, raw)
+	pipeline.lrange(key, FEED_CAP, -1)
+	pipeline.ltrim(key, 0, FEED_CAP - 1)
+	const results = await pipeline.exec()
+	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
+	for (const evictedRaw of evicted) {
+		try {
+			const dropped = JSON.parse(evictedRaw)
+			ctx.publish(topic, 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already evicted */ }
+	}
+	ctx.publish(topic, 'created', entry)
+}
 
-/** @type {Array<{ id: string, orderId: string, message: string, ts: number }>} */
-const notifications = []
-
-function shiftIfFull(arr, cap) {
-	while (arr.length > cap) arr.pop()
+async function readList(key) {
+	const raws = await redis.redis.lrange(key, 0, -1)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
 }
 
 export const myEffectState = live(async () => ({
@@ -70,36 +97,42 @@ export const placeOrder = live(async (ctx, args) => {
 		buyerName: ctx.user?.name ?? '(unknown)',
 		buyerColor: ctx.user?.color ?? '#888888'
 	}
-	orders.unshift(order)
-	while (orders.length > FEED_CAP) {
-		const dropped = orders.pop()
-		ctx.publish(TOPICS.demoEffectOrders, 'deleted', { id: dropped.id })
-	}
-	ctx.publish(TOPICS.demoEffectOrders, 'created', order)
+	await appendCapped(ORDERS_KEY, TOPICS.demoEffectOrders, order, ctx)
 	return order
 })
 
 /**
- * Wipe all three feeds. Same fan-out as the existing clearFeeds RPC.
+ * Wipe all three feeds. Same fan-out as the clearFeeds RPC.
  */
 export async function purge(ctx) {
-	const counts = { orders: orders.length, audit: auditEntries.length, notifications: notifications.length }
-	for (const o of orders) ctx.publish(TOPICS.demoEffectOrders, 'deleted', { id: o.id })
-	for (const a of auditEntries) ctx.publish(TOPICS.demoEffectAudit, 'deleted', { id: a.id })
-	for (const n of notifications) ctx.publish(TOPICS.demoEffectNotifications, 'deleted', { id: n.id })
-	orders.length = 0
-	auditEntries.length = 0
-	notifications.length = 0
+	const [ordersRaws, auditRaws, notifRaws] = await Promise.all([
+		redis.redis.lrange(ORDERS_KEY, 0, -1),
+		redis.redis.lrange(AUDIT_KEY, 0, -1),
+		redis.redis.lrange(NOTIF_KEY, 0, -1)
+	])
+	const counts = { orders: ordersRaws.length, audit: auditRaws.length, notifications: notifRaws.length }
+	const pipeline = redis.redis.multi()
+	pipeline.del(ORDERS_KEY)
+	pipeline.del(AUDIT_KEY)
+	pipeline.del(NOTIF_KEY)
+	await pipeline.exec()
+
+	function emit(raws, topic) {
+		for (const raw of raws) {
+			try {
+				const e = JSON.parse(raw)
+				ctx.publish(topic, 'deleted', { id: e.id })
+			} catch { /* corrupt entry already gone */ }
+		}
+	}
+	emit(ordersRaws, TOPICS.demoEffectOrders)
+	emit(auditRaws, TOPICS.demoEffectAudit)
+	emit(notifRaws, TOPICS.demoEffectNotifications)
 	return counts
 }
 
 export const clearFeeds = live(async (ctx) => {
-	for (const o of orders.slice()) ctx.publish(TOPICS.demoEffectOrders, 'deleted', { id: o.id })
-	for (const a of auditEntries.slice()) ctx.publish(TOPICS.demoEffectAudit, 'deleted', { id: a.id })
-	for (const n of notifications.slice()) ctx.publish(TOPICS.demoEffectNotifications, 'deleted', { id: n.id })
-	orders.length = 0
-	auditEntries.length = 0
-	notifications.length = 0
+	await purge(ctx)
 	return { ok: true }
 })
 
@@ -110,6 +143,14 @@ export const clearFeeds = live(async (ctx) => {
  * services, write to durable stores, push to webhooks - the same
  * shape composes for any side-effect orchestration.
  *
+ * Leader-gated cluster-wide: the live.effect wrap fires on every
+ * replica that receives the source publish (the bus subscriber's
+ * local fan-out re-triggers it), so without this gate one order
+ * placement would generate one audit entry + one notification PER
+ * replica - duplicate side effects. The gate runs the handler on
+ * exactly one worker; the audit + notification publishes from that
+ * worker reach every replica's subscribers via the cluster bus.
+ *
  * Fire-and-forget: throws here are swallowed by the framework so a
  * downstream service outage doesn't fail the original publisher's
  * RPC. Log them via `live.onError(...)` if you want visibility.
@@ -117,6 +158,7 @@ export const clearFeeds = live(async (ctx) => {
 export const orderEffects = live.effect(
 	[TOPICS.demoEffectOrders],
 	async (event, data, platform) => {
+		if (!leader.isLeader()) return
 		// We only react to 'created' events. 'deleted' events from FIFO
 		// eviction are not order placements; ignoring them keeps the
 		// audit / notifications feeds focused on real user actions.
@@ -124,47 +166,44 @@ export const orderEffects = live.effect(
 		if (!data || typeof data !== 'object') return
 
 		const order = data
-		const auditId = 'aud-' + crypto.randomUUID().slice(0, 8)
-		const notifId = 'ntf-' + crypto.randomUUID().slice(0, 8)
-
 		const auditEntry = {
-			id: auditId,
+			id: 'aud-' + crypto.randomUUID().slice(0, 8),
 			orderId: order.id,
 			level: 'info',
 			message: `order ${order.id}: ${order.qty}x ${order.productName} for $${order.total} placed by ${order.buyerName}`,
 			ts: Date.now()
 		}
 		const notification = {
-			id: notifId,
+			id: 'ntf-' + crypto.randomUUID().slice(0, 8),
 			orderId: order.id,
 			message: `Thanks ${order.buyerName}! Your ${order.qty}x ${order.productName} is confirmed.`,
 			ts: Date.now()
 		}
 
-		auditEntries.unshift(auditEntry)
-		shiftIfFull(auditEntries, FEED_CAP)
-		notifications.unshift(notification)
-		shiftIfFull(notifications, FEED_CAP)
-
-		platform.publish(TOPICS.demoEffectAudit, 'created', auditEntry)
-		platform.publish(TOPICS.demoEffectNotifications, 'created', notification)
+		// platform here is the framework's wrapped platform; appendCapped
+		// uses ctx.publish via the platform's publish path, which goes
+		// through the same wrap and (since we already gated above) does
+		// not re-fire the effect.
+		const ctx = { publish: (t, ev, d) => platform.publish(t, ev, d) }
+		await appendCapped(AUDIT_KEY, TOPICS.demoEffectAudit, auditEntry, ctx)
+		await appendCapped(NOTIF_KEY, TOPICS.demoEffectNotifications, notification, ctx)
 	}
 )
 
 export const ordersStream = live.stream(
 	TOPICS.demoEffectOrders,
-	async () => orders.slice(),
+	async () => readList(ORDERS_KEY),
 	{ merge: 'crud', key: 'id' }
 )
 
 export const auditStream = live.stream(
 	TOPICS.demoEffectAudit,
-	async () => auditEntries.slice(),
+	async () => readList(AUDIT_KEY),
 	{ merge: 'crud', key: 'id' }
 )
 
 export const notificationsStream = live.stream(
 	TOPICS.demoEffectNotifications,
-	async () => notifications.slice(),
+	async () => readList(NOTIF_KEY),
 	{ merge: 'crud', key: 'id' }
 )

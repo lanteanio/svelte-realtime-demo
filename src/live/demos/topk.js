@@ -41,6 +41,7 @@
 
 import { live, LiveError, combineCounts } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 /** Pool of 12 visually distinct items competing for the leaderboards. */
 const ITEMS = [
@@ -59,27 +60,38 @@ const ITEMS = [
 ]
 
 const VALID_BIAS = new Set(['uniform', 'hot', 'monopoly'])
+const DEFAULT_SPEED = 5
+const DEFAULT_BIAS = 'uniform'
 
 /**
- * Server-side controls. Global to all viewers; the demo's pitch is
- * a shared real-time view, like a public trending page on a streaming
- * service. Per-user controls would defeat the "watch others' clicks
- * shape the leaderboard" angle (which we don't have today, but might
- * add later).
+ * Server-side controls live in Redis so the slider is cluster-shared:
+ * setSpeed / setBias RPCs may land on any replica, and the leader-gated
+ * firehose cron may fire on a different replica - both ends see the
+ * same value within one round-trip.
  */
-let speed = 5
-let bias = 'uniform'
+const SPEED_KEY = 'demos:topk:speed'
+const BIAS_KEY = 'demos:topk:bias'
+
+async function getSpeed() {
+	const v = await redis.redis.get(SPEED_KEY)
+	if (v === null) return DEFAULT_SPEED
+	const n = Number(v)
+	return Number.isFinite(n) ? n : DEFAULT_SPEED
+}
+
+async function getBias() {
+	const v = await redis.redis.get(BIAS_KEY)
+	return typeof v === 'string' && VALID_BIAS.has(v) ? v : DEFAULT_BIAS
+}
 
 /**
- * Bias weights determine how the firehose picks items. Returns
- * cumulative thresholds in [0, 1]; binary-search-friendly but the
- * pool is tiny so a linear scan is fine.
+ * Bias weights determine how the firehose picks items.
  *
- *  - uniform: every item equal probability (1/12 ≈ 8.3% each)
+ *  - uniform: every item equal probability (1/12 ~= 8.3% each)
  *  - hot:     top 3 items get 60% combined; rest split the 40%
  *  - monopoly: one item dominates with 75%; rest split the 25%
  */
-function pickItem() {
+function pickItem(bias) {
 	const r = Math.random()
 	const N = ITEMS.length
 	if (bias === 'uniform') {
@@ -106,7 +118,7 @@ function pickItem() {
  */
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
-	speed = num
+	await redis.redis.set(SPEED_KEY, num)
 	return { ok: true, speed: num }
 })
 
@@ -119,7 +131,7 @@ export const setBias = live(async (ctx, b) => {
 	if (typeof b !== 'string' || !VALID_BIAS.has(b)) {
 		throw new LiveError('VALIDATION', 'invalid bias')
 	}
-	bias = b
+	await redis.redis.set(BIAS_KEY, b)
 	return { ok: true, bias: b }
 })
 
@@ -128,7 +140,10 @@ export const setBias = live(async (ctx, b) => {
  * renders the right slider position + active bias button without a
  * round-trip flicker.
  */
-export const myTopkState = live(async () => ({ speed, bias, items: ITEMS }))
+export const myTopkState = live(async () => {
+	const [speed, bias] = await Promise.all([getSpeed(), getBias()])
+	return { speed, bias, items: ITEMS }
+})
 
 /**
  * Firehose. Every second the cron tick publishes `speed` 'viewed'
@@ -142,9 +157,11 @@ export const myTopkState = live(async () => ({ speed, bias, items: ITEMS }))
  * cron{status:'not-leader'} (set up in hooks.ws.js init).
  */
 export const firehoseTick = live.cron('* * * * * *', TOPICS.demoTopkEvent, async (ctx) => {
+	const speed = await getSpeed()
 	if (speed <= 0) return
+	const bias = await getBias()
 	for (let i = 0; i < speed; i++) {
-		ctx.publish(TOPICS.demoTopkEvent, 'viewed', { itemId: pickItem(), ts: Date.now() })
+		ctx.publish(TOPICS.demoTopkEvent, 'viewed', { itemId: pickItem(bias), ts: Date.now() })
 	}
 })
 

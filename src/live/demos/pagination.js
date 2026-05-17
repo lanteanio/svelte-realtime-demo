@@ -19,11 +19,15 @@
  * returning `{ data, hasMore, cursor }` plus the client store's
  * `loadMore()` method.
  *
- * Storage is in-memory. 200 synthetic entries seeded at module-load.
+ * Storage is cluster-shared via a Redis LIST (chronological order;
+ * oldest at index 0) plus a counter for the next-id. A SETNX-guarded
+ * seed inserts the initial 200 entries on the first worker boot so
+ * multi-replica deploys do not multi-seed.
  */
 
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const TOTAL = 200
 const PAGE_SIZE = 25
@@ -45,44 +49,62 @@ const SYNTHETIC_MESSAGES = [
 
 const SEVERITIES = ['info', 'info', 'info', 'info', 'warn', 'error']
 
-/** @type {Array<{ id: string, ts: number, severity: string, message: string, seq: number }>} */
-const logEntries = []
-let entrySeq = 0
+const ENTRIES_KEY = 'demos:pagination:entries'   // LIST: oldest first
+const SEQ_KEY = 'demos:pagination:seq'           // counter: next entry seq
+const SEEDED_KEY = 'demos:pagination:seeded'     // SETNX guard
 
-;(function seed() {
-	const now = Date.now()
-	for (let i = 0; i < TOTAL; i++) {
-		entrySeq += 1
-		// Oldest first: index 0 is the oldest entry, index TOTAL-1 is the
-		// newest. The loader pages through this in chronological order, so
-		// page 1 reads the oldest 25 and `loadMore` walks forward in time.
-		// `appendLogEntry` pushes new entries onto the end and they land
-		// at the bottom of the rendered list, which matches the
-		// chronological-timeline pitch and avoids the prepend-vs-append
-		// conflict between live `created` events and paginated catch-up.
-		logEntries.push({
-			id: 'log-' + entrySeq,
-			ts: now - (TOTAL - i) * 10_000,
-			severity: SEVERITIES[i % SEVERITIES.length],
-			message: SYNTHETIC_MESSAGES[i % SYNTHETIC_MESSAGES.length],
-			seq: entrySeq
-		})
+async function seedIfNeeded() {
+	try {
+		const ok = await redis.redis.set(SEEDED_KEY, '1', 'NX', 'EX', 3600)
+		if (ok !== 'OK') return
+		const now = Date.now()
+		const pipeline = redis.redis.multi()
+		pipeline.del(ENTRIES_KEY)
+		pipeline.set(SEQ_KEY, 0)
+		for (let i = 0; i < TOTAL; i++) {
+			const seq = i + 1
+			// Oldest first: index 0 is the oldest entry, index TOTAL-1 is the
+			// newest. The loader pages through this in chronological order, so
+			// page 1 reads the oldest 25 and `loadMore` walks forward in time.
+			// `appendLogEntry` pushes new entries onto the end and they land
+			// at the bottom of the rendered list, which matches the
+			// chronological-timeline pitch and avoids the prepend-vs-append
+			// conflict between live `created` events and paginated catch-up.
+			pipeline.rpush(ENTRIES_KEY, JSON.stringify({
+				id: 'log-' + seq,
+				ts: now - (TOTAL - i) * 10_000,
+				severity: SEVERITIES[i % SEVERITIES.length],
+				message: SYNTHETIC_MESSAGES[i % SYNTHETIC_MESSAGES.length],
+				seq
+			}))
+		}
+		pipeline.set(SEQ_KEY, TOTAL)
+		await pipeline.exec()
+	} catch {
+		// Best-effort - a Redis blip during boot defers seeding to the
+		// next worker.
 	}
-})()
+}
+seedIfNeeded()
 
 /**
  * Drop entries appended past the seeded TOTAL=200. The original seed
- * is left in place (it is not user content). entrySeq is intentionally
- * not reset so a subsequent appendLogEntry produces ids beyond the
- * highest one any current subscriber has cached.
+ * is left in place (it is not user content). The seq counter is
+ * intentionally not reset so a subsequent appendLogEntry produces ids
+ * beyond the highest one any current subscriber has cached.
  */
 export async function purge(ctx) {
-	if (logEntries.length <= TOTAL) return { trimmed: 0 }
-	const overflow = logEntries.splice(TOTAL)
-	for (const entry of overflow) {
-		ctx.publish(TOPICS.demoPaginationLog, 'deleted', { id: entry.id })
+	const len = await redis.redis.llen(ENTRIES_KEY)
+	if (len <= TOTAL) return { trimmed: 0 }
+	const overflowRaws = await redis.redis.lrange(ENTRIES_KEY, TOTAL, -1)
+	await redis.redis.ltrim(ENTRIES_KEY, 0, TOTAL - 1)
+	for (const raw of overflowRaws) {
+		try {
+			const entry = JSON.parse(raw)
+			ctx.publish(TOPICS.demoPaginationLog, 'deleted', { id: entry.id })
+		} catch { /* corrupt entry already gone */ }
 	}
-	return { trimmed: overflow.length }
+	return { trimmed: overflowRaws.length }
 }
 
 export const myPaginationState = live(async () => ({
@@ -96,15 +118,15 @@ export const appendLogEntry = live(async (ctx, args) => {
 	const message = typeof args?.message === 'string' && args.message.length > 0
 		? args.message.slice(0, 200)
 		: 'manually appended entry'
-	entrySeq += 1
+	const seq = await redis.redis.incr(SEQ_KEY)
 	const entry = {
-		id: 'log-' + entrySeq,
+		id: 'log-' + seq,
 		ts: Date.now(),
 		severity,
 		message,
-		seq: entrySeq
+		seq
 	}
-	logEntries.push(entry)
+	await redis.redis.rpush(ENTRIES_KEY, JSON.stringify(entry))
 	ctx.publish(TOPICS.demoPaginationLog, 'created', entry)
 	return entry
 })
@@ -123,9 +145,16 @@ export const logFeed = live.stream(
 		const offset = (ctx.cursor && typeof ctx.cursor === 'object' && Number.isInteger(ctx.cursor.offset))
 			? Math.max(0, ctx.cursor.offset)
 			: 0
-		const slice = logEntries.slice(offset, offset + PAGE_SIZE)
+		const [sliceRaws, totalLen] = await Promise.all([
+			redis.redis.lrange(ENTRIES_KEY, offset, offset + PAGE_SIZE - 1),
+			redis.redis.llen(ENTRIES_KEY)
+		])
+		const slice = []
+		for (const raw of sliceRaws) {
+			try { slice.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+		}
 		const nextOffset = offset + slice.length
-		const hasMore = nextOffset < logEntries.length
+		const hasMore = nextOffset < totalLen
 		return {
 			data: slice,
 			hasMore,

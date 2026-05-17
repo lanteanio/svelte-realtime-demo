@@ -19,29 +19,64 @@
  * a small bounded message list. /demos/counter-resume is the showcase
  * for replay buffer + session resume.
  *
- * Storage is an in-memory Map (demo only - not durable across server
- * restarts and not shared across instances). Single-server presence
- * is bootstrapped via realtime's _presenceRef fallback; a
- * cluster deployment would wire `platform.presence.list` to a Redis
- * registry, same shape.
+ * Storage is a cluster-shared Redis LIST per room (key:
+ * demos:chat:room:{roomId}), capped at MAX_MESSAGES_PER_ROOM via
+ * LTRIM. A message sent on one replica is visible to subscribers on
+ * every replica via the cluster pub/sub fan-out and via the loader.
  */
 
 import { live } from 'svelte-realtime/server'
+import { createIdempotencyStore } from 'svelte-adapter-uws-extensions/redis/idempotency'
 import { TOPICS } from '$lib/server/topics'
+import { redis, breaker } from '$lib/server/redis'
+import { metrics } from '$lib/server/metrics'
 
 const MAX_MESSAGES_PER_ROOM = 100
 
-const messages = new Map()
+const roomKey = (roomId) => `demos:chat:room:${roomId}`
 
-function loadMessages(roomId) {
-	return messages.get(roomId) ?? []
+/**
+ * Cluster-shared idempotency store so a Send-button double-tap that
+ * retries on a different replica still posts the message exactly once.
+ */
+const idempotencyStore = createIdempotencyStore(redis, {
+	keyPrefix: 'demos:chat:idemp:',
+	ttl: 30,
+	acquireTtl: 30,
+	breaker,
+	metrics
+})
+
+async function loadMessages(roomId) {
+	const raws = await redis.redis.lrange(roomKey(roomId), 0, -1)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
 }
 
-function pushMessage(roomId, msg) {
-	const list = messages.get(roomId) ?? []
-	list.push(msg)
-	if (list.length > MAX_MESSAGES_PER_ROOM) list.shift()
-	messages.set(roomId, list)
+/**
+ * RPUSH appends newest-last; LTRIM keeps the most recent
+ * MAX_MESSAGES_PER_ROOM. LRANGE 0 -(cap+1) captures any messages the
+ * subsequent LTRIM is about to drop so subscribers see a 'deleted'
+ * event per evicted id rather than a silent disappearance.
+ */
+async function pushMessage(roomId, msg, ctx) {
+	const raw = JSON.stringify(msg)
+	const key = roomKey(roomId)
+	const pipeline = redis.redis.multi()
+	pipeline.rpush(key, raw)
+	pipeline.lrange(key, 0, -(MAX_MESSAGES_PER_ROOM + 1))
+	pipeline.ltrim(key, -MAX_MESSAGES_PER_ROOM, -1)
+	const results = await pipeline.exec()
+	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
+	for (const evictedRaw of evicted) {
+		try {
+			const dropped = JSON.parse(evictedRaw)
+			ctx.publish(TOPICS.demoChatRoom(roomId), 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already evicted */ }
+	}
 }
 
 export const chat = live.room({
@@ -51,28 +86,39 @@ export const chat = live.room({
 })
 
 /**
- * Wipe every room's message log. Publishes 'deleted' per message on
- * each room topic so currently-subscribed clients drain their lists
- * via the room data stream's default crud merge. Idempotency cache
- * keys for sendMessage retries are NOT touched; their 30s TTL handles
- * itself. Returns counts for the orchestrator log.
+ * Wipe every room's message log. SCAN walks the keyspace cluster-wide
+ * to find every demos:chat:room:* key; for each, snapshot the contents
+ * (so we can publish 'deleted' per message), then DEL the list.
+ * Idempotency cache keys for sendMessage retries are NOT touched;
+ * their 30s TTL handles itself.
  */
 export async function purge(ctx) {
+	const keys = []
+	let cursor = '0'
+	do {
+		const [next, batch] = await redis.redis.scan(cursor, 'MATCH', 'demos:chat:room:*', 'COUNT', 100)
+		cursor = next
+		for (const k of batch) keys.push(k)
+	} while (cursor !== '0')
+
 	let messageCount = 0
-	const roomIds = Array.from(messages.keys())
-	for (const roomId of roomIds) {
-		const list = messages.get(roomId) ?? []
-		for (const msg of list) {
-			ctx.publish(TOPICS.demoChatRoom(roomId), 'deleted', { id: msg.id })
-			messageCount++
+	for (const key of keys) {
+		const roomId = key.slice('demos:chat:room:'.length)
+		const raws = await redis.redis.lrange(key, 0, -1)
+		await redis.redis.del(key)
+		for (const raw of raws) {
+			try {
+				const msg = JSON.parse(raw)
+				ctx.publish(TOPICS.demoChatRoom(roomId), 'deleted', { id: msg.id })
+				messageCount++
+			} catch { /* corrupt entry already gone */ }
 		}
 	}
-	messages.clear()
-	return { rooms: roomIds.length, messages: messageCount }
+	return { rooms: keys.length, messages: messageCount }
 }
 
 export const sendMessage = live.idempotent(
-	{ ttl: 30 },
+	{ ttl: 30, store: idempotencyStore },
 	async (ctx, roomId, text) => {
 		const trimmed = String(text ?? '').trim().slice(0, 500)
 		if (!trimmed) return null
@@ -84,7 +130,7 @@ export const sendMessage = live.idempotent(
 			text: trimmed,
 			ts: Date.now()
 		}
-		pushMessage(roomId, msg)
+		await pushMessage(roomId, msg, ctx)
 		ctx.publish(TOPICS.demoChatRoom(roomId), 'created', msg)
 		return msg
 	}

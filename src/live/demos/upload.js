@@ -173,14 +173,14 @@ export const uploadFile = live.upload(async (ctx, args) => {
 			uploadedAt: Date.now()
 		}
 
-		const evictedIds = appendFile(record)
+		const evictedIds = await appendFile(record)
 
 		for (const evictedId of evictedIds) {
 			ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id: evictedId })
 		}
 		const publicRecord = stripHashes(record)
 		ctx.publish(TOPICS.demoUploadFiles, 'created', publicRecord)
-		ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
+		ctx.publish(TOPICS.demoUploadStats, 'set', await statsSnapshot())
 
 		if (userId) {
 			live.notify(
@@ -235,11 +235,11 @@ export async function purge(ctx) {
 	}
 	const forced = active > 0
 	_consecutiveSkips = 0
-	const ids = purgeMemory()
+	const ids = await purgeMemory()
 	for (const id of ids) {
 		ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id })
 	}
-	ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
+	ctx.publish(TOPICS.demoUploadStats, 'set', await statsSnapshot())
 	const redisDeleted = await purgeRedisChunks()
 	return forced
 		? { files: ids.length, redisKeys: redisDeleted, forced: true, activeUploads: active }
@@ -253,12 +253,13 @@ export async function purge(ctx) {
  * on a prior upload's chunk hashes still being cached.
  */
 export const clearFiles = live(async (ctx) => {
-	const ids = listFiles().map((f) => f.id)
+	const files = await listFiles()
+	const ids = files.map((f) => f.id)
 	for (const id of ids) {
-		removeFile(id)
+		await removeFile(id)
 		ctx.publish(TOPICS.demoUploadFiles, 'deleted', { id })
 	}
-	ctx.publish(TOPICS.demoUploadStats, 'set', statsSnapshot())
+	ctx.publish(TOPICS.demoUploadStats, 'set', await statsSnapshot())
 	return { ok: true, cleared: ids.length }
 })
 
@@ -269,7 +270,7 @@ export const clearFiles = live(async (ctx) => {
  */
 export const uploadedFiles = live.stream(
 	TOPICS.demoUploadFiles,
-	async () => listFiles().map(stripHashes),
+	async () => (await listFiles()).map(stripHashes),
 	{ merge: 'crud', key: 'id' }
 )
 

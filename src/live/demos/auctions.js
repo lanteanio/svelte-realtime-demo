@@ -14,16 +14,19 @@
  *
  * The headline primitive: live.push x N parallel + Promise.allSettled.
  * Spectator drama: each accepted bid triggers an immediate
- * `ctx.publish('updated', ...)` on the active-lots stream, so the
- * waterfall of bids appears in real time on every tab subscribed to
- * the stream (the seller, fellow bidders, and idle spectators).
+ * `ctx.publish('updated', ...)` on the active-lots stream AND an HSET
+ * on the cluster-shared lot record, so a spectator joining mid-auction
+ * on any replica sees the bids-so-far via the loader (not just live
+ * events arriving after their subscribe).
  *
- * Storage is in-memory. Recent results capped at RECENT_CAP, FIFO.
- * Per-seller active cap is MAX_ACTIVE_PER_SELLER.
+ * Storage is cluster-shared via Redis (HASH for active lots, LIST for
+ * recent results). The per-seller active-lot cap also reads from the
+ * HASH, so a seller cannot bypass it by hopping between replicas.
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const PUSH_EVENT = 'demos:auction:bid-request'
 
@@ -39,11 +42,8 @@ const PUSH_GRACE_MS = 1500
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
-/** @type {Map<string, object>} active lots, keyed by lot id. */
-const activeLots = new Map()
-
-/** @type {Array<object>} completed lots, newest first, capped at RECENT_CAP. */
-const recentAuctions = []
+const ACTIVE_KEY = 'demos:auctions:active'
+const RECENT_KEY = 'demos:auctions:recent'
 
 function publicLot(lot) {
 	return {
@@ -62,7 +62,34 @@ function publicLot(lot) {
 	}
 }
 
-function archive(lot, status, winner, soldPrice, ctx) {
+async function listActive() {
+	const raws = await redis.redis.hvals(ACTIVE_KEY)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
+}
+
+async function listRecent() {
+	const raws = await redis.redis.lrange(RECENT_KEY, 0, -1)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
+}
+
+async function countActiveBySeller(sellerId) {
+	const all = await listActive()
+	let n = 0
+	for (const lot of all) {
+		if (lot.sellerId === sellerId) n++
+	}
+	return n
+}
+
+async function archive(lot, status, winner, soldPrice, ctx) {
 	const record = {
 		...publicLot(lot),
 		closedAt: Date.now(),
@@ -72,20 +99,23 @@ function archive(lot, status, winner, soldPrice, ctx) {
 		winnerColor: winner?.color ?? null,
 		soldPrice
 	}
-	recentAuctions.unshift(record)
-	while (recentAuctions.length > RECENT_CAP) {
-		const dropped = recentAuctions.pop()
-		ctx.publish(TOPICS.demoAuctionsRecent, 'deleted', { id: dropped.id })
+	const raw = JSON.stringify(record)
+	// LPUSH puts newest first; LTRIM bounds the list at RECENT_CAP.
+	// LRANGE(RECENT_CAP, -1) captures any entries the subsequent LTRIM
+	// will drop so subscribers see a 'deleted' event per evicted record.
+	const pipeline = redis.redis.multi()
+	pipeline.lpush(RECENT_KEY, raw)
+	pipeline.lrange(RECENT_KEY, RECENT_CAP, -1)
+	pipeline.ltrim(RECENT_KEY, 0, RECENT_CAP - 1)
+	const results = await pipeline.exec()
+	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
+	for (const evictedRaw of evicted) {
+		try {
+			const dropped = JSON.parse(evictedRaw)
+			ctx.publish(TOPICS.demoAuctionsRecent, 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already gone */ }
 	}
 	ctx.publish(TOPICS.demoAuctionsRecent, 'created', record)
-}
-
-function countActiveBySeller(sellerId) {
-	let n = 0
-	for (const lot of activeLots.values()) {
-		if (lot.sellerId === sellerId) n++
-	}
-	return n
 }
 
 function sanitizeName(s) {
@@ -124,11 +154,12 @@ export const myAuctionsState = live(async () => ({
  * Validates inputs, publishes the lot to the active-lots stream so
  * spectators see it appear, then fans out one `live.push` per
  * recipient (excluding self, deduped, capped). Each push that returns
- * a valid bid is appended to lot.bids and a fresh 'updated' event is
- * published immediately, driving the live race. After Promise.allSettled
- * (every reply has resolved, passed, or timed out), the highest bid
- * above reserve wins; otherwise no-sale. The lot is removed from active
- * and archived to the recent stream.
+ * a valid bid is appended to lot.bids, HSET back to the cluster-shared
+ * lot record, and a fresh 'updated' event is published immediately,
+ * driving the live race. After Promise.allSettled (every reply has
+ * resolved, passed, or timed out), the highest bid above reserve wins;
+ * otherwise no-sale. The lot is removed from active and archived to
+ * the recent stream.
  */
 export const createAuction = live(async (ctx, args) => {
 	const sellerId = ctx.user?.id
@@ -168,7 +199,8 @@ export const createAuction = live(async (ctx, args) => {
 		if (recipientIds.length >= MAX_RECIPIENTS) break
 	}
 
-	if (countActiveBySeller(sellerId) >= MAX_ACTIVE_PER_SELLER) {
+	const activeCount = await countActiveBySeller(sellerId)
+	if (activeCount >= MAX_ACTIVE_PER_SELLER) {
 		throw new LiveError('VALIDATION', `max ${MAX_ACTIVE_PER_SELLER} active lots per seller`)
 	}
 
@@ -190,13 +222,13 @@ export const createAuction = live(async (ctx, args) => {
 		bids: []
 	}
 
-	activeLots.set(id, lot)
+	await redis.redis.hset(ACTIVE_KEY, id, JSON.stringify(publicLot(lot)))
 	ctx.publish(TOPICS.demoAuctionsActive, 'created', publicLot(lot))
 
 	if (recipientIds.length === 0) {
-		activeLots.delete(id)
+		await redis.redis.hdel(ACTIVE_KEY, id)
 		ctx.publish(TOPICS.demoAuctionsActive, 'deleted', { id })
-		archive(lot, 'no-bidders', null, null, ctx)
+		await archive(lot, 'no-bidders', null, null, ctx)
 		return { ok: true, status: 'no-bidders', id, soldPrice: null, winnerId: null, winnerName: null }
 	}
 
@@ -217,6 +249,10 @@ export const createAuction = live(async (ctx, args) => {
 				amount,
 				ts: Date.now()
 			})
+			// Persist the new bid into the cluster-shared lot record so a
+			// spectator joining mid-auction on any replica sees the bid via
+			// the loader, not only via subsequently-arriving live events.
+			await redis.redis.hset(ACTIVE_KEY, id, JSON.stringify(publicLot(lot)))
 			ctx.publish(TOPICS.demoAuctionsActive, 'updated', publicLot(lot))
 		} catch {
 			// NOT_FOUND, timeout, handler-error: silent. Treated as pass.
@@ -233,23 +269,23 @@ export const createAuction = live(async (ctx, args) => {
 		await new Promise((resolve) => setTimeout(resolve, remaining))
 	}
 
-	activeLots.delete(id)
+	await redis.redis.hdel(ACTIVE_KEY, id)
 	ctx.publish(TOPICS.demoAuctionsActive, 'deleted', { id })
 
 	if (lot.bids.length === 0) {
-		archive(lot, 'no-sale', null, null, ctx)
+		await archive(lot, 'no-sale', null, null, ctx)
 		return { ok: true, status: 'no-sale', id, soldPrice: null, winnerId: null, winnerName: null }
 	}
 
 	const sorted = lot.bids.slice().sort((a, b) => b.amount - a.amount || a.ts - b.ts)
 	const top = sorted[0]
 	if (top.amount < reservePrice) {
-		archive(lot, 'no-sale', null, null, ctx)
+		await archive(lot, 'no-sale', null, null, ctx)
 		return { ok: true, status: 'no-sale', id, soldPrice: null, winnerId: null, winnerName: null }
 	}
 
 	const winner = { id: top.bidderId, name: top.bidderName, color: top.bidderColor }
-	archive(lot, 'sold', winner, top.amount, ctx)
+	await archive(lot, 'sold', winner, top.amount, ctx)
 	return {
 		ok: true,
 		status: 'sold',
@@ -266,28 +302,31 @@ export const createAuction = live(async (ctx, args) => {
  * over per-bidder live.push calls, and yanking the lot out from under
  * those awaiters would orphan the seller's RPC. Active lots already
  * self-evict at their deadline (durationSec, max MAX_DURATION_SEC =
- * 30s), so the worst case is a 30s wait before the in-memory map
- * drains itself.
+ * 30s), so the worst case is a 30s wait before Redis drains itself.
  */
 export async function purge(ctx) {
-	const count = recentAuctions.length
-	for (const lot of recentAuctions) {
-		ctx.publish(TOPICS.demoAuctionsRecent, 'deleted', { id: lot.id })
+	const raws = await redis.redis.lrange(RECENT_KEY, 0, -1)
+	await redis.redis.del(RECENT_KEY)
+	for (const raw of raws) {
+		try {
+			const lot = JSON.parse(raw)
+			ctx.publish(TOPICS.demoAuctionsRecent, 'deleted', { id: lot.id })
+		} catch { /* corrupt entry already gone */ }
 	}
-	recentAuctions.length = 0
-	return { recent: count, activeKept: activeLots.size }
+	const activeCount = await redis.redis.hlen(ACTIVE_KEY)
+	return { recent: raws.length, activeKept: activeCount }
 }
 
 /** Live stream of in-flight lots. */
 export const activeAuctions = live.stream(
 	TOPICS.demoAuctionsActive,
-	async () => Array.from(activeLots.values()).map(publicLot),
+	async () => listActive(),
 	{ merge: 'crud', key: 'id' }
 )
 
 /** Live stream of completed lots. Newest first; capped at RECENT_CAP. */
 export const recentResults = live.stream(
 	TOPICS.demoAuctionsRecent,
-	async () => recentAuctions.slice(),
+	async () => listRecent(),
 	{ merge: 'crud', key: 'id' }
 )

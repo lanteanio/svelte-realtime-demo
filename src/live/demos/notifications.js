@@ -7,7 +7,7 @@
  * and AWAITS a reply - the recipient's tab pops a card with two
  * buttons (Got it / Dismiss); the value they click comes back as the
  * sender's RPC return. With "schedule N seconds" checked, the message
- * lands in an in-memory queue drained by a `live.cron('* * * * * *')`
+ * lands in a cluster-shared Redis hash drained by a `live.cron('* * * * * *')`
  * tick (6-field cron, fires every second). Cancel removes a
  * pending entry before it fires.
  *
@@ -35,30 +35,63 @@
  *      so the tick stays fast even when a recipient is offline and
  *      the push waits the full timeout.
  *
- * Storage is in-memory (demo only). The activity log is capped at
- * ACTIVITY_CAP entries with FIFO eviction; older entries get a
- * 'deleted' event so the client list stays bounded.
+ * Storage is cluster-shared via Redis (HASH for the scheduler queue +
+ * capped LIST for the activity log). A scheduled push enqueued on
+ * Replica A is visible to the leader-gated tick on Replica B; the
+ * activity log appended on any replica is visible to subscribers on
+ * every replica via the cluster pub/sub fan-out plus the loader read.
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const PUSH_TIMEOUT_MS = 8000
 const ACTIVITY_CAP = 50
 const MAX_TEXT_LEN = 200
 const MAX_SCHEDULE_SEC = 120
 
-/** @type {Map<string, { id: string, fromUserId: string, fromUserName: string, fromUserColor: string, toUserId: string, toUserName: string, text: string, fireAt: number }>} */
-const scheduled = new Map()
+const SCHEDULED_KEY = 'demos:notifications:scheduled'
+const ACTIVITY_KEY = 'demos:notifications:activity'
 
-/** @type {Array<object>} - newest first, capped at ACTIVITY_CAP. */
-const activity = []
+async function listScheduled() {
+	const raws = await redis.redis.hvals(SCHEDULED_KEY)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
+}
 
-function appendActivity(entry, ctx) {
-	activity.unshift(entry)
-	if (activity.length > ACTIVITY_CAP) {
-		const dropped = activity.pop()
-		ctx.publish(TOPICS.demoNotificationsActivity, 'deleted', { id: dropped.id })
+async function listActivity() {
+	const raws = await redis.redis.lrange(ACTIVITY_KEY, 0, -1)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
+}
+
+/**
+ * LPUSH puts newest first; LTRIM bounds the list at ACTIVITY_CAP. The
+ * single pipelined round-trip captures any evicted entry from the
+ * post-LPUSH state via LRANGE(ACTIVITY_CAP, -1) before LTRIM drops
+ * everything past the cap, so subscribers see a 'deleted' event per
+ * evicted entry instead of a silent disappearance.
+ */
+async function appendActivity(entry, ctx) {
+	const raw = JSON.stringify(entry)
+	const pipeline = redis.redis.multi()
+	pipeline.lpush(ACTIVITY_KEY, raw)
+	pipeline.lrange(ACTIVITY_KEY, ACTIVITY_CAP, -1)
+	pipeline.ltrim(ACTIVITY_KEY, 0, ACTIVITY_CAP - 1)
+	const results = await pipeline.exec()
+	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
+	for (const evictedRaw of evicted) {
+		try {
+			const dropped = JSON.parse(evictedRaw)
+			ctx.publish(TOPICS.demoNotificationsActivity, 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already evicted */ }
 	}
 	ctx.publish(TOPICS.demoNotificationsActivity, 'created', entry)
 }
@@ -84,7 +117,7 @@ async function deliverPush(entry, ctx) {
 			{ timeoutMs: PUSH_TIMEOUT_MS }
 		)
 		const ack = reply?.ack === 'dismiss' ? 'dismiss' : 'ok'
-		appendActivity({
+		await appendActivity({
 			id: crypto.randomUUID(),
 			ts: Date.now(),
 			kind: ack === 'dismiss' ? 'dismissed' : 'delivered',
@@ -97,7 +130,7 @@ async function deliverPush(entry, ctx) {
 	} catch (err) {
 		const code = err instanceof LiveError ? err.code : null
 		const kind = code === 'NOT_FOUND' ? 'offline' : (code === 'TIMEOUT' ? 'timeout' : 'error')
-		appendActivity({
+		await appendActivity({
 			id: crypto.randomUUID(),
 			ts: Date.now(),
 			kind,
@@ -119,17 +152,27 @@ async function deliverPush(entry, ctx) {
  * those resolve naturally.
  */
 export async function purge(ctx) {
-	const scheduledCount = scheduled.size
-	for (const id of Array.from(scheduled.keys())) {
+	// Snapshot before delete so we can publish 'deleted' per id. A race
+	// with a concurrent schedule is harmless: the new entry survives the
+	// HDEL window and shows up on next subscribe.
+	const scheduledIds = await redis.redis.hkeys(SCHEDULED_KEY)
+	const activityRaws = await redis.redis.lrange(ACTIVITY_KEY, 0, -1)
+
+	const pipeline = redis.redis.multi()
+	pipeline.del(SCHEDULED_KEY)
+	pipeline.del(ACTIVITY_KEY)
+	await pipeline.exec()
+
+	for (const id of scheduledIds) {
 		ctx.publish(TOPICS.demoNotificationsScheduled, 'deleted', { id })
 	}
-	scheduled.clear()
-	const activityCount = activity.length
-	for (const entry of activity) {
-		ctx.publish(TOPICS.demoNotificationsActivity, 'deleted', { id: entry.id })
+	for (const raw of activityRaws) {
+		try {
+			const entry = JSON.parse(raw)
+			ctx.publish(TOPICS.demoNotificationsActivity, 'deleted', { id: entry.id })
+		} catch { /* corrupt entry already gone */ }
 	}
-	activity.length = 0
-	return { scheduled: scheduledCount, activity: activityCount }
+	return { scheduled: scheduledIds.length, activity: activityRaws.length }
 }
 
 /**
@@ -171,9 +214,9 @@ export const sendNotification = live(async (ctx, args) => {
 		const id = crypto.randomUUID()
 		const fireAt = Date.now() + sec * 1000
 		const entry = { id, fromUserId, fromUserName, fromUserColor, toUserId: recipientId, toUserName, text: cleanText, fireAt }
-		scheduled.set(id, entry)
+		await redis.redis.hset(SCHEDULED_KEY, id, JSON.stringify(entry))
 		ctx.publish(TOPICS.demoNotificationsScheduled, 'created', entry)
-		appendActivity({
+		await appendActivity({
 			id: crypto.randomUUID(),
 			ts: Date.now(),
 			kind: 'scheduled',
@@ -200,15 +243,20 @@ export const sendNotification = live(async (ctx, args) => {
 
 /**
  * Cancel a pending scheduled notification before it fires. Throws
- * NOT_FOUND if the id has already fired or never existed.
+ * NOT_FOUND if the id has already fired or never existed. The HDEL
+ * is the source of truth; the get-before-delete is purely for the
+ * activity-log payload (sender / recipient names + the original text).
  */
 export const cancelScheduled = live(async (ctx, id) => {
 	if (typeof id !== 'string') throw new LiveError('VALIDATION', 'id required')
-	const entry = scheduled.get(id)
-	if (!entry) throw new LiveError('NOT_FOUND', 'no such scheduled notification')
-	scheduled.delete(id)
+	const raw = await redis.redis.hget(SCHEDULED_KEY, id)
+	if (!raw) throw new LiveError('NOT_FOUND', 'no such scheduled notification')
+	let entry
+	try { entry = JSON.parse(raw) } catch { throw new LiveError('NOT_FOUND', 'no such scheduled notification') }
+	const removed = await redis.redis.hdel(SCHEDULED_KEY, id)
+	if (removed === 0) throw new LiveError('NOT_FOUND', 'no such scheduled notification')
 	ctx.publish(TOPICS.demoNotificationsScheduled, 'deleted', { id })
-	appendActivity({
+	await appendActivity({
 		id: crypto.randomUUID(),
 		ts: Date.now(),
 		kind: 'cancelled',
@@ -227,7 +275,7 @@ export const cancelScheduled = live(async (ctx, id) => {
  */
 export const scheduledNotifications = live.stream(
 	TOPICS.demoNotificationsScheduled,
-	async () => Array.from(scheduled.values()),
+	async () => listScheduled(),
 	{ merge: 'crud', key: 'id' }
 )
 
@@ -237,36 +285,35 @@ export const scheduledNotifications = live.stream(
  */
 export const recentActivity = live.stream(
 	TOPICS.demoNotificationsActivity,
-	async () => activity.slice(),
+	async () => listActivity(),
 	{ merge: 'crud', key: 'id' }
 )
 
 /**
  * Scheduler tick. 6-field cron: every second.
  *
- * Scans for due entries, removes them from the queue, and fires each
- * push fire-and-forget. The push's reply (or timeout / offline) lands
- * in the activity stream when it resolves - the tick itself does NOT
- * await individual deliveries, so a recipient with the inbox closed
- * can't block the next tick.
+ * Scans for due entries via HVALS, removes them from the queue, and
+ * fires each push fire-and-forget. The push's reply (or timeout /
+ * offline) lands in the activity stream when it resolves - the tick
+ * itself does NOT await individual deliveries, so a recipient with the
+ * inbox closed can't block the next tick.
  *
- * Single-flight: if a tick body somehow runs longer than
- * 1s, the next tick is skipped (visible as `cronCount{status:'skipped'}`
- * in metrics) instead of overlapping. Returning undefined suppresses
- * the cron's automatic 'set' publish; we use ctx.publish per affected
- * entry instead.
+ * Single-flight; cluster-singleton via configureCron({ leader }) wired
+ * in src/hooks.ws.js init.
  */
 export const tickScheduler = live.cron('* * * * * *', TOPICS.demoNotificationsScheduled, async (ctx) => {
 	const now = Date.now()
-	const due = []
-	for (const entry of scheduled.values()) {
-		if (entry.fireAt <= now) due.push(entry)
-	}
+	const all = await listScheduled()
+	const due = all.filter((entry) => entry.fireAt <= now)
 	if (due.length === 0) return
 	for (const entry of due) {
-		scheduled.delete(entry.id)
+		// HDEL returns 1 if removed, 0 if already gone (race with cancel).
+		// Skip publishing 'deleted' for a race-loser; the cancel path
+		// already published the deletion when it won.
+		const removed = await redis.redis.hdel(SCHEDULED_KEY, entry.id)
+		if (removed === 0) continue
 		ctx.publish(TOPICS.demoNotificationsScheduled, 'deleted', { id: entry.id })
-		appendActivity({
+		await appendActivity({
 			id: crypto.randomUUID(),
 			ts: Date.now(),
 			kind: 'fired',

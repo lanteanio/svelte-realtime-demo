@@ -11,10 +11,16 @@
  * Streams:
  * - `demos:pressure:tick` - 500ms heartbeat publishing the current
  *   pressure snapshot. `merge: 'set'`. Self-arms on first subscribe
- *   the same way /demos/counter-resume does (no static import of
- *   live modules from hooks.ws.js).
- * - `demos:pressure:shed` - crud merge of recent shed decisions.
- *   Capped at 50 entries client-side via `max`.
+ *   the same way /demos/counter-resume did originally (no static
+ *   import of live modules from hooks.ws.js). Leader-gated inside
+ *   the timer body so only one replica publishes the snapshot per
+ *   tick - without the gate, two replicas would each publish their
+ *   own snapshot to the same global topic at 2 Hz and subscribers
+ *   would see jumpy values alternating between two workers' views.
+ * - `demos:pressure:shed` - crud merge of recent shed decisions, also
+ *   cluster-shared (Redis LIST) so a shed event recorded on any
+ *   replica is visible to subscribers on every replica via the
+ *   loader and via cluster pub/sub.
  *
  * RPCs:
  * - `generateLoad(count)` - publishes `count` no-op events to
@@ -25,24 +31,36 @@
  *   regardless of actual pressure. Lets the page demonstrate the
  *   surface even when the demo's load isn't enough to drive
  *   PUBLISH_RATE past the admission threshold.
+ *
+ * Note on `live.cron` vs leader-gated setInterval: live.cron caps at
+ * 1 Hz, but the pressure snapshot's natural cadence is 500ms (so the
+ * page's sparkline doesn't lag a full second behind real load). The
+ * leader-gated setInterval lets us keep sub-second timing while still
+ * being a cluster-singleton publisher.
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis, leader } from '$lib/server/redis'
 
 const TICK_INTERVAL_MS = 500
 const SHED_MAX = 50
 const LOAD_CAP = 5000
 
+const LAST_SNAPSHOT_KEY = 'demos:pressure:last-snapshot'
+const SHED_KEY = 'demos:pressure:shed'
+
 let armed = false
-let lastSnapshot = null
-const shedLog = []
 
 function armTicker(platform) {
 	if (armed) return
 	armed = true
-	setInterval(() => {
-		const snap = platform.pressure
+	setInterval(async () => {
+		// Leader-gated: every replica fires the timer (Node's setInterval
+		// is per-process) but only the leader computes and publishes a
+		// snapshot. Without the gate, N replicas would each publish their
+		// own snapshot to the same global topic, producing jumpy values.
+		if (!leader.isLeader()) return
 		// Snapshot getter returns a fresh object each call; safe to
 		// publish directly. Ignore topPublishers in the demo wire
 		// shape - the readout only needs the scalar fields. Heap
@@ -50,6 +68,7 @@ function armTicker(platform) {
 		// pressure snapshot only exposes `memoryMB` (RSS), and the
 		// MEMORY reason is computed from `heapUsed / heapTotal` -
 		// surfacing both lets the page explain WHY MEMORY fires.
+		const snap = platform.pressure
 		const mem = process.memoryUsage()
 		const heapTotalMB = mem.heapTotal / (1024 * 1024)
 		const heapUsedMB = mem.heapUsed / (1024 * 1024)
@@ -63,9 +82,13 @@ function armTicker(platform) {
 			heapTotalMB,
 			heapPct,
 			reason: snap.reason ?? 'NONE',
-			ts: Date.now()
+			ts: Date.now(),
+			instanceId: leader.instanceId
 		}
-		lastSnapshot = payload
+		// Persist for new subscribers' loader; publish for live ones.
+		// SET with a short TTL so a leadership flip followed by silence
+		// doesn't leave a stale snapshot at the top of the page forever.
+		try { await redis.redis.set(LAST_SNAPSHOT_KEY, JSON.stringify(payload), 'EX', 30) } catch {}
 		platform.publish(TOPICS.demoPressureTick, 'set', payload)
 	}, TICK_INTERVAL_MS)
 }
@@ -74,20 +97,45 @@ export const pressureSnapshot = live.stream(
 	TOPICS.demoPressureTick,
 	async (ctx) => {
 		armTicker(ctx.platform)
-		return lastSnapshot ?? null
+		const raw = await redis.redis.get(LAST_SNAPSHOT_KEY)
+		if (!raw) return null
+		try { return JSON.parse(raw) } catch { return null }
 	},
 	{ merge: 'set' }
 )
 
 export const shedEvents = live.stream(
 	TOPICS.demoPressureShed,
-	async () => shedLog.slice(),
+	async () => {
+		const raws = await redis.redis.lrange(SHED_KEY, 0, -1)
+		const out = []
+		for (const raw of raws) {
+			try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+		}
+		return out
+	},
 	{ merge: 'crud', key: 'id' }
 )
 
-function pushShed(ctx, entry) {
-	shedLog.push(entry)
-	if (shedLog.length > SHED_MAX) shedLog.shift()
+/**
+ * Cluster-shared shed log. LPUSH puts newest first; LTRIM bounds the
+ * list at SHED_MAX. The LRANGE between captures any entries the LTRIM
+ * is about to drop so subscribers see a 'deleted' event for each.
+ */
+async function pushShed(ctx, entry) {
+	const raw = JSON.stringify(entry)
+	const pipeline = redis.redis.multi()
+	pipeline.lpush(SHED_KEY, raw)
+	pipeline.lrange(SHED_KEY, SHED_MAX, -1)
+	pipeline.ltrim(SHED_KEY, 0, SHED_MAX - 1)
+	const results = await pipeline.exec()
+	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
+	for (const evictedRaw of evicted) {
+		try {
+			const dropped = JSON.parse(evictedRaw)
+			ctx.publish(TOPICS.demoPressureShed, 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already evicted */ }
+	}
 	ctx.publish(TOPICS.demoPressureShed, 'created', entry)
 }
 
@@ -150,7 +198,7 @@ export const generateLoad = live(async (ctx, count) => {
 	// reflects the peak the burst drove the platform to.
 	if (ctx.shed('background')) {
 		const snap = ctx.platform.pressure
-		pushShed(ctx, {
+		await pushShed(ctx, {
 			id: crypto.randomUUID(),
 			ts: Date.now(),
 			class: 'background',
@@ -163,7 +211,7 @@ export const generateLoad = live(async (ctx, count) => {
 })
 
 export const simulateShed = live(async (ctx) => {
-	pushShed(ctx, {
+	await pushShed(ctx, {
 		id: crypto.randomUUID(),
 		ts: Date.now(),
 		class: 'background',
@@ -175,10 +223,13 @@ export const simulateShed = live(async (ctx) => {
 })
 
 export const clearShedLog = live(async (ctx) => {
-	const snapshot = shedLog.slice()
-	shedLog.length = 0
-	for (const e of snapshot) {
-		ctx.publish(TOPICS.demoPressureShed, 'deleted', e)
+	const raws = await redis.redis.lrange(SHED_KEY, 0, -1)
+	await redis.redis.del(SHED_KEY)
+	for (const raw of raws) {
+		try {
+			const e = JSON.parse(raw)
+			ctx.publish(TOPICS.demoPressureShed, 'deleted', e)
+		} catch { /* corrupt entry already gone */ }
 	}
-	return { cleared: snapshot.length }
+	return { cleared: raws.length }
 })

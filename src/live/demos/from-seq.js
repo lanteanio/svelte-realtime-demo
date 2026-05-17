@@ -3,8 +3,8 @@
  *
  * The pitch. A 1Hz cron publishes events on a topic, each with an
  * incrementing `seq`. The stream's loader returns the recent
- * window from a durable store and tags every entry `tier:
- * 'rehydrate'`. Live publishes (the cron) tag `tier: 'live'`.
+ * window from a cluster-shared durable store and tags every entry
+ * `tier: 'rehydrate'`. Live publishes (the cron) tag `tier: 'live'`.
  * `delta.fromSeq(sinceSeq)` is wired to the same durable store and
  * tags `tier: 'fromSeq'` on every event it returns. The page
  * renders all events with their tier as a badge, so you can see
@@ -13,27 +13,26 @@
  * Demo flow: the page subscribes; live events arrive tagged
  * `live`. Click Pause; the page unsubscribes from this stream
  * (subCount hits 0, SDK drops the subscription). The server's cron
- * keeps publishing; events are stored in the durable Map. Click
+ * keeps publishing; events are stored in the durable Redis hash. Click
  * Resume; the page re-subscribes, the SDK sends its cached
  * `_lastSeq` on the wire, the server's replay buffer doesn't cover
  * this topic (not in the REPLAY_TOPIC_RE whitelist), so the
  * framework falls through to `delta.fromSeq` which reads from the
- * durable Map and returns the missed entries tagged `fromSeq`.
+ * durable hash and returns the missed entries tagged `fromSeq`.
  *
  * The headline primitive: `delta.fromSeq(sinceSeq)` - the
  * user-provided bridge for older-than-buffer reconnects, the third
  * tier of the reconnect resolution chain (replay buffer ->
  * fromSeq -> rehydrate via loader).
  *
- * Storage is in-memory. The durable Map keeps the last
- * STORE_RETAIN entries; the live ticker advances `seq` on every
- * tick. Cron is gated on the cluster leader-election primitive in
- * hooks.ws.js so multi-instance deployments fire the tick exactly
- * once.
+ * Storage is cluster-shared via Redis (INCR counter + HASH keyed by
+ * seq). The leader-gated cron is the only writer; every replica reads
+ * the same view from its loader and delta.fromSeq paths.
  */
 
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const STORE_RETAIN = 200
 const RECENT_WINDOW = 20
@@ -48,16 +47,40 @@ const PHRASES = [
 	'cleanup sweep'
 ]
 
-let nextSeq = 0
-/** @type {Map<number, { id: string, seq: number, ts: number, message: string, tier: string }>} */
-const durable = new Map()
+const NEXT_SEQ_KEY = 'demos:fromseq:next'
+const DURABLE_KEY = 'demos:fromseq:durable'
 
-function pruneStore() {
-	if (durable.size <= STORE_RETAIN) return
-	const cutoff = nextSeq - STORE_RETAIN
-	for (const seq of durable.keys()) {
-		if (seq <= cutoff) durable.delete(seq)
+async function getNextSeq() {
+	const v = await redis.redis.get(NEXT_SEQ_KEY)
+	if (v === null) return 0
+	const n = Number(v)
+	return Number.isFinite(n) ? n : 0
+}
+
+async function pruneStore(currentSeq) {
+	if (currentSeq <= STORE_RETAIN) return
+	const cutoff = currentSeq - STORE_RETAIN
+	const fields = await redis.redis.hkeys(DURABLE_KEY)
+	const toDelete = []
+	for (const f of fields) {
+		const s = Number(f)
+		if (Number.isFinite(s) && s <= cutoff) toDelete.push(f)
 	}
+	if (toDelete.length > 0) await redis.redis.hdel(DURABLE_KEY, ...toDelete)
+}
+
+async function readRange(startSeq, endSeq) {
+	if (endSeq < startSeq) return []
+	const fields = []
+	for (let s = startSeq; s <= endSeq; s++) fields.push(String(s))
+	if (fields.length === 0) return []
+	const values = await redis.redis.hmget(DURABLE_KEY, ...fields)
+	const out = []
+	for (const v of values) {
+		if (v === null) continue
+		try { out.push(JSON.parse(v)) } catch { /* skip corrupt */ }
+	}
+	return out
 }
 
 export const myFromSeqState = live(async () => ({
@@ -67,13 +90,16 @@ export const myFromSeqState = live(async () => ({
 
 /**
  * The headline. Cron tick at 1Hz publishes one event per tick. The
- * event is stored in the durable Map AND broadcast as a live
+ * event is stored in the durable Redis hash AND broadcast as a live
  * publish. Stored events feed both the loader's recent-window
  * rehydrate and `delta.fromSeq`'s gap-fill on reconnect.
+ *
+ * INCR is atomic across replicas, so even though the cron is leader-
+ * singleton (configureCron({ leader })) any handover to a new leader
+ * resumes the same monotonic sequence without rebasing to zero.
  */
 export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, async (ctx) => {
-	nextSeq += 1
-	const seq = nextSeq
+	const seq = await redis.redis.incr(NEXT_SEQ_KEY)
 	const entry = {
 		id: 'evt-' + seq,
 		seq,
@@ -81,8 +107,8 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 		message: PHRASES[seq % PHRASES.length] + ' #' + seq,
 		tier: 'live'
 	}
-	durable.set(seq, entry)
-	pruneStore()
+	await redis.redis.hset(DURABLE_KEY, String(seq), JSON.stringify(entry))
+	await pruneStore(seq)
 	ctx.publish(TOPICS.demoFromSeqEvents, 'created', entry)
 })
 
@@ -91,7 +117,7 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
  * (last RECENT_WINDOW entries) tagged `rehydrate`. On reconnect
  * with a stale `lastSeq`, the framework checks the replay buffer
  * (this topic isn't in `REPLAY_TOPIC_RE` so it's skipped) and
- * falls through to `delta.fromSeq`, which reads the durable Map
+ * falls through to `delta.fromSeq`, which reads the durable hash
  * and returns the missed entries tagged `fromSeq`.
  *
  * Live publishes from `tickEvents` arrive as 'created' events
@@ -100,13 +126,10 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 export const eventStream = live.stream(
 	TOPICS.demoFromSeqEvents,
 	async () => {
-		const entries = []
+		const nextSeq = await getNextSeq()
 		const startSeq = Math.max(1, nextSeq - RECENT_WINDOW + 1)
-		for (let s = startSeq; s <= nextSeq; s++) {
-			const e = durable.get(s)
-			if (e) entries.push({ ...e, tier: 'rehydrate' })
-		}
-		return entries
+		const entries = await readRange(startSeq, nextSeq)
+		return entries.map((e) => ({ ...e, tier: 'rehydrate' }))
 	},
 	{
 		merge: 'crud',
@@ -123,12 +146,9 @@ export const eventStream = live.stream(
 		delta: {
 			fromSeq: async (sinceSeq) => {
 				if (typeof sinceSeq !== 'number' || sinceSeq < 0) return null
-				const out = []
-				for (let s = sinceSeq + 1; s <= nextSeq; s++) {
-					const e = durable.get(s)
-					if (e) out.push({ ...e, tier: 'fromSeq' })
-				}
-				return out
+				const nextSeq = await getNextSeq()
+				const entries = await readRange(sinceSeq + 1, nextSeq)
+				return entries.map((e) => ({ ...e, tier: 'fromSeq' }))
 			}
 		}
 	}

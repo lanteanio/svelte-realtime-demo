@@ -14,18 +14,28 @@
  * - `forceFail` is a per-call flag, NOT server-side state. Each user's tab
  *   has its own toggle; concurrent users don't fight over it.
  *
- * Storage: in-memory array (demo only - not durable across restart, not
- * shared across instances).
+ * Storage: cluster-shared Redis HASH keyed by todo id. A todo added on one
+ * replica is visible to subscribers on every replica (via the HSET + cluster
+ * pub/sub fan-out of the 'created' event).
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const MAX_TODOS = 200
+const TODOS_KEY = 'demos:todos'
 
-const todos = []
+async function listTodos() {
+	const raws = await redis.redis.hvals(TODOS_KEY)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
+	}
+	return out
+}
 
-export const todosStream = live.stream(TOPICS.demoTodos, async () => todos.slice(), {
+export const todosStream = live.stream(TOPICS.demoTodos, async () => listTodos(), {
 	merge: 'crud',
 	key: 'id'
 })
@@ -37,50 +47,57 @@ export const addTodo = live(async (ctx, { id, text, forceFail }) => {
 	if (typeof id !== 'string' || id.length < 1 || id.length > 64) {
 		throw new LiveError('VALIDATION', 'Invalid id')
 	}
-	if (todos.length >= MAX_TODOS) throw new LiveError('FULL', 'Todos list full')
+	const len = await redis.redis.hlen(TODOS_KEY)
+	if (len >= MAX_TODOS) throw new LiveError('FULL', 'Todos list full')
 	const todo = { id, text: trimmed, done: false, ts: Date.now() }
-	todos.push(todo)
+	await redis.redis.hset(TODOS_KEY, id, JSON.stringify(todo))
 	ctx.publish(TOPICS.demoTodos, 'created', todo)
 	return todo
 })
 
 export const toggleTodo = live(async (ctx, { id, forceFail }) => {
 	if (forceFail) throw new LiveError('FORCED', 'Force-fail is on')
-	const todo = todos.find((t) => t.id === id)
-	if (!todo) throw new LiveError('NOT_FOUND', 'Todo not found')
+	const raw = await redis.redis.hget(TODOS_KEY, id)
+	if (!raw) throw new LiveError('NOT_FOUND', 'Todo not found')
+	let todo
+	try { todo = JSON.parse(raw) } catch { throw new LiveError('NOT_FOUND', 'Todo not found') }
 	todo.done = !todo.done
+	await redis.redis.hset(TODOS_KEY, id, JSON.stringify(todo))
 	ctx.publish(TOPICS.demoTodos, 'updated', todo)
 	return todo
 })
 
 export const removeTodo = live(async (ctx, { id, forceFail }) => {
 	if (forceFail) throw new LiveError('FORCED', 'Force-fail is on')
-	const idx = todos.findIndex((t) => t.id === id)
-	if (idx === -1) throw new LiveError('NOT_FOUND', 'Todo not found')
-	const removed = todos.splice(idx, 1)[0]
-	ctx.publish(TOPICS.demoTodos, 'deleted', removed)
-	return removed
+	const raw = await redis.redis.hget(TODOS_KEY, id)
+	if (!raw) throw new LiveError('NOT_FOUND', 'Todo not found')
+	let todo
+	try { todo = JSON.parse(raw) } catch { throw new LiveError('NOT_FOUND', 'Todo not found') }
+	const removed = await redis.redis.hdel(TODOS_KEY, id)
+	if (removed === 0) throw new LiveError('NOT_FOUND', 'Todo not found')
+	ctx.publish(TOPICS.demoTodos, 'deleted', todo)
+	return todo
 })
 
 /**
- * Wipe the todos array. Same shape as clearAll but as a plain function
- * the orchestrator can call.
+ * Wipe the todos hash. Snapshot before delete so we can publish a
+ * 'deleted' event per id; a concurrent addTodo that lands between the
+ * HVALS and the DEL is harmless (its 'created' is what subscribers
+ * see; the next clear catches it).
  */
 export async function purge(ctx) {
-	const count = todos.length
-	const snapshot = todos.slice()
-	todos.length = 0
-	for (const t of snapshot) {
-		ctx.publish(TOPICS.demoTodos, 'deleted', t)
+	const raws = await redis.redis.hvals(TODOS_KEY)
+	await redis.redis.del(TODOS_KEY)
+	for (const raw of raws) {
+		try {
+			const t = JSON.parse(raw)
+			ctx.publish(TOPICS.demoTodos, 'deleted', t)
+		} catch { /* corrupt entry already gone */ }
 	}
-	return { todos: count }
+	return { todos: raws.length }
 }
 
 export const clearAll = live(async (ctx) => {
-	const snapshot = todos.slice()
-	todos.length = 0
-	for (const t of snapshot) {
-		ctx.publish(TOPICS.demoTodos, 'deleted', t)
-	}
-	return { cleared: snapshot.length }
+	const result = await purge(ctx)
+	return { cleared: result.todos }
 })

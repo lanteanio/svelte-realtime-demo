@@ -27,7 +27,7 @@
  *      the three most recently-published stories so a freshly-published
  *      headline crosses the trending leaderboard quickly.
  *
- *  - live.aggregate(source, reducers, { topic, windows }) - the 
+ *  - live.aggregate(source, reducers, { topic, windows }) - the
  *      windowed aggregate. One reducer (counts per story id), one compute
  *      (top-5), three windows: last30s sliding (3s hops), thisMinute
  *      tumbling (per-minute boundary), lifetime (never resets). Demo-
@@ -37,21 +37,30 @@
  *  - live.derived(['demos:news:topk:lifetime', topic], fn) - server-side
  *      computed stream that recomputes when the lifetime aggregate
  *      publishes (1Hz under default firehose) or a new story arrives.
- *      Reads in-memory state to produce a four-field stats strip the
- *      page renders at the top.
+ *      Reads cluster-shared Redis state to produce a four-field stats
+ *      strip the page renders at the top.
  *
- * Storage is in-memory (demo only). Stories cap at STORY_CAP entries
- * with FIFO eviction; older entries publish a 'deleted' event so the
- * client list stays bounded.
+ * Storage is cluster-shared via Redis (LIST + scalar counters) so the
+ * leader-gated firehose, webhook-handler replicas, and subscribing
+ * replicas all see the same view. Stories cap at STORY_CAP entries with
+ * FIFO eviction (LPOP); seed entries are inserted once at first-boot
+ * via a SETNX guard so multi-replica deploys do not multi-seed.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { live, LiveError, combineCounts } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const STORY_CAP = 24
 const MAX_HEADLINE_LEN = 80
 const MAX_SUMMARY_LEN = 200
+const DEFAULT_SPEED = 5
+
+const STORIES_KEY = 'demos:news:stories'
+const SEEDED_KEY = 'demos:news:seeded'
+const SPEED_KEY = 'demos:news:speed'
+const TOTAL_VIEWS_KEY = 'demos:news:totalViews'
 
 /**
  * HMAC secret. Real deployments must override with DEMO_NEWS_WEBHOOK_SECRET.
@@ -73,10 +82,9 @@ const WEBHOOK_SECRET = (() => {
 })()
 
 /**
- * Seed stories so the page is non-empty on first load and the firehose
- * has targets to pick from before any external publish fires. IDs are
- * stable strings so the aggregate's per-story counts persist across
- * dev-server restarts at runtime even if the seed list changes.
+ * Initial stories the page shows before any webhook publishes. Seeded
+ * once across the cluster via a SETNX guard so a multi-worker / multi-
+ * replica deploy does not insert N copies of each seed.
  */
 const SEED_STORIES = [
 	{ id: 'seed-aurora',  headline: 'Aurora launch clears final flight review', summary: 'Telemetry suite passes the last gate before Friday window.' },
@@ -87,29 +95,82 @@ const SEED_STORIES = [
 	{ id: 'seed-midnight', headline: 'Midnight Drift expansion adds two routes',     summary: 'Carrier announces twice-daily service to inland hub starting June.' }
 ]
 
-/** Newest at the END (so .slice(-3) returns the three most recent). */
-const stories = SEED_STORIES.map((s) => ({ ...s, source: 'seed', publishedAt: Date.now() }))
-
-let totalViews = 0
-let speed = 5
-
 function nowIso() {
 	return new Date().toISOString()
 }
 
 /**
- * GC pass for the stories list. Called from the firehose cron tick so
- * overflow eviction publishes 'deleted' events with a ctx in scope.
- *
- * The webhook transform path mutates `stories` but cannot publish
- * eviction events itself (no ctx); we instead let the cron tick reap
- * overflow within ~1s. Subscribers see a stale entry for at most one
- * tick before the 'deleted' fans out, which is fine for a demo.
+ * One-shot cluster-wide seed. SETNX wins on exactly one worker across
+ * the cluster; the winner replaces any existing list (defensive: a
+ * crashed-mid-seed run would otherwise leave a partial list) and RPUSHes
+ * all seeds. EX matches the boards' cleanup TTL so a fully idle deploy
+ * lets Redis reclaim the key; the next boot re-seeds.
  */
-function gcStories(ctx) {
-	while (stories.length > STORY_CAP) {
-		const dropped = stories.shift()
-		if (dropped) ctx.publish(TOPICS.demoNewsStories, 'deleted', { id: dropped.id })
+async function seedIfNeeded() {
+	try {
+		const ok = await redis.redis.set(SEEDED_KEY, '1', 'NX', 'EX', 3600)
+		if (ok !== 'OK') return
+		const ts = Date.now()
+		const pipeline = redis.redis.multi()
+		pipeline.del(STORIES_KEY)
+		for (const s of SEED_STORIES) {
+			pipeline.rpush(STORIES_KEY, JSON.stringify({ ...s, source: 'seed', publishedAt: ts }))
+		}
+		await pipeline.exec()
+	} catch {
+		// Best-effort: Redis blip during boot just defers seeding to the
+		// next worker. The demo can render with an empty list.
+	}
+}
+seedIfNeeded()
+
+async function getSpeed() {
+	const v = await redis.redis.get(SPEED_KEY)
+	if (v === null) return DEFAULT_SPEED
+	const n = Number(v)
+	return Number.isFinite(n) ? n : DEFAULT_SPEED
+}
+
+async function getTotalViews() {
+	const v = await redis.redis.get(TOTAL_VIEWS_KEY)
+	if (v === null) return 0
+	const n = Number(v)
+	return Number.isFinite(n) ? n : 0
+}
+
+/** Read all stories in chronological order (newest at the END). */
+async function getStories() {
+	const raw = await redis.redis.lrange(STORIES_KEY, 0, -1)
+	const out = []
+	for (const s of raw) {
+		try { out.push(JSON.parse(s)) } catch { /* skip corrupt entry */ }
+	}
+	return out
+}
+
+/**
+ * GC pass for the stories list. Called from the firehose cron tick so
+ * overflow eviction publishes 'deleted' events with a ctx in scope. The
+ * cron is cluster-singleton via configureCron({ leader }) so this only
+ * runs on the leader replica; the LPOP + publish reaches all replicas
+ * via the cluster bus.
+ *
+ * The webhook transform path RPUSHes but cannot publish eviction events
+ * itself (no ctx); we instead let the cron tick reap overflow within
+ * ~1s. Subscribers see a stale entry for at most one tick before the
+ * 'deleted' fans out, which is fine for a demo.
+ */
+async function gcStories(ctx) {
+	const len = await redis.redis.llen(STORIES_KEY)
+	const excess = len - STORY_CAP
+	if (excess <= 0) return
+	for (let i = 0; i < excess; i++) {
+		const raw = await redis.redis.lpop(STORIES_KEY)
+		if (!raw) break
+		try {
+			const dropped = JSON.parse(raw)
+			ctx.publish(TOPICS.demoNewsStories, 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already popped; nothing more to do */ }
 	}
 }
 
@@ -123,7 +184,7 @@ function gcStories(ctx) {
  *  - 50% spread uniformly over everything older (or over the seed pool
  *    if there are fewer than 3 stories total)
  */
-function pickStoryId() {
+function pickStoryId(stories) {
 	if (stories.length === 0) return null
 	const r = Math.random()
 	const newest = stories.slice(-3)
@@ -140,13 +201,19 @@ function pickStoryId() {
  * stories so the page renders without a flash of empty state on first
  * mount. The stories stream is the source of truth thereafter.
  */
-export const myNewsState = live(async () => ({
-	speed,
-	storyCap: STORY_CAP,
-	totalStories: stories.length,
-	maxHeadlineLen: MAX_HEADLINE_LEN,
-	maxSummaryLen: MAX_SUMMARY_LEN
-}))
+export const myNewsState = live(async () => {
+	const [speed, len] = await Promise.all([
+		getSpeed(),
+		redis.redis.llen(STORIES_KEY)
+	])
+	return {
+		speed,
+		storyCap: STORY_CAP,
+		totalStories: len,
+		maxHeadlineLen: MAX_HEADLINE_LEN,
+		maxSummaryLen: MAX_SUMMARY_LEN
+	}
+})
 
 /**
  * Drop every webhook-sourced story. Seeded entries are kept (they are
@@ -154,18 +221,28 @@ export const myNewsState = live(async () => ({
  * those decay out of the sliding (30s) and tumbling (1min) windows
  * naturally; the lifetime window retains ghost ids until next restart,
  * which is acceptable for a demo.
+ *
+ * LREM removes by exact-value match. JSON.stringify is deterministic
+ * for the same property order, so the raw LRANGE strings round-trip
+ * back to identical removals. Race-safe against concurrent webhook
+ * RPUSHes: a story that lands between our read and the LREM survives,
+ * which is the expected purge semantics.
  */
 export async function purge(ctx) {
+	const raws = await redis.redis.lrange(STORIES_KEY, 0, -1)
 	let dropped = 0
-	for (let i = stories.length - 1; i >= 0; i--) {
-		const s = stories[i]
-		if (s.source !== 'seed') {
-			ctx.publish(TOPICS.demoNewsStories, 'deleted', { id: s.id })
-			stories.splice(i, 1)
+	let kept = 0
+	for (const raw of raws) {
+		let entry
+		try { entry = JSON.parse(raw) } catch { continue }
+		if (entry.source === 'seed') { kept++; continue }
+		const removed = await redis.redis.lrem(STORIES_KEY, 1, raw)
+		if (removed > 0) {
+			ctx.publish(TOPICS.demoNewsStories, 'deleted', { id: entry.id })
 			dropped++
 		}
 	}
-	return { dropped, kept: stories.length }
+	return { dropped, kept }
 }
 
 /**
@@ -174,7 +251,7 @@ export async function purge(ctx) {
  */
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
-	speed = num
+	await redis.redis.set(SPEED_KEY, num)
 	return { ok: true, speed: num }
 })
 
@@ -214,30 +291,37 @@ export const signPublish = live(async (ctx, args) => {
  */
 export const newsStories = live.stream(
 	TOPICS.demoNewsStories,
-	async () => stories.slice(),
+	async () => getStories(),
 	{ merge: 'crud', key: 'id' }
 )
 
 /**
  * Firehose. Every second the cron tick publishes `speed` 'viewed' events
  * into the source topic. The aggregate watches the same topic and
- * reduces them into per-window state. We also bump a module-scope
+ * reduces them into per-window state. We also bump a Redis-shared
  * totalViews counter for the derived stream to read; the aggregate's
  * lifetime window holds the same value but per-story, and exposing the
  * scalar avoids re-summing it inside derived's recompute.
  *
- * Single-flight; cluster-singleton via configureCron({
- * leader }) wired in src/hooks.ws.js init.
+ * Single-flight; cluster-singleton via configureCron({ leader }) wired
+ * in src/hooks.ws.js init. INCRBY batches the view increment so a tick
+ * at speed=50 issues one Redis op instead of fifty.
  */
 export const firehoseTick = live.cron('* * * * * *', TOPICS.demoNewsView, async (ctx) => {
-	gcStories(ctx)
+	await gcStories(ctx)
+	const speed = await getSpeed()
 	if (speed <= 0) return
+	const stories = await getStories()
+	if (stories.length === 0) return
+	const ts = Date.now()
+	let viewed = 0
 	for (let i = 0; i < speed; i++) {
-		const storyId = pickStoryId()
+		const storyId = pickStoryId(stories)
 		if (!storyId) break
-		totalViews++
-		ctx.publish(TOPICS.demoNewsView, 'viewed', { storyId, ts: Date.now() })
+		ctx.publish(TOPICS.demoNewsView, 'viewed', { storyId, ts })
+		viewed++
 	}
+	if (viewed > 0) await redis.redis.incrby(TOTAL_VIEWS_KEY, viewed)
 })
 
 /**
@@ -278,7 +362,7 @@ export const trending = live.aggregate(TOPICS.demoNewsView, {
 /**
  * Derived stats strip. Recomputes when the lifetime aggregate publishes
  * (1Hz under the default firehose) or when a new story arrives. Reads
- * in-memory state and the totalViews counter the firehose maintains.
+ * cluster-shared Redis state so the value is the same on every replica.
  *
  * 250ms debounce so a burst of webhook publishes + the same-tick
  * aggregate publish coalesce into one recompute instead of three.
@@ -286,6 +370,10 @@ export const trending = live.aggregate(TOPICS.demoNewsView, {
 export const newsStats = live.derived(
 	['demos:news:topk:lifetime', TOPICS.demoNewsStories],
 	async () => {
+		const [stories, totalViews] = await Promise.all([
+			getStories(),
+			getTotalViews()
+		])
 		const newest = stories[stories.length - 1] ?? null
 		return {
 			totalStories: stories.length,
@@ -324,7 +412,7 @@ export const newsWebhook = live.webhook(TOPICS.demoNewsStories, {
 		if (!timingSafeEqual(a, b)) throw new Error('invalid signature')
 		return JSON.parse(body)
 	},
-	transform(payload) {
+	async transform(payload) {
 		const id = typeof payload?.id === 'string' && payload.id.length > 0 ? payload.id : crypto.randomUUID()
 		const headline = typeof payload?.headline === 'string' ? payload.headline.trim().slice(0, MAX_HEADLINE_LEN) : ''
 		const summary = typeof payload?.summary === 'string' ? payload.summary.trim().slice(0, MAX_SUMMARY_LEN) : ''
@@ -333,12 +421,12 @@ export const newsWebhook = live.webhook(TOPICS.demoNewsStories, {
 			throw new Error('headline required')
 		}
 		const story = { id, headline, summary, source: 'webhook', publishedAt: Date.parse(publishedAt) || Date.now() }
-		// The framework auto-publishes the {event, data} we return to
-		// the configured topic. Mutating `stories` here keeps the stream
-		// loader + firehose's pickStoryId in sync immediately;
-		// overflow eviction (with its 'deleted' fan-out) runs on the
-		// next cron tick so it has a ctx in scope.
-		stories.push(story)
+		// RPUSH appends to the cluster-shared list so the next firehose
+		// tick's pickStoryId on the leader replica sees the new story,
+		// AND new subscribers reading via getStories see it too. Overflow
+		// eviction (with its 'deleted' fan-out) runs on the next cron
+		// tick so it has a ctx in scope.
+		await redis.redis.rpush(STORIES_KEY, JSON.stringify(story))
 		return { event: 'created', data: story }
 	}
 })

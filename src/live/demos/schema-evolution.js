@@ -32,6 +32,7 @@
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 
 const SEED_IDS = ['alpha', 'beta', 'gamma']
 const LABELS = {
@@ -45,11 +46,8 @@ const COLORS = {
 	gamma: '#f59e0b'
 }
 
-/** @type {Map<string, { id: string, value: number, modifiedAt: number }>} */
-const counters = new Map()
-for (const id of SEED_IDS) {
-	counters.set(id, { id, value: 0, modifiedAt: Date.now() })
-}
+const VALUES_KEY = 'demos:schema:values'
+const TIMES_KEY = 'demos:schema:times'
 
 function v2Shape(c) {
 	return {
@@ -60,6 +58,22 @@ function v2Shape(c) {
 		modifiedAt: c.modifiedAt,
 		provenance: 'loader'
 	}
+}
+
+async function readAllCounters() {
+	const [valuesRaw, timesRaw] = await Promise.all([
+		redis.redis.hmget(VALUES_KEY, ...SEED_IDS),
+		redis.redis.hmget(TIMES_KEY, ...SEED_IDS)
+	])
+	return SEED_IDS.map((id, i) => {
+		const value = valuesRaw[i] === null ? 0 : Number(valuesRaw[i])
+		const modifiedAt = timesRaw[i] === null ? 0 : Number(timesRaw[i])
+		return {
+			id,
+			value: Number.isFinite(value) ? value : 0,
+			modifiedAt: Number.isFinite(modifiedAt) ? modifiedAt : 0
+		}
+	})
 }
 
 /**
@@ -110,31 +124,37 @@ export const myCounterState = live(async () => ({
 }))
 
 export const incrementCounter = live(async (ctx, id) => {
-	if (typeof id !== 'string' || !counters.has(id)) {
+	if (typeof id !== 'string' || !SEED_IDS.includes(id)) {
 		throw new LiveError('VALIDATION', 'unknown counter')
 	}
-	const c = counters.get(id)
-	c.value += 1
-	c.modifiedAt = Date.now()
-	const payload = v2Shape(c)
+	const modifiedAt = Date.now()
+	// HINCRBY is atomic per field, so two concurrent increments from
+	// different replicas never lose a count. The timestamp goes into a
+	// parallel hash because HINCRBY only works on integer values.
+	const value = await redis.redis.hincrby(VALUES_KEY, id, 1)
+	await redis.redis.hset(TIMES_KEY, id, String(modifiedAt))
+	const payload = v2Shape({ id, value, modifiedAt })
 	ctx.publish(TOPICS.demoSchemaCounter, 'updated', payload)
 	return payload
 })
 
 export const resetCounters = live(async (ctx) => {
+	const modifiedAt = Date.now()
+	const pipeline = redis.redis.multi()
 	for (const id of SEED_IDS) {
-		const c = counters.get(id)
-		if (!c) continue
-		c.value = 0
-		c.modifiedAt = Date.now()
-		ctx.publish(TOPICS.demoSchemaCounter, 'updated', v2Shape(c))
+		pipeline.hset(VALUES_KEY, id, 0)
+		pipeline.hset(TIMES_KEY, id, String(modifiedAt))
+	}
+	await pipeline.exec()
+	for (const id of SEED_IDS) {
+		ctx.publish(TOPICS.demoSchemaCounter, 'updated', v2Shape({ id, value: 0, modifiedAt }))
 	}
 	return { ok: true }
 })
 
 export const counter = live.stream(
 	TOPICS.demoSchemaCounter,
-	async () => Array.from(counters.values()).map(v2Shape),
+	async () => (await readAllCounters()).map(v2Shape),
 	{
 		version: 2,
 		migrate: { 1: v1ToV2 },

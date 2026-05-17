@@ -30,58 +30,69 @@
  *    /demos/news; the only thing that makes this one a cluster
  *    primitive is the leader gate around it.
  *
- * Storage is in-memory (demo only). Recent ticks are capped at TICK_CAP
- * with FIFO eviction; the FIFO drop publishes a 'deleted' event from
- * inside the same cron tick that pushed the new entry, so subscribers
- * never see the cap exceeded.
+ * Storage is cluster-shared via Redis (LIST + counter). Only the leader
+ * writes per tick, but every replica reads via the loader and via live
+ * cluster pub/sub fan-out, so a subscriber on a non-leader replica gets
+ * the same view as a subscriber on the leader. Recent ticks are capped
+ * at TICK_CAP entries with FIFO eviction via LTRIM.
  */
 
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
-import { leader } from '$lib/server/redis'
+import { leader, redis } from '$lib/server/redis'
 
 const TICK_CAP = 30
 
-/** Newest at the END so the page can sort/render via slice/reverse. */
-const recentTicks = []
+const TICKS_KEY = 'demos:cluster-cron:ticks'
+const TICK_COUNT_KEY = 'demos:cluster-cron:count'
 
-let tickCount = 0
+async function readTickCount() {
+	const v = await redis.redis.get(TICK_COUNT_KEY)
+	if (v === null) return 0
+	const n = Number(v)
+	return Number.isFinite(n) ? n : 0
+}
 
-function appendTick(entry, ctx) {
-	recentTicks.push(entry)
-	while (recentTicks.length > TICK_CAP) {
-		const dropped = recentTicks.shift()
-		if (dropped) ctx.publish(TOPICS.demoClusterCronTick, 'deleted', { id: dropped.id })
+async function readRecentTicks() {
+	const raws = await redis.redis.lrange(TICKS_KEY, 0, -1)
+	const out = []
+	for (const raw of raws) {
+		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt */ }
 	}
-	ctx.publish(TOPICS.demoClusterCronTick, 'created', entry)
+	return out
 }
 
 /**
  * Page-load probe. Returns this instance's identity, its current leader
- * status, and the in-memory recent-ticks snapshot. The page renders
+ * status, and the cluster-shared recent-ticks snapshot. The page renders
  * without a flash of empty state on first mount even if zero ticks have
  * fired yet (e.g. a fresh boot with no Redis lease yet acquired).
  *
  * The clusterTicks stream is the source of truth thereafter; this RPC
- * just primes the panel.
+ * just primes the panel. `instanceId` and `isLeader()` are necessarily
+ * per-replica - the demo's point is to show WHICH worker holds the lease
+ * right now - so they are not cluster-shared.
  */
-export const myClusterCronState = live(async () => ({
-	instanceId: leader.instanceId,
-	leaseKey: leader.key,
-	isLeader: leader.isLeader(),
-	tickCap: TICK_CAP,
-	tickCount,
-	ticks: recentTicks.slice()
-}))
+export const myClusterCronState = live(async () => {
+	const [tickCount, ticks] = await Promise.all([readTickCount(), readRecentTicks()])
+	return {
+		instanceId: leader.instanceId,
+		leaseKey: leader.key,
+		isLeader: leader.isLeader(),
+		tickCap: TICK_CAP,
+		tickCount,
+		ticks
+	}
+})
 
 /**
  * Live stream of recent ticks. Capped at TICK_CAP with FIFO eviction
- * inside the cron tick (the eviction site is the only ctx-bearing path,
- * see appendTick).
+ * inside the cron tick. Reads from Redis so every replica returns the
+ * same view.
  */
 export const clusterTicks = live.stream(
 	TOPICS.demoClusterCronTick,
-	async () => recentTicks.slice(),
+	async () => readRecentTicks(),
 	{ merge: 'crud', key: 'id' }
 )
 
@@ -92,15 +103,39 @@ export const clusterTicks = live.stream(
  * the latest entry's instanceId to highlight which worker is currently
  * the leader.
  *
- * Single-flight; cluster-singleton via configureCron({
- * leader }) wired in src/hooks.ws.js init.
+ * INCR + RPUSH are atomic across replicas, so a leader handover (lease
+ * expiry on the old leader, acquisition by a sibling) produces a
+ * continuous sequence rather than rebasing the count to zero. Eviction
+ * via LTRIM bounds the list at TICK_CAP and publishes 'deleted' for
+ * each evicted entry so subscribers' crud merges drop them.
+ *
+ * Single-flight; cluster-singleton via configureCron({ leader }) wired
+ * in src/hooks.ws.js init.
  */
 export const cronTick = live.cron('* * * * * *', TOPICS.demoClusterCronTick, async (ctx) => {
-	tickCount += 1
-	appendTick({
+	const tickCount = await redis.redis.incr(TICK_COUNT_KEY)
+	const entry = {
 		id: crypto.randomUUID(),
 		instanceId: leader.instanceId,
 		ts: Date.now(),
 		seq: tickCount
-	}, ctx)
+	}
+	const raw = JSON.stringify(entry)
+	// RPUSH adds at the end (newest last); LRANGE 0 -(TICK_CAP+1)
+	// captures the front entries that the subsequent LTRIM -TICK_CAP -1
+	// will drop. When length <= TICK_CAP the LRANGE returns empty and
+	// the LTRIM is a no-op.
+	const pipeline = redis.redis.multi()
+	pipeline.rpush(TICKS_KEY, raw)
+	pipeline.lrange(TICKS_KEY, 0, -(TICK_CAP + 1))
+	pipeline.ltrim(TICKS_KEY, -TICK_CAP, -1)
+	const results = await pipeline.exec()
+	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
+	for (const evictedRaw of evicted) {
+		try {
+			const dropped = JSON.parse(evictedRaw)
+			ctx.publish(TOPICS.demoClusterCronTick, 'deleted', { id: dropped.id })
+		} catch { /* corrupt entry already evicted */ }
+	}
+	ctx.publish(TOPICS.demoClusterCronTick, 'created', entry)
 })
