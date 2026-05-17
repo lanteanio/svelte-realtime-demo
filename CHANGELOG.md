@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`src/lib/server/upload.js` chunks Map switched to a Set of hashes only; bytes are no longer retained.** Pre-fix, every uploaded chunk's raw `Uint8Array` (up to 1 MB) stayed in a module-level `Map<hash, Uint8Array>` until `purgeMemory()` cleared it. Purge runs on a leader-gated cron, so non-leader workers in a clustered deploy never cleared their local Map and the Map grew without bound at upload rate. Bytes were also never read back (the demo's wire surface returns dedup metadata only; `getChunk` was exported but had no callers). The new shape keeps only the hash strings (Set membership for dedup checks), which is bounded at `MAX_FILES * avg-chunks-per-file` entries (~KB total). Removed the unused `getChunk` export; `storeChunk(hash)` no longer accepts the bytes argument.
+
+- **`/demos/chaos` `states` Map now cleared on WS close.** Pre-fix, the demo's per-user state Map (`states: Map<userId, ...>`) was documented as "demo accepts the leak": every user who ran `startChaos` and disconnected without clicking Stop left an orphan entry that the 100ms ticker iterated forever, publishing into a topic with no subscribers. Anonymous demo users get a fresh `ctx.user.id` per session, so orphans accumulated one per session. Added an `onClose(ws)` export wired from `src/hooks.ws.js` close handler that calls `states.delete(ws.getUserData().id)`. Same fix shape that other in-process demo state should use; chaos was the only such demo.
+
+### Added
+
+- **SIGUSR2 heap-snapshot trigger in `src/hooks.ws.js`.** `kill -SIGUSR2 <node-pid>` on the host writes a `heap-<timestamp>.heapsnapshot` file to the worker's CWD, loadable in Chrome DevTools (Memory tab -> Load profile). Synchronous stop-the-world pause for the snapshot (~50-500ms depending on heap size) and the signal isn't reachable from outside the host. Useful for heap-retention diagnostics on a live worker.
+
 ### Security
 
 - **App connects to Postgres as the non-superuser `stickynotes_app` role.** Pre-fix, the demo's `DATABASE_URL` connected as `postgres` - the superuser bootstrap role created by the official postgres image. An RCE landing inside the node container had full DDL / role-management / cross-database access from the connection it already held. Fix: a new `init-app-role.sh` runs once on first postgres init (via `/docker-entrypoint-initdb.d/00-init-app-role.sh`) and creates the `stickynotes_app` role with the password from `STICKYNOTES_APP_PASSWORD`. `schema.sql` runs a `SET ROLE stickynotes_app` block so the `board` / `note` tables, the `note_board_id_idx` index, and the `archive_old_notes()` function are all owned by `stickynotes_app`. Owner privilege lets the runtime `ALTER TABLE` in `hooks.server.js` continue to work without granting the app role broader rights. The role is NOT a superuser (`rolsuper=f`), cannot create other roles (`rolcreaterole=f`), cannot create databases (`rolcreatedb=f`), and has no privilege on databases other than `stickynotes`. The `postgres` superuser password (`POSTGRES_PASSWORD`) is still required for the image's first-init bootstrap and for operator ad-hoc maintenance (`docker exec -it <container> psql -U postgres`), just not for the app's runtime connection.

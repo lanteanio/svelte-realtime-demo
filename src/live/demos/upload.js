@@ -135,13 +135,13 @@ export const uploadFile = live.upload(async (ctx, args) => {
 			if (chunkIdempotency) {
 				const slot = await chunkIdempotency.acquire(hash)
 				if (slot.acquired) {
-					storeChunk(hash, chunk)
+					storeChunk(hash)
 					await slot.commit({ stored: true, byteLength: chunk.byteLength })
 				} else {
 					dedup = true
 				}
 			} else {
-				if (!storeChunk(hash, chunk)) dedup = true
+				if (!storeChunk(hash)) dedup = true
 			}
 
 			hashes.push(hash)

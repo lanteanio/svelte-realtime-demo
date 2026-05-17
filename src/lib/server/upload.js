@@ -1,12 +1,18 @@
 /**
  * Server-side state for /demos/upload.
  *
- * Cluster-shared file index in Redis. Chunk bytes remain in a per-replica
- * in-memory Map: the demo never reads the bytes back over the wire (the
- * dedup test only asserts that two uploads with the same hashes report
- * dedup: true), so paying to cluster-share the actual bytes would be pure
- * overhead. The file metadata + ordering + byte-cap counter all live in
- * Redis so the uploaded-files list looks the same on every replica.
+ * Cluster-shared file index in Redis. Chunk dedup is content-addressed
+ * via a per-replica `Set<hash>` - the demo's pitch is "two uploads with
+ * the same hashes report dedup: true", which only needs the hash
+ * existence check. We deliberately do NOT retain chunk bytes:
+ * `live.upload` already streams bytes through the handler, the dedup
+ * check fires inside the loop, and nothing downstream reads bytes back
+ * (the wire surface returns metadata + dedupedChunks count only). An
+ * earlier version stored `Uint8Array` chunks in this Map; under cluster
+ * deploys where `purgeMemory` is leader-gated, non-leader workers
+ * accumulated bytes forever - a real leak, not a "demo accepts it"
+ * leak. The Set-of-hashes shape is bounded at ~MAX_FILES * avg-chunks-
+ * per-file entries (~64 bytes each), measured in KB.
  *
  * Files are kept under MAX_FILE_BYTES total or MAX_FILES count, whichever
  * is smaller. FIFO eviction drops the oldest file when over capacity.
@@ -48,20 +54,16 @@ export const chunkIdempotency = env.REDIS_URL
 		})
 	: null
 
-/** @type {Map<string, Uint8Array>} hash -> raw bytes (per-replica, never read back) */
-const chunks = new Map()
-
-export function getChunk(hash) {
-	return chunks.get(hash) ?? null
-}
+/** @type {Set<string>} hashes only - bytes never retained, see file docstring */
+const chunks = new Set()
 
 export function hasChunk(hash) {
 	return chunks.has(hash)
 }
 
-export function storeChunk(hash, bytes) {
+export function storeChunk(hash) {
 	if (chunks.has(hash)) return false
-	chunks.set(hash, bytes)
+	chunks.add(hash)
 	return true
 }
 

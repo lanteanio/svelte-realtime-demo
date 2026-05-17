@@ -18,8 +18,8 @@
  * Architecture:
  * - Per-user state: { seed, dropRate, tickN, deliveredN, rng }
  *   keyed by `ctx.user.id`. Module-level Map; cleared on
- *   stopChaos or implicit on connection close (we don't track
- *   close here - demo accepts the leak).
+ *   `stopChaos` (explicit) or on WS close via the exported
+ *   `onClose(ws)` hook wired from `src/hooks.ws.js`.
  * - One module-level 100ms ticker arms on first subscribe and
  *   iterates every active user. For each, advance the RNG, decide
  *   drop, publish a record on `demos:chaos:tick:{userId}`. The
@@ -110,6 +110,19 @@ export const stopChaos = live(async (ctx) => {
 	states.delete(ctx.user.id)
 	return { ok: true }
 })
+
+/**
+ * WS close hook. Wired from `src/hooks.ws.js` close handler so a user
+ * who starts chaos and disconnects without clicking Stop does not leave
+ * an orphan entry in `states` that the 100ms ticker iterates forever.
+ * Anonymous demo users get a fresh `ctx.user.id` per session, so the
+ * orphan accumulates one entry per dropped session under the previous
+ * "demo accepts the leak" comment.
+ */
+export function onClose(ws) {
+	const userId = ws?.getUserData?.()?.id
+	if (userId) states.delete(userId)
+}
 
 export const myChaosState = live(async (ctx) => {
 	const s = states.get(ctx.user.id)

@@ -8,15 +8,33 @@
  * The adapter calls them automatically - you just export the right names.
  */
 
+import v8 from 'node:v8'
 import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
 import { bus, limiter, presence, cursor, replay, registry, leader, redis } from '$lib/server/redis'
 import { metrics } from '$lib/server/metrics'
 import { tasks } from '$lib/server/tasks'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
+import { onClose as chaosOnClose } from '$live/demos/chaos'
 // Side-effect import: eagerly loads every demo with a purge surface and
 // registers the orchestrator cron at boot. See src/lib/server/demo-purge.js.
 import '$lib/server/demo-purge'
+
+// SIGUSR2 heap-snapshot trigger. `kill -SIGUSR2 <pid>` on the host writes
+// a `heap-<timestamp>.heapsnapshot` file in the worker's CWD; load it in
+// Chrome DevTools -> Memory tab to see top retainers. Safe in production:
+// the dump is a synchronous V8 stop-the-world pause (~50-500ms depending
+// on heap size) but allocates no long-lived state and the signal isn't
+// reachable from outside the host.
+process.on('SIGUSR2', () => {
+	const file = `heap-${Date.now()}.heapsnapshot`
+	try {
+		v8.writeHeapSnapshot(file)
+		console.log(`[heap-dump] wrote ${file} pid=${process.pid} rss=${Math.round(process.memoryUsage.rss() / 1024 / 1024)}MB`)
+	} catch (err) {
+		console.error(`[heap-dump] failed pid=${process.pid}`, err)
+	}
+})
 
 /**
  * Message-tier admission control. Pairs with the handshake-tier
@@ -325,6 +343,10 @@ export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	// pages close, producing 30s-delayed warning floods.
 	pushHooks.close(ws, ctx)
 	registry.hooks.close(ws, ctx)
+	// Per-demo cleanup that needs WS context (most demos use Redis
+	// for state and don't need a close hook; chaos.js keeps a
+	// per-user state Map in-process that would orphan on disconnect).
+	chaosOnClose(ws)
 })
 
 /**
