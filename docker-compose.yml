@@ -40,6 +40,17 @@ services:
       # change; setting it enables the AUTH handshake in lockstep with the
       # redis service's --requirepass below.
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@127.0.0.1:6379
+      # CRITICAL: svelte-realtime gates dev-only diagnostics on
+      # `process.env.NODE_ENV !== 'production'`. With NODE_ENV unset, the
+      # framework treats the process as dev and arms a per-platform
+      # `setInterval` publish-rate-warning sampler (registered in a
+      # `Set` keyed by platform identity). Combined with the cron tick's
+      # per-fire `bus.wrap(_cronPlatform)` minting a fresh wrapped
+      # platform on every fire, the Set accumulates one entry per cron
+      # tick at ~7 Hz - each entry holding an active timer plus the
+      # full helpers/closures graph. Heap grows by ~100 MB/hr until OOM.
+      # Setting NODE_ENV=production constant-folds the dev branch dead.
+      NODE_ENV: production
       PORT: "443"
       ORIGIN: https://${DOMAIN:?required}
       SSL_CERT: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
