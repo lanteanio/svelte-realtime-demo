@@ -10,7 +10,7 @@
 
 import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
-import { bus, limiter, presence, cursor, replay, registry, leader } from '$lib/server/redis'
+import { bus, limiter, presence, cursor, replay, registry, leader, redis } from '$lib/server/redis'
 import { metrics } from '$lib/server/metrics'
 import { tasks } from '$lib/server/tasks'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
@@ -131,6 +131,13 @@ export function init({ platform }) {
 	// `.replay` via a live getter, so any per-tick / per-message
 	// re-wrap also sees it.
 	platform.replay = replay
+	// Stash the raw ioredis client so realtime's `live.room({ presence })`
+	// uses its Redis-backed cluster-shared roster path instead of the
+	// per-process _presenceRef Map. Without this, a room's "Online" list
+	// only shows users on the same replica as the viewer; with it, the
+	// roster is HGETALL-aggregated across replicas via a shared HASH
+	// (`__live-presence:{topic}`).
+	platform.redis = redis.redis
 	bus.activate(platform)
 	setCronPlatform(platform)
 
