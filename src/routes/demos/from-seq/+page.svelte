@@ -17,7 +17,7 @@
 	store and tags each missed entry `fromSeq`.
 -->
 <script>
-	import { onMount } from 'svelte'
+	import { onMount, untrack } from 'svelte'
 	import { SvelteSet } from 'svelte/reactivity'
 	import {
 		myFromSeqState,
@@ -57,27 +57,37 @@
 	// delivers the missed entries a moment later. By merging we preserve
 	// the older rows the user has already seen and stamp the new ones
 	// with whatever tier the server tagged them.
+	//
+	// The callback body runs under untrack() because the SDK's store fires
+	// synchronously on subscribe with its current value -- which during
+	// the resume-grace window is the retained array from the previous
+	// session. Without untrack, that synchronous fire happens inside the
+	// effect's tracking phase, the read of `entries` taints the effect,
+	// the subsequent write triggers a re-run, and Svelte aborts with
+	// effect_update_depth_exceeded.
 	$effect(() => {
 		if (!subscribed) return
 		const off = eventStream.subscribe((v) => {
-			const arr = Array.isArray(v) ? v : []
-			if (arr.length === 0) return
-			const merged = new Map(entries.map((e) => [e.id, e]))
-			for (const e of arr) {
-				merged.set(e.id, e)
-				if (
-					resumedAt > 0 &&
-					e.tier === 'live' &&
-					e.seq > pausedAtSeq &&
-					e.ts < resumedAt
-				) {
-					if (!replayFillSeqs.has(e.seq)) {
-						replayFillSeqs.add(e.seq)
-						replayBurstCount++
+			untrack(() => {
+				const arr = Array.isArray(v) ? v : []
+				if (arr.length === 0) return
+				const merged = new Map(entries.map((e) => [e.id, e]))
+				for (const e of arr) {
+					merged.set(e.id, e)
+					if (
+						resumedAt > 0 &&
+						e.tier === 'live' &&
+						e.seq > pausedAtSeq &&
+						e.ts < resumedAt
+					) {
+						if (!replayFillSeqs.has(e.seq)) {
+							replayFillSeqs.add(e.seq)
+							replayBurstCount++
+						}
 					}
 				}
-			}
-			entries = [...merged.values()].sort((a, b) => b.seq - a.seq)
+				entries = [...merged.values()].sort((a, b) => b.seq - a.seq)
+			})
 		})
 		return () => off()
 	})
