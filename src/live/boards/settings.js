@@ -10,6 +10,7 @@ import { live, LiveError } from 'svelte-realtime/server'
 import { getBoard, updateBoard } from '$lib/server/db'
 import { validateBoardId, validateBoardFields } from '$lib/server/validate'
 import { TOPICS } from '$lib/server/topics'
+import { activityEvent } from './activity'
 
 export const updateSettings = live(async (ctx, boardId, fields) => {
 	validateBoardId(boardId)
@@ -21,14 +22,10 @@ export const updateSettings = live(async (ctx, boardId, fields) => {
 	// updateBoard already sets last_activity = now(), broadcast to home page
 	ctx.publish(TOPICS.boards, 'updated', { board_id: board.board_id, title: board.title, slug: board.slug, last_activity: board.last_activity })
 	if (clean.title !== undefined) {
-		ctx.publish(TOPICS.activity(boardId), 'created', {
-			action: 'renamed the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-		})
+		ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'renamed the board'))
 	}
 	if (clean.background !== undefined) {
-		ctx.publish(TOPICS.activity(boardId), 'created', {
-			action: 'changed the background', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-		})
+		ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'changed the background'))
 	}
 	return board
 })

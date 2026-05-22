@@ -28,6 +28,7 @@ import {
 } from '$lib/server/db'
 import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
 import { TOPICS } from '$lib/server/topics'
+import { activityEvent } from './activity'
 
 /**
  * Touch the board's last_activity and broadcast the update to the
@@ -78,9 +79,7 @@ export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { co
 		creatorName: ctx.user.name
 	})
 	ctx.publish(TOPICS.notes(boardId), 'created', note)
-	ctx.publish(TOPICS.activity(boardId), 'created', {
-		action: 'added a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-	})
+	ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'added a note'))
 	touch(ctx, boardId)
 	return note
 })
@@ -214,14 +213,10 @@ export const editNote = live.lock(
 		_invalidateNoteCache(noteId)
 		ctx.publish(TOPICS.notes(boardId), 'updated', note)
 		if (clean.content !== undefined) {
-			ctx.publish(TOPICS.activity(boardId), 'created', {
-				action: 'edited a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-			})
+			ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'edited a note'))
 		}
 		if (clean.color) {
-			ctx.publish(TOPICS.activity(boardId), 'created', {
-				action: 'recolored a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-			})
+			ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'recolored a note'))
 		}
 		touch(ctx, boardId)
 		return note
@@ -251,9 +246,7 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 	await dbDeleteNote(noteId)
 	_invalidateNoteCache(noteId)
 	ctx.publish(TOPICS.notes(boardId), 'deleted', { note_id: noteId })
-	ctx.publish(TOPICS.activity(boardId), 'created', {
-		action: 'removed a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
-	})
+	ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'removed a note'))
 	touch(ctx, boardId)
 })
 
@@ -276,7 +269,7 @@ export const tidyNotes = live(async (ctx, boardId) => {
 	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
-		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'tidied the board') }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -324,7 +317,7 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
-		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'rearranged the board') }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -352,7 +345,7 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
-		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'shuffled the board') }
 	])
 	touch(ctx, boardId)
 	return updated
@@ -399,7 +392,7 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
-		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
+		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'grouped notes by author') }
 	])
 	touch(ctx, boardId)
 	return updated

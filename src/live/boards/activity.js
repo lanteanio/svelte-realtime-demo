@@ -12,6 +12,16 @@
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 
+/**
+ * Build an activity event payload. Every event carries a UUID so the
+ * ActivityTicker each block has a guaranteed-unique key - a busy board
+ * (e.g. stress testing) fires same-user/same-action events inside a
+ * single millisecond, and ts + user + action alone collide there.
+ */
+export function activityEvent(ctx, action) {
+	return { id: crypto.randomUUID(), action, user: ctx.user.name, color: ctx.user.color, ts: Date.now() }
+}
+
 export const activity = live.stream((ctx, boardId) => TOPICS.activity(boardId), async (ctx, boardId) => {
 	return []
 }, { merge: 'latest', max: 30, replay: true })
