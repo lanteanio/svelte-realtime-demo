@@ -378,6 +378,16 @@ export const message = createMessage({
 		if (THROTTLED_RPCS.has(rpcPath)) return
 		const { allowed, resetMs } = await limiter.consume(ws)
 		if (!allowed) throw new LiveError('RATE_LIMITED', `Retry in ${Math.ceil(resetMs / 1000)}s`)
+	},
+	// Catch wire frames that don't match the RPC shape. The adapter's
+	// `move(topic, data)` helper (used by Canvas for cursor updates)
+	// sends `{type:'cursor', topic, data}` with no `rpc` field, so it
+	// lands here. Route to the cursor extension's tracker.update via
+	// its hooks.message dispatcher; bypasses the realtime RPC pipeline
+	// entirely for the cursor hot path -- no RPC id allocation, no
+	// pending-promise map entry, no timeout timer, no devtools/dedup.
+	onUnhandled(ws, data, platform) {
+		cursor.hooks.message(ws, { data, platform })
 	}
 })
 

@@ -26,6 +26,28 @@
 	// --- Drag handling ---
 	// Uses pointer capture so the note keeps receiving events even if
 	// the cursor moves outside the element (fast dragging).
+	//
+	// pointermove fires at the input device's native rate (500-1000Hz on
+	// modern trackpads / high-poll-rate mice). Without coalescing, every
+	// firing called onMove -> moveNote RPC, flooding the server at 1000
+	// req/sec per drag and tripping the PUBLISH_RATE pressure signal:
+	// admission control then sheds the background-class moveNote handler
+	// entirely, observers freeze for the duration of the pressure window,
+	// and the drag only resumes broadcasting once the local drag slows.
+	// rAF batching caps outbound at display-refresh rate (60Hz on a 60Hz
+	// monitor, 120Hz on a 120Hz monitor) which keeps us well clear of
+	// the pressure floor. Same pattern Canvas uses for cursor capture.
+
+	let pendingMove = null
+	let moveRafScheduled = false
+
+	function flushMove() {
+		moveRafScheduled = false
+		if (!pendingMove) return
+		const { x, y } = pendingMove
+		pendingMove = null
+		onMove(x, y)
+	}
 
 	function onPointerDown(e) {
 		if (editing) return
@@ -37,12 +59,19 @@
 
 	function onPointerMove(e) {
 		if (!dragging) return
-		onMove(e.clientX - offset.x, e.clientY - offset.y)
+		pendingMove = { x: e.clientX - offset.x, y: e.clientY - offset.y }
+		if (!moveRafScheduled) {
+			moveRafScheduled = true
+			requestAnimationFrame(flushMove)
+		}
 	}
 
 	function onPointerUp() {
 		if (dragging) {
 			dragging = false
+			// Flush any pending move so the final landing position lands
+			// on the server even if pointerup races the rAF callback.
+			if (pendingMove) flushMove()
 			onMoveEnd()
 		}
 	}

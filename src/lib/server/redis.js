@@ -72,19 +72,37 @@ export const presence = createPresence(redis, {
 /**
  * Cursor position tracker for live cursor overlays.
  *
- * - throttle: 16ms per-connection - one user can broadcast their
- *   cursor position at most ~60 times/second
- * - topicThrottle: 16ms per-topic world-state tick - pending positions
- *   per cursor are kept in a Map; every 16ms the server emits one bulk
+ * - throttle: 8ms per-connection - one user can broadcast their cursor
+ *   at most ~120 times/second, matching a 120Hz display's refresh rate.
+ *   Client capture is rAF-driven so it already emits at display-refresh
+ *   rate; this gate is the per-connection safety cap.
+ * - topicThrottle: 8ms per-topic world-state tick - pending positions
+ *   per cursor are kept in a Map; every 8ms the server emits one bulk
  *   frame per topic with the latest position for every cursor that
- *   moved. Per-peer wire frames per topic per second = 1000 / 16 = 60,
+ *   moved. Per-peer wire frames per topic per second = 1000 / 8 = 120,
  *   regardless of cursor count or per-cursor publish rate. Bandwidth
- *   scales with active-mover count, not movers x rate.
+ *   scales with active-mover count, not movers x rate. The doubled
+ *   rate vs 60Hz is the bandwidth cost we accept for visible smoothness
+ *   on 120Hz displays. Per-frame size went from "user metadata x N
+ *   cursors" to "x, y x N cursors" as of extensions 0.5.2 -- user
+ *   metadata now flows on a separate catalog channel (`user-joined`,
+ *   `user-updated`, `user-left`), sent on attach + on join/leave only,
+ *   not on every flush. So the 120Hz wire cost is dominated by 8 bytes
+ *   per cursor per flush, not 100.
+ * - snapshotIntervalMs: 100 (extensions 0.5.2 default) - decouples the
+ *   Redis HSET writes from the bulk-flush cadence. Cursor positions are
+ *   kept in-memory on the publishing replica and only snapshotted to
+ *   the durable hash every 100ms (for joiner snapshots + crash
+ *   recovery). At 120Hz x N movers that's 10 HSETs/sec per topic instead
+ *   of 120 x N. Pre-0.5.2 the demo would saturate Redis writes at a
+ *   few hundred concurrent movers; with the snapshot decouple the same
+ *   topology survives 10K+.
  * - select: same as presence, only expose public user fields
  */
 export const cursor = createCursor(redis, {
-	throttle: 16,
-	topicThrottle: 16,
+	throttle: 8,
+	topicThrottle: 8,
+	snapshotIntervalMs: 100,
 	select: (u) => ({ id: u.id, name: u.name, color: u.color }),
 	breaker
 })

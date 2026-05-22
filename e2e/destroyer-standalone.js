@@ -16,7 +16,22 @@ const WITH_CURSORS = args.includes('--cursors');
 const WS_URL = args.find(a => a.startsWith('wss://')) || 'wss://svelte-realtime-demo.lantean.io/ws';
 const HTTP_URL = WS_URL.replace('wss://', 'https://').replace('/ws', '');
 const BOARD_SLUG = 'stress-me-out';
-const LEVELS = [1000, 2000, 3000, 5000, 7000, 10000];
+// Ramps past 10K to find the actual ceiling when fired from a Linux box
+// against the demo (home networks NAT-table-out around 5-10K). Override via
+// LEVELS env var: `LEVELS=1000,5000,15000,30000 node destroyer-standalone.js`.
+const LEVELS = process.env.LEVELS
+	? process.env.LEVELS.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite)
+	: [1000, 2000, 5000, 10000, 15000, 20000, 30000, 50000];
+
+// Per-bot cursor publish interval (ms). 32ms (~31Hz) keeps headroom; 8ms
+// (~125Hz) saturates the server's new 8ms cursor throttle from every bot.
+// At N bots x 125Hz that's N*125 raw RPCs/sec landing on the publish path
+// before per-WS coalescing kicks in -- the real ceiling-finding workload.
+//
+//   CURSOR_INTERVAL_MS=8 node destroyer-standalone.js --cursors    # PARTY MODE
+const CURSOR_INTERVAL_MS = Number.isFinite(parseInt(process.env.CURSOR_INTERVAL_MS, 10))
+	? parseInt(process.env.CURSOR_INTERVAL_MS, 10)
+	: 32;
 
 // Per-request TLS-skip dispatcher for fetch. Scoped to this Agent instance
 // so other fetch / https calls in the process still verify certificates.
@@ -81,7 +96,7 @@ function startCursor(ws, boardId) {
 				ws.send(JSON.stringify({ rpc: 'boards/cursors/moveCursor', id: nextId(), args: [boardId, { x: Math.round(x), y: Math.round(y) }] }));
 			}
 		} catch {}
-	}, 32);
+	}, CURSOR_INTERVAL_MS);
 }
 
 async function checkServer() {
@@ -104,6 +119,10 @@ async function run() {
 	console.log(`  Target: ${WS_URL}`);
 	console.log(`  Board:  ${BOARD_SLUG}`);
 	console.log(`  Levels: ${LEVELS.join(', ')}`);
+	if (WITH_CURSORS) {
+		const hz = (1000 / CURSOR_INTERVAL_MS).toFixed(1);
+		console.log(`  Cursor rate: ${CURSOR_INTERVAL_MS}ms (~${hz}Hz per bot)`);
+	}
 	console.log('='.repeat(60) + '\n');
 
 	const boardId = await getBoardId();

@@ -87,8 +87,12 @@ export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { co
 
 /**
  * Move a note to a new position.
- * Throttled to 50ms - during a drag, the client fires this on every
- * mouse move, but the server only processes it every 50ms at most.
+ * Throttled to 8ms (~120Hz) - matches a 120Hz display's refresh rate
+ * so observers see drag motion as smoothly as the dragger does. The
+ * client coalesces pointermove via rAF (see StickyNote.onPointerMove)
+ * so we already only receive at display-refresh rate per drag; this
+ * throttle is the per-note safety cap when multiple browsers drag the
+ * same note simultaneously.
  *
  * Background-class: silently dropped under any pressure signal. The
  * client is doing optimistic display via store.mutate so a few dropped
@@ -96,7 +100,7 @@ export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { co
  */
 export const moveNote = live(async (ctx, boardId, noteId, x, y) => {
 	if (ctx.shed('background')) return
-	ctx.throttle(`move:${noteId}`, 50)
+	ctx.throttle(`move:${noteId}`, 8)
 	await verifyNoteOwnership(noteId, boardId)
 	const note = await dbUpdateNote(noteId, { x: validateCoord(x, 'x'), y: validateCoord(y, 'y') })
 	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
