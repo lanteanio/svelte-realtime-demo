@@ -12,7 +12,13 @@
 	import CountdownTimer from './CountdownTimer.svelte'
 
 	let { board, onpresence } = $props()
-	const presenceStore = $derived(presence(`board:${board.board_id}`))
+	// maxAge matches the server-side per-field TTL (90s). Without this,
+	// an entry that expires in Redis via HPEXPIRE (no diff fires for
+	// per-field expiry) would linger on the home page forever -- you'd
+	// see "1 here" for a board that nobody is actually on. The next
+	// heartbeat for a still-present user re-adds them via the new
+	// {key:data} heartbeat shape, so legitimate users do not flicker.
+	const presenceStore = $derived(presence(`board:${board.board_id}`, { maxAge: 90000 }))
 	const users = $derived($presenceStore ?? [])
 
 	// Report presence count to parent for sorting
