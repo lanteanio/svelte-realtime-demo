@@ -55,6 +55,9 @@ function connectAndJoin(boardId, index) {
 }
 
 test.describe('Presence Destroyer', () => {
+	// Opt-in: ramps to 10K live WS connections. See destroyer.spec.js for
+	// the same gating. Set RUN_DESTROYER=1 to run.
+	test.skip(!process.env.RUN_DESTROYER, 'opt-in: ramps to 10K WS connections (set RUN_DESTROYER=1)');
 	test.setTimeout(1200_000);
 
 	test('ramp to 10K connections - find presence ceiling', async ({ browser }) => {

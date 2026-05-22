@@ -30,9 +30,22 @@
 	function onPointerMove(e) {
 		if (!canvasEl) return
 		const rect = canvasEl.getBoundingClientRect()
+		// Bitwise `| 0` truncates to int32 (faster than Math.floor and produces
+		// the same result for non-negative values, which page coordinates always
+		// are). Saves ~15-25 bytes per cursor wire frame vs the default float
+		// JSON representation (e.g. `742.0843811035156` -> `742`). Visually:
+		// labels render sharper because drawImage with integer offsets does
+		// 1:1 pixel mapping instead of bilinear interpolation; the arrow itself
+		// is roughly equivalent (its diagonals anti-alias regardless of
+		// translate fractional part).
+		//
+		// Caveat for future-you: this quantizes DOCUMENT coordinates. If a
+		// zoom feature ever lands, 1-document-pixel quantization becomes
+		// N-screen-pixel quantization at zoom N, which becomes visible. Move
+		// the truncation downstream of any zoom transform if that day comes.
 		pendingCursor = {
-			x: e.clientX - rect.left + canvasEl.scrollLeft,
-			y: e.clientY - rect.top + canvasEl.scrollTop
+			x: (e.clientX - rect.left + canvasEl.scrollLeft) | 0,
+			y: (e.clientY - rect.top + canvasEl.scrollTop) | 0
 		}
 		if (!rafScheduled) {
 			rafScheduled = true

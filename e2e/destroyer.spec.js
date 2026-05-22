@@ -112,6 +112,12 @@ async function measureFrames(page) {
 }
 
 test.describe('Destroyer Test', () => {
+	// Opt-in: ramps to 10K live WS connections. The 10K plateau saturates
+	// consumer-grade home networking gear (NAT table exhaustion, ISP
+	// pipe), so this is skipped by default and runs only when
+	// RUN_DESTROYER is set. Use it from a deployable runner or a
+	// machine on a network that can take the load.
+	test.skip(!process.env.RUN_DESTROYER, 'opt-in: ramps to 10K WS connections (set RUN_DESTROYER=1)');
 	test.setTimeout(1200_000); // 20 minutes
 
 	test('ramp to 10K users - find the ceiling', async ({ browser }) => {
