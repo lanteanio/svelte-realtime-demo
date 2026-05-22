@@ -25,8 +25,12 @@ const config = {
 			websocket: {
 				upgradeRateLimit: 0,
 				upgradeAdmission: {
-					maxConcurrent: 1000,
-					perTickBudget: 64
+					// Cap in-flight upgrades. 4000 keeps the 1000-bot stress harness
+					// (plus 4x burst-room above it) entirely on the cheap shed path.
+					// perTickBudget scales to drain that pool within ~1s of event-
+					// loop time on a 60Hz tick (4000 / 256 = ~16 ticks).
+					maxConcurrent: 4000,
+					perTickBudget: 256
 				},
 				// Demo pressure thresholds. The adapter ships production-
 				// tuned defaults (publishRatePerSec: 10000, memoryHeapUsedRatio:

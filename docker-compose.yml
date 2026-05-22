@@ -79,7 +79,7 @@ services:
         hard: 65536
     restart: unless-stopped
     deploy:
-      replicas: 2
+      replicas: 4
 
   certbot:
     image: certbot/certbot
