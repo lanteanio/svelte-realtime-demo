@@ -43,9 +43,30 @@
 	const overflow = $derived(Math.max(0, users.length - maxAvatars))
 
 	$effect(() => {
-		joinBoard(boardId)
+		let cancelled = false
+		let backoffTimer
+
+		async function joinWithRetry() {
+			try {
+				await joinBoard(boardId)
+			} catch (err) {
+				if (cancelled) return
+				if (err?.code === 'OVERLOADED') {
+					// Server admission-shed under pressure; retry with jitter so a
+					// stampede of clients does not all retry on the same tick.
+					backoffTimer = setTimeout(joinWithRetry, 800 + Math.random() * 700)
+					return
+				}
+				console.error('joinBoard failed:', err)
+			}
+		}
+
+		joinWithRetry()
+
 		return () => {
-			leaveBoard(boardId)
+			cancelled = true
+			if (backoffTimer) clearTimeout(backoffTimer)
+			leaveBoard(boardId).catch(() => {})
 		}
 	})
 </script>

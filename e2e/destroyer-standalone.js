@@ -3,19 +3,42 @@
  * Pure Node.js + ws library. Connect, join presence, optionally move cursors.
  * Ramps through levels and reports results.
  *
+ * Single-process default. With WORKERS=N (N > 1) the primary process forks
+ * N child Node processes via the cluster module, divides LEVELS by N, and
+ * aggregates exit codes. Each child runs a separate event loop, which
+ * bypasses single-process setInterval saturation: at WORKERS=1 with 1000
+ * bots at 8ms, the harness only delivers ~12 RPCs/sec/bot because the
+ * 1000 timers compete for one event loop. With WORKERS=8 each child has
+ * 125 timers and the harness can hit the configured rate.
+ *
  * Usage:
  *   node destroyer.js                          # presence only
  *   node destroyer.js --cursors                # with cursor movement
  *   node destroyer.js --url wss://localhost/ws # custom server
+ *
+ *   WORKERS=8 LEVELS=1000 CURSOR_INTERVAL_MS=8 SUSTAIN_MS=60000 \
+ *     node destroyer-standalone.js --cursors
  */
 
+import cluster from 'node:cluster';
 import { WebSocket } from 'ws';
-import { Agent } from 'undici';
+
 const args = process.argv.slice(2);
 const WITH_CURSORS = args.includes('--cursors');
 const WS_URL = args.find(a => a.startsWith('wss://')) || 'wss://svelte-realtime-demo.lantean.io/ws';
 const HTTP_URL = WS_URL.replace('wss://', 'https://').replace('/ws', '');
 const BOARD_SLUG = 'stress-me-out';
+
+// Multi-process: WORKERS=N forks N child Node processes that each handle
+// 1/N of the bot population. Default 1 = single-process (legacy behavior).
+// SHARD is set per child by the primary (0..N-1); 0 in single-process mode.
+const WORKERS = Math.max(1, parseInt(process.env.WORKERS, 10) || 1);
+const SHARD = parseInt(process.env.SHARD, 10) || 0;
+// Each shard reserves 100k bot indices so display names stay globally
+// unique across children (the user id is randomUUID and already unique;
+// this is just for log readability).
+const SHARD_BASE = SHARD * 100_000;
+
 // Ramps past 10K to find the actual ceiling when fired from a Linux box
 // against the demo (home networks NAT-table-out around 5-10K). Override via
 // LEVELS env var: `LEVELS=1000,5000,15000,30000 node destroyer-standalone.js`.
@@ -24,7 +47,7 @@ const LEVELS = process.env.LEVELS
 	: [1000, 2000, 5000, 10000, 15000, 20000, 30000, 50000];
 
 // Per-bot cursor publish interval (ms). 32ms (~31Hz) keeps headroom; 8ms
-// (~125Hz) saturates the server's new 8ms cursor throttle from every bot.
+// (~125Hz) saturates the server's 8ms cursor throttle from every bot.
 // At N bots x 125Hz that's N*125 raw RPCs/sec landing on the publish path
 // before per-WS coalescing kicks in -- the real ceiling-finding workload.
 //
@@ -41,11 +64,62 @@ const SUSTAIN_MS = Number.isFinite(parseInt(process.env.SUSTAIN_MS, 10))
 	? parseInt(process.env.SUSTAIN_MS, 10)
 	: 3000;
 
-// Per-request TLS-skip dispatcher for fetch. Scoped to this Agent instance
-// so other fetch / https calls in the process still verify certificates.
-// The WebSocket connections use the ws library's scoped rejectUnauthorized
-// option at construction time.
-const insecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } });
+if (WORKERS > 1 && cluster.isPrimary) {
+	runPrimary();
+} else {
+	if (WORKERS > 1) {
+		// Prefix every child log line with its shard id so interleaved output
+		// from multiple workers stays readable in one terminal.
+		const origLog = console.log;
+		console.log = (msg = '', ...rest) => origLog(`[s${SHARD}] ${msg}`, ...rest);
+	}
+	runChild().catch((err) => { console.error(err); process.exit(1); });
+}
+
+// ============================================================
+// Primary: fork N children, divide LEVELS across them
+// ============================================================
+
+function runPrimary() {
+	const childLevels = LEVELS.map((n) => Math.floor(n / WORKERS)).filter((n) => n > 0).join(',');
+
+	console.log('='.repeat(60));
+	console.log(`  DESTROYER (multi-process) - ${WORKERS} workers - ${WITH_CURSORS ? 'with cursors' : 'presence only'}`);
+	console.log(`  Target:           ${WS_URL}`);
+	console.log(`  Board:            ${BOARD_SLUG}`);
+	console.log(`  Global LEVELS:    ${LEVELS.join(', ')}`);
+	console.log(`  Per-shard LEVELS: ${childLevels}`);
+	if (WITH_CURSORS) {
+		const hz = (1000 / CURSOR_INTERVAL_MS).toFixed(1);
+		console.log(`  Cursor rate:      ${CURSOR_INTERVAL_MS}ms (~${hz}Hz per bot)`);
+	}
+	console.log(`  Sustain:          ${SUSTAIN_MS}ms per level`);
+	console.log('='.repeat(60));
+
+	const start = Date.now();
+	let exits = 0;
+	let failures = 0;
+
+	for (let i = 0; i < WORKERS; i++) {
+		cluster.fork({ ...process.env, SHARD: String(i), LEVELS: childLevels });
+	}
+
+	cluster.on('exit', (worker, code) => {
+		exits++;
+		if (code !== 0) failures++;
+		if (exits === WORKERS) {
+			const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+			console.log('='.repeat(60));
+			console.log(`  All ${WORKERS} workers exited (${failures} failures) in ${elapsed}s`);
+			console.log('='.repeat(60));
+			process.exit(failures > 0 ? 1 : 0);
+		}
+	});
+}
+
+// ============================================================
+// Child: existing single-process destroyer logic
+// ============================================================
 
 let msgId = 0;
 const nextId = () => 'x' + (msgId++).toString(36);
@@ -59,7 +133,6 @@ async function getBoardId() {
 		return process.env.BOARD_UUID;
 	}
 	try {
-		// See checkServer for why we don't pass a custom dispatcher.
 		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`);
 		const body = await res.text();
 		const match = body.match(/boardId[:"]\s*"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
@@ -78,7 +151,7 @@ function connectUser(index) {
 	return new Promise((resolve, reject) => {
 		const id = crypto.randomUUID();
 		const cookie = `identity=${encodeURIComponent(JSON.stringify({
-			id, name: `X${index}`, color: '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
+			id, name: `X${SHARD_BASE + index}`, color: '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
 		}))}`;
 
 		const ws = new WebSocket(WS_URL, { headers: { Cookie: cookie }, rejectUnauthorized: false });
@@ -118,10 +191,6 @@ async function checkServer() {
 	try {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 10000);
-		// Drop the custom dispatcher: newer Node ships its own undici and
-		// rejects an externally-constructed Agent as the dispatcher arg
-		// with UND_ERR_INVALID_ARG. The live demo has a valid TLS cert so
-		// the rejectUnauthorized escape hatch wasn't load-bearing here.
 		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { signal: controller.signal });
 		clearTimeout(timer);
 		return res.status === 200;
@@ -132,9 +201,9 @@ async function checkServer() {
 	}
 }
 
-async function run() {
+async function runChild() {
 	console.log('='.repeat(60));
-	console.log(`  DESTROYER (standalone) - ${WITH_CURSORS ? 'with cursors' : 'presence only'}`);
+	console.log(`  DESTROYER ${WORKERS > 1 ? `(shard ${SHARD}/${WORKERS})` : '(standalone)'} - ${WITH_CURSORS ? 'with cursors' : 'presence only'}`);
 	console.log(`  Target: ${WS_URL}`);
 	console.log(`  Board:  ${BOARD_SLUG}`);
 	console.log(`  Levels: ${LEVELS.join(', ')}`);
@@ -223,7 +292,5 @@ async function run() {
 	console.log(`  Server alive after: ${finalAlive}`);
 	console.log('='.repeat(60) + '\n');
 
-	process.exit(lastStable >= 1000 ? 0 : 1);
+	process.exit(lastStable >= LEVELS[0] ? 0 : 1);
 }
-
-run().catch((err) => { console.error(err); process.exit(1); });
