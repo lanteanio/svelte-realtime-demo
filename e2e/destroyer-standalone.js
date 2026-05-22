@@ -33,6 +33,14 @@ const CURSOR_INTERVAL_MS = Number.isFinite(parseInt(process.env.CURSOR_INTERVAL_
 	? parseInt(process.env.CURSOR_INTERVAL_MS, 10)
 	: 32;
 
+// Hold time (ms) after each level's ramp completes, before either moving to
+// the next level or running cleanup on the last level. Default 3s for
+// ceiling-finding ramps; bump for sustained-load probes, e.g.
+//   LEVELS=1000 SUSTAIN_MS=120000   # hold 1000 cursors for 2 minutes
+const SUSTAIN_MS = Number.isFinite(parseInt(process.env.SUSTAIN_MS, 10))
+	? parseInt(process.env.SUSTAIN_MS, 10)
+	: 3000;
+
 // Per-request TLS-skip dispatcher for fetch. Scoped to this Agent instance
 // so other fetch / https calls in the process still verify certificates.
 // The WebSocket connections use the ws library's scoped rejectUnauthorized
@@ -134,6 +142,7 @@ async function run() {
 		const hz = (1000 / CURSOR_INTERVAL_MS).toFixed(1);
 		console.log(`  Cursor rate: ${CURSOR_INTERVAL_MS}ms (~${hz}Hz per bot)`);
 	}
+	console.log(`  Sustain: ${SUSTAIN_MS}ms per level`);
 	console.log('='.repeat(60) + '\n');
 
 	const boardId = await getBoardId();
@@ -178,8 +187,8 @@ async function run() {
 			if (WITH_CURSORS) allIntervals.push(startCursor(u.ws, boardId));
 		}
 
-		// Let it settle
-		await new Promise((r) => setTimeout(r, 3000));
+		// Hold steady at this level (settle for ramps, sustained load for probes)
+		await new Promise((r) => setTimeout(r, SUSTAIN_MS));
 
 		const alive = await checkServer();
 		console.log(`  Server alive: ${alive}`);
