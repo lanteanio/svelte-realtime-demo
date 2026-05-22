@@ -181,9 +181,12 @@ export const orderEffects = live.effect(
 		}
 
 		// platform here is the framework's wrapped platform; appendCapped
-		// uses ctx.publish via the platform's publish path, which goes
-		// through the same wrap and (since we already gated above) does
-		// not re-fire the effect.
+		// uses ctx.publish via the platform's publish path. From svelte-
+		// realtime 0.5.6 the bus configured via configureCron({ bus }) in
+		// hooks.ws.js is the single declaration of cluster intent, and the
+		// framework auto-wraps the reactive seam's publish through it, so
+		// the audit / notification frames here relay to every replica
+		// without any per-handler bus.wrap call.
 		const ctx = { publish: (t, ev, d) => platform.publish(t, ev, d) }
 		await appendCapped(AUDIT_KEY, TOPICS.demoEffectAudit, auditEntry, ctx)
 		await appendCapped(NOTIF_KEY, TOPICS.demoEffectNotifications, notification, ctx)
