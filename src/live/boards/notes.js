@@ -86,26 +86,113 @@ export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { co
 })
 
 /**
- * Move a note to a new position.
- * Throttled to 8ms (~120Hz) - matches a 120Hz display's refresh rate
- * so observers see drag motion as smoothly as the dragger does. The
- * client coalesces pointermove via rAF (see StickyNote.onPointerMove)
- * so we already only receive at display-refresh rate per drag; this
- * throttle is the per-note safety cap when multiple browsers drag the
- * same note simultaneously.
+ * In-flight drag buffer + DB-write batcher.
  *
- * Background-class: silently dropped under any pressure signal. The
- * client is doing optimistic display via store.mutate so a few dropped
- * intermediate frames are invisible; the next non-shed move catches up.
+ * moveNote can fire at the client's display-refresh rate (60-120Hz) per
+ * active drag. Running verifyNoteOwnership + UPDATE on every call would
+ * issue ~240 postgres queries/sec per drag, saturating the pool and
+ * stalling observers behind the queue.
+ *
+ * Same pattern the extensions cursor plugin uses (snapshotIntervalMs):
+ * keep the latest position in memory, broadcast every move at full rate
+ * (so observers see smooth motion), and flush the latest x/y to postgres
+ * on a 100ms timer regardless of inbound rate. 120Hz client drag
+ * collapses to ~10 UPDATEs/sec per active note.
+ *
+ * Entries are LOCAL to this replica. Cross-replica edits (editNote /
+ * recolor / etc) invalidate locally via _invalidateNoteCache(noteId);
+ * the next moveNote on this replica re-fetches the fresh row. Inflight
+ * drags briefly publish stale non-position fields when a foreign edit
+ * lands, but the window is bounded by the time-to-next-moveNote on the
+ * dragging replica (<16ms at 120Hz drag).
+ */
+const _noteCache = new Map() // noteId -> { boardId, note, dirty, lastTouch }
+const _FLUSH_INTERVAL_MS = 100
+const _CACHE_TTL_MS = 10_000
+let _flushTimer = null
+
+function _ensureFlushTimer() {
+	if (_flushTimer) return
+	_flushTimer = setInterval(_flushNoteCache, _FLUSH_INTERVAL_MS)
+	if (_flushTimer.unref) _flushTimer.unref()
+}
+
+async function _flushNoteCache() {
+	const now = Date.now()
+	const dirtyIds = []
+	for (const [id, entry] of _noteCache) {
+		if (entry.dirty) dirtyIds.push(id)
+		else if (now - entry.lastTouch > _CACHE_TTL_MS) _noteCache.delete(id)
+	}
+	if (_noteCache.size === 0 && _flushTimer) {
+		clearInterval(_flushTimer)
+		_flushTimer = null
+	}
+	if (dirtyIds.length === 0) return
+
+	for (const id of dirtyIds) {
+		const entry = _noteCache.get(id)
+		if (!entry) continue
+		entry.dirty = false
+		const { x, y } = entry.note
+		try {
+			const fresh = await dbUpdateNote(id, { x, y })
+			// Merge DB-side fields back so any concurrent foreign edit lands
+			// on our cached shape before the next broadcast.
+			if (fresh) entry.note = { ...fresh, x: entry.note.x, y: entry.note.y }
+		} catch { /* swallow; next flush retries */ }
+	}
+}
+
+/**
+ * Invalidate the in-flight drag cache for a note. Called from every
+ * non-moveNote mutation so the next moveNote on this replica refetches
+ * the fresh row. For batch arrangements that touch many notes at once,
+ * use _invalidateAllNotesCache().
+ */
+function _invalidateNoteCache(noteId) {
+	_noteCache.delete(noteId)
+}
+
+function _invalidateAllNotesCache() {
+	_noteCache.clear()
+}
+
+/**
+ * Move a note to a new position. Hot path during drag.
+ *
+ * - Cold (first call per noteId on this replica): SELECT + cache.
+ * - Hot: cache lookup + in-memory position update + immediate broadcast.
+ * - DB UPDATE happens on the periodic flusher, not per call.
+ *
+ * Background-class: silently dropped under pressure. The client is
+ * doing optimistic display via store.mutate so a few dropped intermediate
+ * frames are invisible; the next non-shed move catches up.
  */
 export const moveNote = live(async (ctx, boardId, noteId, x, y) => {
 	if (ctx.shed('background')) return
-	ctx.throttle(`move:${noteId}`, 8)
-	await verifyNoteOwnership(noteId, boardId)
-	const note = await dbUpdateNote(noteId, { x: validateCoord(x, 'x'), y: validateCoord(y, 'y') })
-	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
-	ctx.publish(TOPICS.notes(boardId), 'updated', note)
-	return note
+	const cx = validateCoord(x, 'x')
+	const cy = validateCoord(y, 'y')
+	const now = Date.now()
+
+	let entry = _noteCache.get(noteId)
+	// Treat cross-board cache hit as a miss. Forces verifyNoteOwnership
+	// to re-run on the cold path so a poisoned cache entry can't be used
+	// to publish on a board the caller shouldn't have access to.
+	if (entry && entry.boardId !== boardId) entry = undefined
+	if (!entry) {
+		await verifyNoteOwnership(noteId, boardId)
+		const fresh = await dbGetNote(noteId)
+		if (!fresh) throw new LiveError('NOT_FOUND', 'Note not found')
+		entry = { boardId, note: fresh, dirty: false, lastTouch: now }
+		_noteCache.set(noteId, entry)
+		_ensureFlushTimer()
+	}
+
+	entry.note = { ...entry.note, x: cx, y: cy }
+	entry.dirty = true
+	entry.lastTouch = now
+	ctx.publish(TOPICS.notes(boardId), 'updated', entry.note)
 })
 
 /**
@@ -124,6 +211,7 @@ export const editNote = live.lock(
 		if (Object.keys(clean).length === 0) throw new LiveError('VALIDATION', 'No valid fields to update')
 		const note = await dbUpdateNote(noteId, clean)
 		if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
+		_invalidateNoteCache(noteId)
 		ctx.publish(TOPICS.notes(boardId), 'updated', note)
 		if (clean.content !== undefined) {
 			ctx.publish(TOPICS.activity(boardId), 'created', {
@@ -141,18 +229,19 @@ export const editNote = live.lock(
 )
 
 /**
- * Bring a note to the front (increase its z-index).
- * Throttled to 100ms to avoid spamming the DB on rapid clicks.
+ * Bring a note to the front (increase its z-index). Click-frequency
+ * operation; no need for an in-handler rate gate (rate-limiter on the
+ * RPC layer handles abuse; human click cadence is fine on raw DB).
  *
  * Background-class: z-order tweaks are nice-to-have. Silently dropped
  * under pressure; the user can click again when the system recovers.
  */
 export const focusNote = live(async (ctx, boardId, noteId, zIndex) => {
 	if (ctx.shed('background')) return
-	ctx.throttle(`focus:${noteId}`, 100)
 	await verifyNoteOwnership(noteId, boardId)
 	const note = await dbUpdateNote(noteId, { z_index: validateZIndex(zIndex) })
 	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
+	_invalidateNoteCache(noteId)
 	ctx.publish(TOPICS.notes(boardId), 'updated', note)
 	return note
 })
@@ -160,6 +249,7 @@ export const focusNote = live(async (ctx, boardId, noteId, zIndex) => {
 export const deleteNote = live(async (ctx, boardId, noteId) => {
 	await verifyNoteOwnership(noteId, boardId)
 	await dbDeleteNote(noteId)
+	_invalidateNoteCache(noteId)
 	ctx.publish(TOPICS.notes(boardId), 'deleted', { note_id: noteId })
 	ctx.publish(TOPICS.activity(boardId), 'created', {
 		action: 'removed a note', user: ctx.user.name, color: ctx.user.color, ts: Date.now()
@@ -183,6 +273,7 @@ export const tidyNotes = live(async (ctx, boardId) => {
 	}))
 
 	const updated = await dbBatchUpdateNotes(updates)
+	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'tidied the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
@@ -230,6 +321,7 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 	}
 
 	const updated = await dbBatchUpdateNotes(updates)
+	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'rearranged the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
@@ -257,6 +349,7 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 	}))
 
 	const updated = await dbBatchUpdateNotes(updates)
+	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'shuffled the board', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
@@ -303,6 +396,7 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 	}
 
 	const updated = await dbBatchUpdateNotes(updates)
+	_invalidateAllNotesCache()
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: { action: 'grouped notes by author', user: ctx.user.name, color: ctx.user.color, ts: Date.now() } }
