@@ -382,14 +382,26 @@ export const message = createMessage({
 	// Catch wire frames that don't match the RPC shape. The adapter's
 	// `move(topic, data)` helper (used by Canvas for cursor updates)
 	// sends `{type:'cursor', topic, data}` with no `rpc` field, so it
-	// lands here. Route to the cursor extension's tracker.update via
-	// its hooks.message dispatcher; bypasses the realtime RPC pipeline
-	// entirely for the cursor hot path -- no RPC id allocation, no
-	// pending-promise map entry, no timeout timer, no devtools/dedup.
+	// lands here. Route to the cursor extension's tracker.message
+	// dispatcher; bypasses the realtime RPC pipeline entirely for the
+	// cursor hot path -- no RPC id allocation, no pending-promise map
+	// entry, no timeout timer, no devtools/dedup.
+	//
+	// createMessage's onUnhandled gets the raw ArrayBuffer (same shape
+	// handleRpc expects), so we parse here before dispatching. Reject
+	// silently on non-JSON / non-object frames -- those would just be
+	// noise from instrumentation or buggy clients.
 	onUnhandled(ws, data, platform) {
-		cursor.hooks.message(ws, { data, platform })
+		if (!(data instanceof ArrayBuffer) || data.byteLength < 2) return
+		let parsed
+		try { parsed = JSON.parse(_unhandledDecoder.decode(data)) } catch { return }
+		if (!parsed || typeof parsed !== 'object') return
+		cursor.hooks.message(ws, { data: parsed, platform })
 	}
 })
+
+// Module-scoped decoder to avoid allocating one per frame on the hot path.
+const _unhandledDecoder = new TextDecoder()
 
 /**
  * Adapter session-resume hook. Fires on WebSocket reconnect when the
