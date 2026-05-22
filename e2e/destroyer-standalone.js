@@ -42,10 +42,17 @@ const insecureDispatcher = new Agent({ connect: { rejectUnauthorized: false } })
 let msgId = 0;
 const nextId = () => 'x' + (msgId++).toString(36);
 
-// Resolve board UUID from the page HTML
+// Resolve board UUID. Env override (BOARD_UUID=<uuid>) skips the page
+// fetch entirely -- needed when running from a remote box where undici
+// rejects the page response with UND_ERR_INVALID_ARG (uWS's response
+// headers can confuse strict HTTP parsers).
 async function getBoardId() {
+	if (process.env.BOARD_UUID && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(process.env.BOARD_UUID)) {
+		return process.env.BOARD_UUID;
+	}
 	try {
-		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { dispatcher: insecureDispatcher });
+		// See checkServer for why we don't pass a custom dispatcher.
+		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`);
 		const body = await res.text();
 		const match = body.match(/boardId[:"]\s*"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
 		if (match) return match[1];
@@ -56,7 +63,7 @@ async function getBoardId() {
 		const match = raw.match?.(/boardId[:"]\s*"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
 		if (match) return match[1];
 	}
-	throw new Error('Could not find boardId in page');
+	throw new Error('Could not find boardId in page; pass BOARD_UUID=<uuid> env to skip auto-detect.');
 }
 
 function connectUser(index) {
@@ -103,7 +110,11 @@ async function checkServer() {
 	try {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), 10000);
-		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { signal: controller.signal, dispatcher: insecureDispatcher });
+		// Drop the custom dispatcher: newer Node ships its own undici and
+		// rejects an externally-constructed Agent as the dispatcher arg
+		// with UND_ERR_INVALID_ARG. The live demo has a valid TLS cert so
+		// the rejectUnauthorized escape hatch wasn't load-bearing here.
+		const res = await fetch(`${HTTP_URL}/board/${BOARD_SLUG}`, { signal: controller.signal });
 		clearTimeout(timer);
 		return res.status === 200;
 	} catch (err) {
