@@ -150,7 +150,12 @@ async function pgUpdateBoard(boardId, fields) {
 
 /** Minimal query - only fetches the IDs for ownership verification. */
 function pgGetNote(noteId) {
-	return sql(`SELECT note_id, board_id FROM note WHERE note_id = $1`, [noteId]).then(rows => rows[0])
+	return sql(`
+		SELECT note_id, board_id, content, x, y, color, creator_name,
+		       COALESCE(z_index, 0) AS z_index
+		  FROM note
+		 WHERE note_id = $1
+	`, [noteId]).then(rows => rows[0])
 }
 
 /** Returns all non-archived notes for a board, ordered by creation time. */
@@ -306,7 +311,12 @@ function memUpdateBoard(boardId, fields) {
 
 function memGetNote(noteId) {
 	const n = notesMap.get(noteId)
-	return n ? { note_id: n.note_id, board_id: n.board_id } : undefined
+	if (!n) return undefined
+	return {
+		note_id: n.note_id, board_id: n.board_id, content: n.content,
+		x: n.x, y: n.y, color: n.color, creator_name: n.creator_name,
+		z_index: n.z_index ?? 0
+	}
 }
 
 function memListNotes(boardId) {

@@ -379,24 +379,34 @@ export const message = createMessage({
 		const { allowed, resetMs } = await limiter.consume(ws)
 		if (!allowed) throw new LiveError('RATE_LIMITED', `Retry in ${Math.ceil(resetMs / 1000)}s`)
 	},
-	// Catch wire frames that don't match the RPC shape. The adapter's
-	// `move(topic, data)` helper (used by Canvas for cursor updates)
-	// sends `{type:'cursor', topic, data}` with no `rpc` field, so it
-	// lands here. Route to the cursor extension's tracker.message
-	// dispatcher; bypasses the realtime RPC pipeline entirely for the
-	// cursor hot path -- no RPC id allocation, no pending-promise map
-	// entry, no timeout timer, no devtools/dedup.
+	// Catch wire frames that don't match the RPC shape and route them to
+	// the extension plugins that own them. Today:
+	//
+	//   {type:'cursor', topic, data}        -> cursor.hooks.message
+	//     Adapter's `move(topic, data)` helper sends this on every cursor
+	//     update. Bypasses the realtime RPC pipeline entirely for the
+	//     cursor hot path -- no RPC id allocation, no pending-promise map
+	//     entry, no timeout timer, no devtools/dedup.
+	//
+	//   {type:'presence-snapshot', topic}   -> presence.hooks.message
+	//     Adapter's presence client sends this on every status==='open'
+	//     (initial connect + reconnect). The handler re-emits
+	//     `presence_state` to the requesting ws so board-scoped presence
+	//     does not stay stale across reconnects.
 	//
 	// createMessage's onUnhandled gets the raw ArrayBuffer (same shape
 	// handleRpc expects), so we parse here before dispatching. Reject
 	// silently on non-JSON / non-object frames -- those would just be
-	// noise from instrumentation or buggy clients.
+	// noise from instrumentation or buggy clients. Each plugin's hook
+	// no-ops on frames whose `type` it does not own, so dispatching to
+	// both is safe.
 	onUnhandled(ws, data, platform) {
 		if (!(data instanceof ArrayBuffer) || data.byteLength < 2) return
 		let parsed
 		try { parsed = JSON.parse(_unhandledDecoder.decode(data)) } catch { return }
 		if (!parsed || typeof parsed !== 'object') return
 		cursor.hooks.message(ws, { data: parsed, platform })
+		presence.hooks.message(ws, { data: parsed, platform })
 	}
 })
 
