@@ -48,7 +48,17 @@ const config = {
 				pressure: {
 					publishRatePerSec: 10000,
 					memoryHeapUsedRatio: 0.97
-				}
+				},
+				// permessage-deflate via uWS SHARED_COMPRESSOR. Shared
+				// dictionary across connections keeps memory bounded
+				// (the per-connection compressors at 2+ allocate up to
+				// 256 KB each). JSON-shaped cursor frames compress
+				// ~75% on average; at 1000-cursor stress this is the
+				// difference between 1.7 GB/sec demand on the NIC and
+				// ~425 MB/sec. CPU cost is in uWS's C++ layer, ~5-10%
+				// per frame -- negligible compared to the bandwidth win.
+				compression: 1
+
 			}
 		})
 	},

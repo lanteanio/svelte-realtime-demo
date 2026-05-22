@@ -68,6 +68,15 @@ services:
       # endpoint stays open - no behavior change for existing deployments
       # scraping without auth.
       METRICS_SCRAPE_TOKEN: ${METRICS_SCRAPE_TOKEN:-}
+      # Cursor per-connection and per-topic throttle, in milliseconds. Default
+      # 8ms = ~120Hz both layers; set to 16 / 33 to match a 60Hz / 30Hz client
+      # publish rate (CURSOR_INTERVAL_MS on the destroyer side). The two must
+      # move together to keep per-cursor dedup effective; mismatched values
+      # produce a degenerate "every cursor every cycle" dirty map. Operators
+      # can change these and restart only the app service (no rebuild needed)
+      # via `docker compose up -d app`.
+      CURSOR_THROTTLE_MS: ${CURSOR_THROTTLE_MS:-8}
+      CURSOR_TOPIC_THROTTLE_MS: ${CURSOR_TOPIC_THROTTLE_MS:-8}
     depends_on:
       postgres:
         condition: service_healthy

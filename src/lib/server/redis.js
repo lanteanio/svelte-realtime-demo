@@ -99,9 +99,23 @@ export const presence = createPresence(redis, {
  *   topology survives 10K+.
  * - select: same as presence, only expose public user fields
  */
+// Env-tunable throttle / topicThrottle. Defaults stay at the 120Hz
+// numbers the demo is tuned for; setting CURSOR_THROTTLE_MS and
+// CURSOR_TOPIC_THROTTLE_MS lets operators (or stress runs) rebalance
+// without a redeploy. The server-side throttle and the client-side
+// CURSOR_INTERVAL_MS must move together to get fair-shape Hz tests --
+// at 60Hz client + 8ms server, every incoming RPC crosses the per-
+// cursor window and dedup is disabled, producing the pathological
+// "every cursor every cycle" dirty map. Keep these matched.
+const _cursorThrottleMs = Number.isFinite(parseInt(process.env.CURSOR_THROTTLE_MS, 10))
+	? parseInt(process.env.CURSOR_THROTTLE_MS, 10)
+	: 8
+const _cursorTopicThrottleMs = Number.isFinite(parseInt(process.env.CURSOR_TOPIC_THROTTLE_MS, 10))
+	? parseInt(process.env.CURSOR_TOPIC_THROTTLE_MS, 10)
+	: 8
 export const cursor = createCursor(redis, {
-	throttle: 8,
-	topicThrottle: 8,
+	throttle: _cursorThrottleMs,
+	topicThrottle: _cursorTopicThrottleMs,
 	snapshotIntervalMs: 100,
 	select: (u) => ({ id: u.id, name: u.name, color: u.color }),
 	breaker
