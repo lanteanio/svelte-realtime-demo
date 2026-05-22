@@ -162,8 +162,21 @@ function connectUser(index) {
 	});
 }
 
+// Blind-retry joinBoard up to 3 times spaced ~1-4s apart. The demo's
+// `boards/cursors/joinBoard` is in the `background` admission class so it
+// gets shed with OVERLOADED under PUBLISH_RATE pressure during mass
+// connect. presence.join + cursor.attach are both idempotent (already-
+// joined returns early), so a redundant successful call after a shed
+// rejection costs only the wire frame, not server state churn. Without
+// this, fire-and-forget bots from rejected attempts permanently stay
+// outside per-board presence even though their WS is live.
 function joinBoard(ws, boardId) {
-	try { ws.send(JSON.stringify({ rpc: 'boards/cursors/joinBoard', id: nextId(), args: [boardId] })); } catch {}
+	const send = () => {
+		try { ws.send(JSON.stringify({ rpc: 'boards/cursors/joinBoard', id: nextId(), args: [boardId] })); } catch {}
+	};
+	send();
+	setTimeout(send, 1000 + Math.random() * 1000);
+	setTimeout(send, 3000 + Math.random() * 1000);
 }
 
 function startCursor(ws, boardId) {

@@ -32,16 +32,21 @@ const config = {
 					maxConcurrent: 4000,
 					perTickBudget: 256
 				},
-				// Demo pressure thresholds. The adapter ships production-
-				// tuned defaults (publishRatePerSec: 10000, memoryHeapUsedRatio:
-				// 0.85) which never trip in a single-user dev / demo. We
-				// lower publishRatePerSec to 500 so the +1000 / +5000
-				// burst reliably trips PUBLISH_RATE, and raise
-				// memoryHeapUsedRatio to 0.97 so the tiny V8 heap at
-				// startup (~32 MB heap_total, ~28 MB heap_used = 87%)
-				// does not permanently pin the reason at MEMORY.
+				// Demo pressure thresholds. publishRatePerSec matches the
+				// adapter's production-tuned default (10000) -- the prior
+				// 500 was tuned for /demos/pressure to artificially trip
+				// PUBLISH_RATE on a single-user burst, but at real cluster
+				// scale (125K cursor RPCs/sec + receiver-aggregation relay)
+				// 500 was constantly tripped, shedding ~70% of joinBoard
+				// admissions for legitimate stress traffic. /demos/pressure
+				// can still trip the gate at 10000 if it bursts hard enough
+				// (3.3K/sec sustained for 1.5s tops the gate naturally on
+				// dynamic-derived watchers, which fan out per source-frame).
+				// memoryHeapUsedRatio raised to 0.97 so the tiny V8 heap at
+				// startup (~32 MB heap_total, ~28 MB heap_used = 87%) does
+				// not permanently pin the reason at MEMORY.
 				pressure: {
-					publishRatePerSec: 500,
+					publishRatePerSec: 10000,
 					memoryHeapUsedRatio: 0.97
 				}
 			}
