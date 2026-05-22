@@ -365,10 +365,15 @@ const THROTTLED_RPCS = new Set(['boards/notes/moveNote', 'boards/cursors/moveCur
  * client gets a RATE_LIMITED error with a countdown.
  */
 export const message = createMessage({
-	// bus.wrap fans out to Redis for cluster delivery and (since
-	// extensions next.15) forwards platform.replay so realtime's
-	// auto-replay routing reaches the buffer.
-	platform: (p) => bus.wrap(p),
+	// No `platform` callback: svelte-realtime 0.5.7 owns cluster routing
+	// at every publish seam via the process-wide bus that
+	// `configureCron({ bus })` set above. The framework installs a
+	// single idempotent wrap (`_ensureWrap`) and there is exactly one
+	// `bus.wrap(...)` call inside the framework, so RPC ctx.publish
+	// relays via one path. A manual `(p) => bus.wrap(p)` here would
+	// stack on top of that inner wrap and double-relay every publish
+	// (the 0.5.6 audit / notifications counted 2x in /demos/effect on a
+	// two-replica deploy).
 	async beforeExecute(ws, rpcPath) {
 		if (THROTTLED_RPCS.has(rpcPath)) return
 		const { allowed, resetMs } = await limiter.consume(ws)
