@@ -48,16 +48,14 @@ const config = {
 				pressure: {
 					publishRatePerSec: 10000,
 					memoryHeapUsedRatio: 0.97
-				},
-				// permessage-deflate via uWS SHARED_COMPRESSOR. Shared
-				// dictionary across connections keeps memory bounded
-				// (the per-connection compressors at 2+ allocate up to
-				// 256 KB each). JSON-shaped cursor frames compress
-				// ~75% on average; at 1000-cursor stress this is the
-				// difference between 1.7 GB/sec demand on the NIC and
-				// ~425 MB/sec. CPU cost is in uWS's C++ layer, ~5-10%
-				// per frame -- negligible compared to the bandwidth win.
-				compression: 1
+				}
+				// permessage-deflate (`compression`) intentionally left at
+				// uWS default (DISABLED=0). Empirical at 1000-cursor stress
+				// on this box: both SHARED_COMPRESSOR=1 and
+				// DEDICATED_COMPRESSOR_3KB=9 saturated the available CPU on
+				// the deflate path; TLS handshake time climbed from ~100ms
+				// to 8+s during sustain. Wire-byte reduction at this scale
+				// belongs at the wire-format layer, not in deflate.
 
 			}
 		})
