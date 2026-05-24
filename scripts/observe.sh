@@ -12,14 +12,14 @@
 #
 # Stop early with Ctrl-C (script exits and SSH closes).
 #
+# Replica discovery: runs `docker ps` once at start and samples every
+# container whose name matches `svelte-realtime-demo-app-*`. Survives a
+# replica-count bump without edits.
+#
 # Columns (CSV-ish, space-separated):
 #   t              -- ISO8601 timestamp
-#   app2_cpu       -- app-2 container CPU %
-#   app2_mem       -- app-2 container memory (MiB)
-#   app2_net       -- app-2 net I/O delta since last sample (MB)
-#   app3_cpu       -- app-3 container CPU %
-#   app3_mem       -- app-3 container memory (MiB)
-#   app3_net       -- app-3 net I/O delta since last sample (MB)
+#   <app>_cpu      -- per-container CPU % (one column per replica)
+#   <app>_mem      -- per-container memory (MiB) (one column per replica)
 #   ws_established -- TCP connections on :443 in ESTABLISHED state
 #   redis_ops      -- redis instantaneous_ops_per_sec
 #   redis_mem      -- redis used_memory_human
@@ -36,39 +36,64 @@ cd ~/svelte-realtime-demo
 TOKEN=$(grep ^METRICS_SCRAPE_TOKEN .env 2>/dev/null | cut -d= -f2-)
 REDIS_PWD=$(grep ^REDIS_PASSWORD .env 2>/dev/null | cut -d= -f2-)
 
-# Header row.
-echo "t                          app2_cpu app2_mem  app2_net  app3_cpu app3_mem  app3_net  ws_est  redis_ops redis_mem  redis_cli pub_rate_top                                stream_subs"
+# Discover every app replica once. Sorted so the column order is stable
+# across samples and across runs. Works for any replica count.
+mapfile -t REPLICAS < <(
+  docker ps --format '{{.Names}}' 2>/dev/null \
+    | grep -E '^svelte-realtime-demo-app-[0-9]+$' \
+    | sort -V
+)
+if [ "${#REPLICAS[@]}" -eq 0 ]; then
+  echo "observe: no svelte-realtime-demo-app-N containers running; nothing to sample" >&2
+  exit 1
+fi
+
+# Header row. CPU+MEM columns per replica, then shared fields.
+{
+  printf "t                         "
+  for c in "${REPLICAS[@]}"; do
+    short=${c#svelte-realtime-demo-}  # app-2, app-3, ...
+    printf " %6s_cpu %8s_mem" "$short" "$short"
+  done
+  printf "  ws_est  redis_ops redis_mem  redis_cli pub_rate_top                                stream_subs\n"
+}
 
 end=$(($(date +%s) + DURATION))
 
 sample() {
-  local t app2 app3 stats ws_est redis_info ops cli mem pub_rate top_topic stream_subs metrics
-
+  local t stats ws_est redis_info ops cli mem pub_rate stream_subs metrics
   t=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-  # docker stats --no-stream is one snapshot per call. Format: CPU% MEM_USAGE NET_IO
-  stats=$(docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}} {{.NetIO}}' \
-    svelte-realtime-demo-app-2 svelte-realtime-demo-app-3 2>/dev/null)
-  app2=$(echo "$stats" | awk '/app-2/ { gsub(/%/,"",$2); printf "%6.1f %7s %9s", $2, $3, $7 }')
-  app3=$(echo "$stats" | awk '/app-3/ { gsub(/%/,"",$2); printf "%6.1f %7s %9s", $2, $3, $7 }')
+  # docker stats --no-stream is one snapshot per call. Format: NAME CPU% MEM_USAGE NET_IO
+  stats=$(docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}' \
+    "${REPLICAS[@]}" 2>/dev/null)
 
-  # TCP connections on the listener port. Sums across both replicas (host networking).
+  # Build per-replica fragments in REPLICAS order so columns line up
+  # with the header even if docker stats reordered them.
+  local per_replica=""
+  for c in "${REPLICAS[@]}"; do
+    local cell
+    cell=$(echo "$stats" | awk -v name="$c" '
+      $1 == name { gsub(/%/,"",$2); printf "%9.1f %12s", $2, $3 }
+    ')
+    per_replica="$per_replica $cell"
+  done
+
+  # TCP connections on the listener port. Host networking means every
+  # replica shares the host port (SO_REUSEPORT); this is the cluster total.
   ws_est=$(ss -tan state established '( sport = :443 )' 2>/dev/null | wc -l)
 
-  # Redis: instantaneous ops/sec + memory + client count
   redis_info=$(docker exec svelte-realtime-demo-redis-1 redis-cli -a "$REDIS_PWD" --no-auth-warning INFO 2>/dev/null)
   ops=$(echo "$redis_info" | awk -F: '/^instantaneous_ops_per_sec:/ { gsub(/\r/,"",$2); print $2 }')
   cli=$(echo "$redis_info" | awk -F: '/^connected_clients:/ { gsub(/\r/,"",$2); print $2 }')
   mem=$(echo "$redis_info" | awk -F: '/^used_memory_human:/ { gsub(/\r/,"",$2); print $2 }')
 
-  # Prometheus: top publisher + active stream subs
   metrics=""
   if [ -n "$TOKEN" ]; then
     metrics=$(curl -sk --max-time 1 -H "X-Scrape-Token: $TOKEN" \
       "https://svelte-realtime-demo.lantean.io/metrics" 2>/dev/null)
   fi
   pub_rate=""
-  top_topic=""
   if [ -n "$metrics" ]; then
     pub_rate=$(echo "$metrics" | awk '/^ws_topic_publish_rate\{/ { match($0, /topic="[^"]+"/); t=substr($0, RSTART+7, RLENGTH-8); v=$NF+0; if (v > maxv) { maxv = v; maxt = t } } END { if (maxv > 0) printf "%d %s", maxv, maxt }')
     stream_subs=$(echo "$metrics" | awk '/^svelte_realtime_stream_subscriptions / { print $2 }')
@@ -76,8 +101,8 @@ sample() {
   pub_rate=${pub_rate:-"-"}
   stream_subs=${stream_subs:-"-"}
 
-  printf "%s  %s  %s  %6s  %9s %9s  %9s  %-40s  %s\n" \
-    "$t" "${app2:-       -          -}" "${app3:-       -          -}" \
+  printf "%s %s  %6s  %9s %9s  %9s  %-40s  %s\n" \
+    "$t" "$per_replica" \
     "$ws_est" "${ops:-0}" "${mem:--}" "${cli:--}" "${pub_rate:--}" "$stream_subs"
 }
 

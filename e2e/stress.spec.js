@@ -111,12 +111,13 @@ test.describe('Stress Test', () => {
 			throw new Error('Could not extract boardId UUID from page. The bots need the UUID, not the slug.');
 		}
 
-		console.log(`\n=== STRESS TEST: 1000 CURSORS ON ${BOARD_URL} ===`);
+		// Env overrides so the same spec can drive 1K / 2K / 5K runs to
+		// chart the ceiling without per-run edits. Defaults preserve the
+		// 1000-user baseline.
+		const TOTAL = Number(process.env.STRESS_TOTAL ?? 1000);
+		const BATCH = Number(process.env.STRESS_BATCH ?? 50);
+		console.log(`\n=== STRESS TEST: ${TOTAL} CURSORS ON ${BOARD_URL} ===`);
 		console.log(`Board UUID: ${boardId}\n`);
-
-		// Connect 1000 users in batches
-		const TOTAL = 1000;
-		const BATCH = 50;
 		const users = [];
 		let connected = 0;
 		let failed = 0;
@@ -250,7 +251,12 @@ test.describe('Stress Test', () => {
 		console.log(`p95 frame time:    ${metrics.p95}ms`);
 		console.log(`App alive after:   ${alive}`);
 
-		expect(connected / TOTAL).toBeGreaterThanOrEqual(0.9);
+		// SLO at the 1K baseline is 90% connected; high-load exploratory
+		// runs (5K / 10K) can lower the bar via STRESS_MIN_CONNECTED to
+		// see the actual ceiling instead of hard-failing at the first
+		// admission shed.
+		const minConnected = Number(process.env.STRESS_MIN_CONNECTED ?? 0.9)
+		expect(connected / TOTAL).toBeGreaterThanOrEqual(minConnected);
 		expect(canvasVisible).toBe(true);
 		expect(alive).toBe(true);
 

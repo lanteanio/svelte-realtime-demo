@@ -18,6 +18,7 @@
 <script>
 	import { onMount, onDestroy } from 'svelte'
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
+	import { status as wsStatus } from 'svelte-adapter-uws/client'
 	import { onPush } from 'svelte-realtime/client'
 	import {
 		myAuctionsState,
@@ -114,6 +115,18 @@
 	let inbox = $state([])
 
 	let unregisterPush = null
+	let pushHandlerInstalled = $state(false)
+	let pushReady = $state(false)
+
+	// pushReady gates the cross-tab push tests: it must mean both
+	// "handler installed on this tab" AND "WS open so the server-side
+	// push registry holds this tab's ws". An always-true gate signalled
+	// visibility before the WS connected, so a fast `live.push` from
+	// the seller could race the bidder's open hook and be dropped.
+	$effect(() => {
+		if ($wsStatus === 'open' && pushHandlerInstalled) pushReady = true
+	})
+
 	onMount(() => {
 		unregisterPush = onPush(caps.pushEvent ?? 'demos:auction:bid-request', (data) => {
 			return new Promise((resolve) => {
@@ -135,6 +148,7 @@
 				inbox = [...inbox, card]
 			})
 		})
+		pushHandlerInstalled = true
 	})
 	onDestroy(() => {
 		unregisterPush?.()
@@ -311,11 +325,14 @@
 				Listing as
 				<span class="inline-block w-2 h-2 rounded-full align-middle" style:background={me.color}></span>
 				<strong>{me.name}</strong>
-				<span class="font-mono">({me.id.slice(0, 8)})</span>
+				<span class="font-mono" data-testid="my-id" data-user-id={me.id}>({me.id.slice(0, 8)})</span>
 				{#if otherUsers.length === 0}
 					<span class="ml-2 badge badge-warning badge-sm" data-testid="alone-badge">alone here</span>
 				{:else}
 					<span class="ml-2 badge badge-success badge-sm">{otherUsers.length} potential bidder{otherUsers.length === 1 ? '' : 's'}</span>
+				{/if}
+				{#if pushReady}
+					<span data-testid="push-ready" hidden></span>
 				{/if}
 			</p>
 		{/if}

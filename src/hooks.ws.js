@@ -9,6 +9,8 @@
  */
 
 import v8 from 'node:v8'
+import path from 'node:path'
+import os from 'node:os'
 import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
 import { bus, limiter, presence, cursor, replay, registry, leader, redis } from '$lib/server/redis'
@@ -21,18 +23,19 @@ import { onClose as chaosOnClose } from '$live/demos/chaos'
 import '$lib/server/demo-purge'
 
 // SIGUSR2 heap-snapshot trigger. `kill -SIGUSR2 <pid>` on the host writes
-// a `heap-<timestamp>.heapsnapshot` file in the worker's CWD; load it in
-// Chrome DevTools -> Memory tab to see top retainers. Safe in production:
-// the dump is a synchronous V8 stop-the-world pause (~50-500ms depending
-// on heap size) but allocates no long-lived state and the signal isn't
-// reachable from outside the host.
+// a `heap-<timestamp>.heapsnapshot` file under HEAP_SNAPSHOT_DIR (default
+// os.tmpdir(); load it in Chrome DevTools -> Memory tab to see top
+// retainers. Configurable so containers whose CWD is owned by root can
+// point the dump at a writable directory (e.g. /tmp) without sed-patching
+// the build at runtime.
+const HEAP_SNAPSHOT_DIR = process.env.HEAP_SNAPSHOT_DIR || os.tmpdir()
 process.on('SIGUSR2', () => {
-	const file = `heap-${Date.now()}.heapsnapshot`
+	const file = path.join(HEAP_SNAPSHOT_DIR, `heap-${Date.now()}-${process.pid}.heapsnapshot`)
 	try {
 		v8.writeHeapSnapshot(file)
 		console.log(`[heap-dump] wrote ${file} pid=${process.pid} rss=${Math.round(process.memoryUsage.rss() / 1024 / 1024)}MB`)
 	} catch (err) {
-		console.error(`[heap-dump] failed pid=${process.pid}`, err)
+		console.error(`[heap-dump] failed pid=${process.pid} dir=${HEAP_SNAPSHOT_DIR}`, err)
 	}
 })
 

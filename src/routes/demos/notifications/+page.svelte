@@ -220,7 +220,7 @@
 				Sending as
 				<span class="inline-block w-2 h-2 rounded-full align-middle" style:background={me.color}></span>
 				<strong>{me.name}</strong>
-				<span class="font-mono">({me.id.slice(0, 8)})</span>
+				<span class="font-mono" data-testid="my-id" data-user-id={me.id}>({me.id.slice(0, 8)})</span>
 			</p>
 		{/if}
 	</header>

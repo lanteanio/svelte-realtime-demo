@@ -19,6 +19,7 @@
 <script>
 	import { onMount, onDestroy } from 'svelte'
 	import { onPush, configure } from 'svelte-realtime/client'
+	import { status as wsStatus } from 'svelte-adapter-uws/client'
 	import {
 		uploadedFiles,
 		uploadStats,
@@ -57,6 +58,8 @@
 	let activeHandle = $state(null)
 
 	let incoming = $state([])
+	let pushReady = $state(false)
+	let pushHandlerInstalled = $state(false)
 	let unregisterPush = null
 
 	$effect(() => {
@@ -68,11 +71,10 @@
 	})
 
 	onMount(async () => {
-		const s = await myUploadState()
-		maxFileBytes = s?.maxFileBytes ?? maxFileBytes
-		maxFiles = s?.maxFiles ?? maxFiles
-		idempotencyEnabled = Boolean(s?.idempotencyEnabled)
-
+		// Register the push handler synchronously on mount so a server-fired
+		// notify that races a slow myUploadState() RPC still finds a handler.
+		// The handler doesn't depend on the discovered limits; the limits
+		// only gate the upload form.
 		unregisterPush = onPush('demos:upload:incoming', (data) => {
 			incoming = [
 				{ ...data, receivedAt: Date.now() },
@@ -80,6 +82,22 @@
 			].slice(0, 5)
 			return { ack: 'ok' }
 		})
+		pushHandlerInstalled = true
+
+		const s = await myUploadState()
+		maxFileBytes = s?.maxFileBytes ?? maxFileBytes
+		maxFiles = s?.maxFiles ?? maxFiles
+		idempotencyEnabled = Boolean(s?.idempotencyEnabled)
+	})
+
+	// pushReady gates the cross-device push test: it must mean both
+	// "handler installed in the client-side map" AND "WS open so the
+	// server-side push registry holds this tab's ws". An always-true
+	// gate signalled visibility before the WS connected, so the
+	// server's notify routed to the OTHER tab (the only entry in the
+	// registry at that moment) and the recipient never saw the banner.
+	$effect(() => {
+		if ($wsStatus === 'open' && pushHandlerInstalled) pushReady = true
 	})
 
 	onDestroy(() => {
@@ -211,6 +229,13 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Visibility-only marker for cross-device push tests: becomes visible once
+		 onPush is registered. Tests wait on this before triggering an upload so
+		 the server-fired notify cannot race past the recipient's handler. -->
+	{#if pushReady}
+		<div data-testid="push-ready" hidden></div>
+	{/if}
 
 	<section class="card bg-base-100 border border-base-300" data-testid="upload-form">
 		<div class="card-body py-3 space-y-2">

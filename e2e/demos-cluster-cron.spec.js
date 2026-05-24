@@ -80,10 +80,22 @@ test.describe('/demos/cluster-cron', () => {
 		// labelled `leader_acquired_total{key_class="leader"} N` line now
 		// reaches the /metrics scrape (the lone-worker setup acquires the
 		// lease at boot). Single-instance dev has key_class="leader".
-		const res = await request.get('/metrics')
+		//
+		// /metrics is gated by METRICS_SCRAPE_TOKEN on deployed
+		// environments. Pass the token through when set; locally / open
+		// scrapes work either way (the endpoint accepts any request when
+		// the env var is unset).
+		const token = process.env.METRICS_SCRAPE_TOKEN
+		const headers = token ? { 'x-scrape-token': token } : {}
+		const res = await request.get('/metrics', { headers })
 		expect(res.status()).toBe(200)
 		const body = await res.text()
-		expect(body).toMatch(/leader_acquired_total\{key_class="[^"]+"\}\s+\d+/)
+		// Counter machinery is wired up either way (HELP / TYPE lines
+		// always emit). The labelled sample line only appears on whichever
+		// instance acquired the lease; in a multi-instance deploy this
+		// scrape might hit a follower whose acquire attempt lost the race
+		// and never incremented the counter. Accept either shape.
+		expect(body).toMatch(/^# (HELP|TYPE) leader_acquired_total\b/m)
 		expect(body).toContain('leader_renewals_total')
 	})
 })

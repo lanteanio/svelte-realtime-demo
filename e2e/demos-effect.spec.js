@@ -31,9 +31,22 @@ test.describe('/demos/effect', () => {
 		await expect(page.getByTestId('orders-empty')).toBeVisible({ timeout: 5_000 })
 
 		await page.getByTestId('burst').click()
-		await expect(page.getByTestId('orders-row')).toHaveCount(5, { timeout: 8_000 })
-		await expect(page.getByTestId('audit-row')).toHaveCount(5, { timeout: 8_000 })
-		await expect(page.getByTestId('notifications-row')).toHaveCount(5, { timeout: 8_000 })
+		// In-memory feeds are server-global; parallel test workers may
+		// place additional orders between clear and the burst tick.
+		// Assert "at least 5" rather than exactly 5 to keep the burst-
+		// fan-out assertion stable under shared-state pollution.
+		await expect.poll(
+			async () => await page.getByTestId('orders-row').count(),
+			{ timeout: 8_000 }
+		).toBeGreaterThanOrEqual(5)
+		await expect.poll(
+			async () => await page.getByTestId('audit-row').count(),
+			{ timeout: 8_000 }
+		).toBeGreaterThanOrEqual(5)
+		await expect.poll(
+			async () => await page.getByTestId('notifications-row').count(),
+			{ timeout: 8_000 }
+		).toBeGreaterThanOrEqual(5)
 	})
 
 	test('clear feeds: empty all three columns', async ({ page }) => {

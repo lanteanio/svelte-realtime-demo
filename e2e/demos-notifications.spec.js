@@ -2,6 +2,29 @@ import { test, expect } from '@playwright/test'
 
 const RUN = `e2e-${Date.now()}`
 
+/**
+ * Read the page's `data-testid="my-id"` element and return the full user id
+ * from its `data-user-id` attribute. The page only renders the first 8 chars
+ * visually; the full id is required so A can selectOption(bId) deterministically
+ * against the recipient dropdown - relying on the pre-selected first option
+ * is flaky when parallel test workers contribute other identities to global
+ * presence.
+ */
+async function getMyId(page) {
+	return await page.getByTestId('my-id').getAttribute('data-user-id')
+}
+
+/**
+ * A picks B explicitly from A's recipient dropdown. Waits for B's option to
+ * appear (presence fan-out is async) before selecting, so the test does not
+ * race the option-list render.
+ */
+async function selectRecipient(a, bId) {
+	const option = a.getByTestId(`recipient-option-${bId}`)
+	await expect(option).toBeAttached({ timeout: 10_000 })
+	await a.getByTestId('recipient-select').selectOption(bId)
+}
+
 test.describe('/demos/notifications', () => {
 	test('alone on the page: recipient dropdown shows the no-users state and Send is disabled', async ({ page }) => {
 		await page.goto('/demos/notifications')
@@ -22,11 +45,8 @@ test.describe('/demos/notifications', () => {
 			await a.goto('/demos/notifications')
 			await b.goto('/demos/notifications')
 
-			// Wait for both pages to see each other in the recipient list.
-			await expect.poll(
-				async () => (await a.getByTestId('recipient-select').locator('option:not([value=""])').count()),
-				{ timeout: 8_000 }
-			).toBeGreaterThanOrEqual(1)
+			const bId = await getMyId(b)
+			await selectRecipient(a, bId)
 
 			const text = `hi-${RUN}-happy`
 			await a.getByTestId('text-input').fill(text)
@@ -59,10 +79,8 @@ test.describe('/demos/notifications', () => {
 			await a.goto('/demos/notifications')
 			await b.goto('/demos/notifications')
 
-			await expect.poll(
-				async () => (await a.getByTestId('recipient-select').locator('option:not([value=""])').count()),
-				{ timeout: 8_000 }
-			).toBeGreaterThanOrEqual(1)
+			const bId = await getMyId(b)
+			await selectRecipient(a, bId)
 
 			const text = `hi-${RUN}-dismiss`
 			await a.getByTestId('text-input').fill(text)
@@ -88,10 +106,8 @@ test.describe('/demos/notifications', () => {
 			await a.goto('/demos/notifications')
 			await b.goto('/demos/notifications')
 
-			await expect.poll(
-				async () => (await a.getByTestId('recipient-select').locator('option:not([value=""])').count()),
-				{ timeout: 8_000 }
-			).toBeGreaterThanOrEqual(1)
+			const bId = await getMyId(b)
+			await selectRecipient(a, bId)
 
 			// Schedule 2 seconds out - short enough to keep the test fast,
 			// long enough to assert the entry sits in the queue first.
@@ -131,10 +147,8 @@ test.describe('/demos/notifications', () => {
 			await a.goto('/demos/notifications')
 			await b.goto('/demos/notifications')
 
-			await expect.poll(
-				async () => (await a.getByTestId('recipient-select').locator('option:not([value=""])').count()),
-				{ timeout: 8_000 }
-			).toBeGreaterThanOrEqual(1)
+			const bId = await getMyId(b)
+			await selectRecipient(a, bId)
 
 			// Long-enough schedule that we have time to cancel.
 			const text = `sched-${RUN}-cancel`

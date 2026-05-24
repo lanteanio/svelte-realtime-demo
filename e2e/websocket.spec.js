@@ -9,11 +9,15 @@ test.describe('WebSocket Connection', () => {
 		expect(ws.url()).toContain('/ws');
 	});
 
-	test('WebSocket uses secure wss:// protocol', async ({ page }) => {
+	test('WebSocket protocol matches page protocol (wss for https, ws for http)', async ({ page, baseURL }) => {
 		const wsPromise = page.waitForEvent('websocket', { timeout: 10000 });
 		await page.goto('/');
 		const ws = await wsPromise;
-		expect(ws.url()).toMatch(/^wss:\/\//);
+		// Production / staging serves over https -> wss. Local dev / e2e
+		// against `http://localhost:NNNN` serves over http -> ws. The
+		// scheme must match the page scheme, never downgrade.
+		const expectedProtocol = new URL(baseURL ?? page.url()).protocol === 'https:' ? 'wss:' : 'ws:';
+		expect(ws.url()).toMatch(new RegExp('^' + expectedProtocol + '//'));
 	});
 
 	test('WebSocket exchanges frames after connection', async ({ page }) => {

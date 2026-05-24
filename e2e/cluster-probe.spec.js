@@ -15,6 +15,16 @@ import { test, expect } from '@playwright/test'
 const INSTANCE_A = process.env.BASE_URL || 'http://localhost:3091'
 const INSTANCE_B = process.env.INSTANCE_B || 'http://localhost:3092'
 
+// These tests require two distinct instances against the same Redis +
+// Postgres. Without a real INSTANCE_B (e.g. when the suite runs against
+// the single-URL production deploy), the localhost:3092 fallback yields
+// ERR_CONNECTION_REFUSED on every navigation. Skip rather than fail; run
+// locally with both ports set to actually exercise the cluster relay.
+test.skip(
+	!process.env.INSTANCE_B,
+	'cluster-probe requires INSTANCE_B set (two local instances against shared Redis/Postgres)'
+)
+
 test.describe('cluster: cross-instance state propagation', () => {
 	test('todos: add on A is visible on B (loader read + live event)', async ({ browser }) => {
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })

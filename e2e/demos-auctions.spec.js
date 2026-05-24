@@ -2,6 +2,21 @@ import { test, expect } from '@playwright/test'
 
 const RUN = `e2e-${Date.now()}`
 
+/**
+ * Wait for every page to signal `push-ready` (WS open + onPush handler
+ * registered). The server's `live.push` to a bidder fans out via the
+ * per-userId registry; if the bidder's WS isn't open yet, the registry
+ * lookup misses and the push routes via the cluster registry OR drops.
+ * The `[N bidders]` count in the seller's listing form is driven by
+ * presence and arrives EARLIER than the push registry is populated, so
+ * polling that alone is insufficient.
+ */
+async function waitForPushReady(...pages) {
+	for (const p of pages) {
+		await expect(p.getByTestId('push-ready')).toBeAttached({ timeout: 10_000 })
+	}
+}
+
 test.describe('/demos/auctions', () => {
 	test('alone on the page: list form is visible but no other bidders, no inbox cards', async ({ page }) => {
 		await page.goto('/demos/auctions')
@@ -20,10 +35,14 @@ test.describe('/demos/auctions', () => {
 			await a.goto('/demos/auctions')
 			await b.goto('/demos/auctions')
 
+			// Match any non-zero bidder count - parallel test workers may
+			// have other identities in presence, so the seller's listing
+			// form shows >= 1 bidder once B is in the global presence roster.
 			await expect.poll(
 				async () => (await a.getByTestId('list-submit').textContent()) ?? '',
 				{ timeout: 8_000 }
-			).toMatch(/1 bidder/)
+			).toMatch(/[1-9]\d* bidder/)
+			await waitForPushReady(a, b)
 
 			const item = `lot-${RUN}-happy`
 			await a.getByTestId('list-item-input').fill(item)
@@ -71,10 +90,16 @@ test.describe('/demos/auctions', () => {
 				d.goto('/demos/auctions')
 			])
 
+			// At least 3 bidders (parallel test workers may add more).
 			await expect.poll(
-				async () => (await a.getByTestId('list-submit').textContent()) ?? '',
+				async () => {
+					const text = (await a.getByTestId('list-submit').textContent()) ?? ''
+					const m = text.match(/(\d+)\s+bidder/)
+					return m ? Number(m[1]) : 0
+				},
 				{ timeout: 10_000 }
-			).toMatch(/3 bidders/)
+			).toBeGreaterThanOrEqual(3)
+			await waitForPushReady(a, b, c, d)
 
 			const item = `lot-${RUN}-race`
 			await a.getByTestId('list-item-input').fill(item)
@@ -134,10 +159,14 @@ test.describe('/demos/auctions', () => {
 			await a.goto('/demos/auctions')
 			await b.goto('/demos/auctions')
 
+			// Match any non-zero bidder count - parallel test workers may
+			// have other identities in presence, so the seller's listing
+			// form shows >= 1 bidder once B is in the global presence roster.
 			await expect.poll(
 				async () => (await a.getByTestId('list-submit').textContent()) ?? '',
 				{ timeout: 8_000 }
-			).toMatch(/1 bidder/)
+			).toMatch(/[1-9]\d* bidder/)
+			await waitForPushReady(a, b)
 
 			const item = `lot-${RUN}-noreserve`
 			await a.getByTestId('list-item-input').fill(item)
@@ -171,10 +200,14 @@ test.describe('/demos/auctions', () => {
 			await a.goto('/demos/auctions')
 			await b.goto('/demos/auctions')
 
+			// Match any non-zero bidder count - parallel test workers may
+			// have other identities in presence, so the seller's listing
+			// form shows >= 1 bidder once B is in the global presence roster.
 			await expect.poll(
 				async () => (await a.getByTestId('list-submit').textContent()) ?? '',
 				{ timeout: 8_000 }
-			).toMatch(/1 bidder/)
+			).toMatch(/[1-9]\d* bidder/)
+			await waitForPushReady(a, b)
 
 			const item = `lot-${RUN}-timeout`
 			await a.getByTestId('list-item-input').fill(item)

@@ -21,6 +21,14 @@ import { test, expect } from '@playwright/test'
 const INSTANCE_A = process.env.BASE_URL || 'http://localhost:3091'
 const INSTANCE_B = process.env.INSTANCE_B || 'http://localhost:3092'
 
+// Requires two distinct instances; see the matching guard in
+// cluster-probe.spec.js. Skip rather than ERR_CONNECTION_REFUSED when the
+// suite runs against a single-URL deploy.
+test.skip(
+	!process.env.INSTANCE_B,
+	'cluster-bugs-probe requires INSTANCE_B set (two local instances against shared Redis/Postgres)'
+)
+
 test.describe.configure({ mode: 'serial' })
 
 test.describe('cluster bugs: presence + push', () => {
@@ -82,13 +90,24 @@ test.describe('cluster bugs: presence + push', () => {
 			await ba.goto(`${INSTANCE_A}/demos/auctions`)
 			await bb.goto(`${INSTANCE_B}/demos/auctions`)
 
-			// Wait for seller's listing form to show BOTH bidders. If presence
-			// is per-replica, this poll will fail after 15s with "1 bidder"
-			// instead of "2 bidders" - the smoking gun for the presence bug.
+			// Wait for seller's listing form to see at least 2 bidders.
+			// The pre-fix bug surfaced as 1 bidder (the same-replica bidder
+			// only); the post-fix shape is >= 2 (cross-replica presence
+			// fan-out succeeds). Parallel test workers may contribute extra
+			// identities so we assert "at least 2" rather than exactly 2.
 			await expect.poll(
-				async () => (await s.getByTestId('list-submit').textContent()) ?? '',
+				async () => {
+					const text = (await s.getByTestId('list-submit').textContent()) ?? ''
+					const m = text.match(/(\d+)\s+bidder/)
+					return m ? Number(m[1]) : 0
+				},
 				{ timeout: 15_000, message: 'seller should see both cross-replica bidders in presence' }
-			).toMatch(/2 bidders/)
+			).toBeGreaterThanOrEqual(2)
+			// Make sure both bidders' WS + onPush handlers are ready before
+			// the seller submits, so the per-bidder `live.push` does not
+			// race the registry / handler installation.
+			await expect(ba.getByTestId('push-ready')).toBeAttached({ timeout: 10_000 })
+			await expect(bb.getByTestId('push-ready')).toBeAttached({ timeout: 10_000 })
 
 			const item = `clusterprobe-${Date.now()}`
 			await s.getByTestId('list-item-input').fill(item)

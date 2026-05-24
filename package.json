@@ -27,7 +27,7 @@
 		"lucide-svelte": "^0.577.0",
 		"pg": "^8.16.2",
 		"svelte-adapter-uws": "^0.5.8",
-		"svelte-adapter-uws-extensions": "^0.5.9",
+		"svelte-adapter-uws-extensions": "^0.5.10",
 		"svelte-realtime": "^0.5.8",
 		"uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.67.0"
 	}

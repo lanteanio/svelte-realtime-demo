@@ -116,8 +116,9 @@ test.describe('/demos/upload', () => {
 	})
 
 	test('cross-device push: upload from tab A, tab B sees the incoming banner', async ({ browser }) => {
-		// Two contexts share one identity cookie so the live.push targets
-		// both tabs as "the same user".
+		// Two contexts share one identity cookie so live.notify targets B's
+		// tab as "the same user" (the per-userId push registry holds the
+		// most-recently-registered ws, which is B's after B's open hook).
 		const ctxA = await browser.newContext()
 		const a = await ctxA.newPage()
 		await a.goto('/demos/upload')
@@ -127,10 +128,26 @@ test.describe('/demos/upload', () => {
 		expect(identityCookie, 'identity cookie set on first page load').toBeTruthy()
 
 		const ctxB = await browser.newContext()
-		await ctxB.addCookies([{ ...identityCookie }])
+		// Strip the Secure flag when running over plain http (local dev /
+		// e2e against http://localhost). The production deploy sets
+		// `secure: !dev` on the identity cookie, so the cookie A receives
+		// is marked Secure. Browsers refuse to send Secure cookies over
+		// http://, which means B would mint a fresh session instead of
+		// inheriting A's identity, and the cross-device push would route
+		// to A's tab (the only ws registered for the original userId) -
+		// not B's. Production runs over https where the flag is fine.
+		const isHttps = identityCookie.domain
+			? Boolean(process.env.BASE_URL && process.env.BASE_URL.startsWith('https://'))
+			: false
+		await ctxB.addCookies([{ ...identityCookie, secure: isHttps }])
 		const b = await ctxB.newPage()
 		await b.goto('/demos/upload')
 		await expect(b.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
+
+		// Wait for B's onPush handler to register before A uploads. Without
+		// this gate the server-fired notify can land before the handler is
+		// installed and the push drops (notify is fire-and-forget; no retry).
+		await expect(b.getByTestId('push-ready')).toBeAttached({ timeout: 5_000 })
 
 		try {
 			await a.getByTestId('clear-button').click()
