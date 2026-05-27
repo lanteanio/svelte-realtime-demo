@@ -18,6 +18,7 @@ import { metrics } from '$lib/server/metrics'
 import { tasks } from '$lib/server/tasks'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
+import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface and
 // registers the orchestrator cron at boot. See src/lib/server/demo-purge.js.
 import '$lib/server/demo-purge'
@@ -189,6 +190,15 @@ export function init({ platform }) {
 	// `.replay` (since extensions next.15) so the framework's
 	// auto-replay routing finds the buffer on the wrapped seam too.
 	configureCron({ leader: () => leader.isLeader(), bus })
+	// /demos/pressure has a 500ms snapshot publisher that must be armed
+	// at boot rather than on first subscribe. The leader gate inside the
+	// timer body means only the cluster leader actually publishes a
+	// snapshot per tick -- but the gate can only fire on a worker whose
+	// ticker is already running, which requires arming all workers at
+	// boot. Pre-fix the ticker armed only on subscribe; if the leader
+	// hadn't yet had a subscribe land on it, the snapshot was never
+	// published and every subscriber's loader returned null forever.
+	armPressureTicker(platform)
 }
 
 /**

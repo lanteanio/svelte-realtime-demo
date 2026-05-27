@@ -52,7 +52,31 @@ const SHED_KEY = 'demos:pressure:shed'
 
 let armed = false
 
-function armTicker(platform) {
+/**
+ * Boot-time arm of the per-worker snapshot ticker. Called once per worker
+ * from `hooks.ws.js`'s `init({ platform })` so every replica has its
+ * snapshot interval running before the first subscriber connects. The
+ * leader gate inside the timer body still ensures only the cluster
+ * leader actually publishes a snapshot per tick -- the other replicas
+ * just hit the early-return path on every fire (a single conditional
+ * check; tiny CPU).
+ *
+ * Pre-fix, this was only invoked from the stream loader on first
+ * subscribe. With 4 replicas behind SO_REUSEPORT, a subscribe connection
+ * lands on whichever replica the kernel routes it to (uniform); only
+ * the leader's interval body actually publishes. If the leader hadn't
+ * yet had a subscriber, its ticker was never armed, the snapshot was
+ * never written to Redis, and the loader returned null forever -- the
+ * client's `if (!v) return` guard then silently skipped every emission
+ * and the page's `reason` badge stayed at `...`. Symptom: pressure
+ * stream is dead after every deploy until a subscriber happens to land
+ * on the leader replica (~25% chance per fresh WS on a 4-replica
+ * cluster). Boot-arm closes the race deterministically.
+ *
+ * @param {*} platform - the cluster-aware platform reference captured
+ *   in `init({ platform })`.
+ */
+export function armPressureTicker(platform) {
 	if (armed) return
 	armed = true
 	setInterval(async () => {
@@ -95,8 +119,12 @@ function armTicker(platform) {
 
 export const pressureSnapshot = live.stream(
 	TOPICS.demoPressureTick,
-	async (ctx) => {
-		armTicker(ctx.platform)
+	async () => {
+		// The ticker is armed once per worker at boot from hooks.ws.js's
+		// init({ platform }) so the leader is always publishing snapshots
+		// regardless of which replica a subscriber lands on. New
+		// subscribers' loaders read the latest snapshot from Redis (set
+		// by the leader's interval body with a 30s TTL).
 		const raw = await redis.redis.get(LAST_SNAPSHOT_KEY)
 		if (!raw) return null
 		try { return JSON.parse(raw) } catch { return null }
