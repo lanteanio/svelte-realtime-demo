@@ -26,7 +26,16 @@ async function selectRecipient(a, bId) {
 }
 
 test.describe('/demos/notifications', () => {
-	test('alone on the page: recipient dropdown shows the no-users state and Send is disabled', async ({ page }) => {
+	test('alone on the page: recipient dropdown shows the no-users state and Send is disabled', async ({ page, baseURL }) => {
+		// "Alone" requires zero entries in the global presence channel.
+		// Achievable against a freshly-started localhost dev server with
+		// no other tabs open; not achievable against the public demo,
+		// where real users and continuous background traffic keep
+		// presence populated. Skip when BASE_URL points at a public host.
+		test.skip(
+			!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(baseURL ?? ''),
+			'alone semantics require localhost dev server (no real-user presence)'
+		)
 		await page.goto('/demos/notifications')
 		// Single context = no other users in global presence.
 		await expect(page.getByTestId('inbox-empty')).toBeVisible({ timeout: 5_000 })

@@ -9,9 +9,9 @@
 		"preview": "vite preview",
 		"start": "node --env-file=.env build",
 		"prepare": "svelte-kit sync || echo ''",
-		"test:e2e": "playwright test",
-		"test:e2e:fast": "playwright test --project=main",
-		"test:e2e:isolated": "playwright test --project=isolated"
+		"test:e2e": "playwright test --project=main",
+		"test:e2e:isolated": "playwright test --project=isolated",
+		"test:e2e:all": "playwright test --project=main && playwright test --project=isolated"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.58.2",

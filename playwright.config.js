@@ -64,6 +64,18 @@ export default defineConfig({
 			workers: 1,
 			retries: 0,
 			timeout: 600_000,
+			// `dependencies: ['main']` was tried and rejected: Playwright's
+			// dependency mechanism is fail-fast (if a dep fails, dependents
+			// skip), AND `--project=isolated` ALSO runs declared dependencies
+			// -- so isolated could neither run after a main flake nor stand
+			// alone. The shell `&&` in `test:e2e:all` is a cleaner sequencer:
+			// both projects always get to run, the caller controls order, and
+			// isolated remains usable standalone via `test:e2e:isolated`.
+			// What still matters: do NOT run `test:e2e:fast` (main) and
+			// `test:e2e:isolated` simultaneously against the same demo -- the
+			// stress test's 1K-bot ramp saturates cluster pub/sub and the
+			// "alone" tests can't pass while main's 3 workers each hold a
+			// presence-attached page.
 			testMatch: [
 				'**/stress.spec.js',
 				'**/destroyer.spec.js',

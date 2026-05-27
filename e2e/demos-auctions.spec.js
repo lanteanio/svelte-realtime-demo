@@ -18,7 +18,17 @@ async function waitForPushReady(...pages) {
 }
 
 test.describe('/demos/auctions', () => {
-	test('alone on the page: list form is visible but no other bidders, no inbox cards', async ({ page }) => {
+	test('alone on the page: list form is visible but no other bidders, no inbox cards', async ({ page, baseURL }) => {
+		// "Alone" requires zero entries in the global presence channel.
+		// Achievable against a freshly-started localhost dev server with
+		// no other tabs open; not achievable against the public demo,
+		// where real users and the demo's continuous background traffic
+		// keep presence populated. Skip when BASE_URL points at a public
+		// host (anything that's not localhost / 127.0.0.1).
+		test.skip(
+			!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(baseURL ?? ''),
+			'alone semantics require localhost dev server (no real-user presence)'
+		)
 		await page.goto('/demos/auctions')
 		await expect(page.getByTestId('alone-badge')).toBeVisible({ timeout: 5_000 })
 		await expect(page.getByTestId('inbox-empty')).toBeVisible()
