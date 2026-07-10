@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { waitForAppWebSocket, waitForWS } from './helpers.js';
 
 test.describe('Performance', () => {
 	test('home page loads within acceptable time', async ({ page }) => {
@@ -134,17 +135,16 @@ test.describe('Performance', () => {
 	});
 
 	test('WebSocket connection establishes quickly', async ({ page }) => {
-		const wsPromise = page.waitForEvent('websocket', { timeout: 15_000 });
+		const startedAt = Date.now();
+		const wsPromise = waitForAppWebSocket(page, { timeout: 15_000 });
 		await page.goto('/', { waitUntil: 'commit' });
 		const ws = await wsPromise;
+		await waitForWS(page);
+		const connectMs = Date.now() - startedAt;
 
-		console.log(`\nWebSocket URL: ${ws.url()}`);
+		console.log(`\nWebSocket URL: ${ws.url()} (${connectMs}ms)`);
 		expect(ws.url()).toBeTruthy();
-
-		// Wait for the WS to be connected and frames to flow
-		const framePromise = ws.waitForEvent('framesent', { timeout: 10_000 });
-		await framePromise;
-		console.log('WebSocket: frames are being sent');
+		expect(connectMs).toBeLessThan(15_000);
 	});
 
 	test('Lighthouse-style CLS check (no layout shift)', async ({ page }) => {

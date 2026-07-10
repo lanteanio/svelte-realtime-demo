@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test'
+import { waitForWS } from './helpers.js'
 
 test.describe('/demos/checkout idempotency', () => {
 	test('single click increments the counter', async ({ page }) => {
 		await page.goto('/demos/checkout')
+		await waitForWS(page)
 		await page.getByRole('button', { name: 'Reset' }).click()
 		await expect(page.locator('.tabular-nums')).toHaveText('0', { timeout: 5_000 })
 
@@ -15,6 +17,7 @@ test.describe('/demos/checkout idempotency', () => {
 
 	test('Retry x5 with same key produces ONE increment, not five', async ({ page }) => {
 		await page.goto('/demos/checkout')
+		await waitForWS(page)
 		await page.getByRole('button', { name: 'Reset' }).click()
 		await expect(page.locator('.tabular-nums')).toHaveText('0', { timeout: 5_000 })
 
@@ -25,7 +28,9 @@ test.describe('/demos/checkout idempotency', () => {
 		await expect(page.locator('.tabular-nums')).toHaveText('1', { timeout: 5_000 })
 
 		// History should show 5 entries all returning count = 1.
-		const historyCounts = await page.locator('.font-mono li .font-bold').allTextContents()
+		const history = page.locator('.font-mono li .font-bold')
+		await expect(history).toHaveCount(5, { timeout: 5_000 })
+		const historyCounts = await history.allTextContents()
 		expect(historyCounts).toHaveLength(5)
 		for (const text of historyCounts) {
 			expect(text).toBe('count = 1')
@@ -40,6 +45,7 @@ test.describe('/demos/checkout idempotency', () => {
 		try {
 			await a.goto('/demos/checkout')
 			await b.goto('/demos/checkout')
+			await Promise.all([waitForWS(a), waitForWS(b)])
 			await a.getByRole('button', { name: 'Reset' }).click()
 			await expect(a.locator('.tabular-nums')).toHaveText('0', { timeout: 5_000 })
 			await expect(b.locator('.tabular-nums')).toHaveText('0', { timeout: 5_000 })

@@ -4,16 +4,13 @@
  * Three extensions primitives compose here:
  *
  *  - createPgClient  : the runner needs a PgClient (Pool + query
- *                      shorthand + lifecycle). We open a separate pool
- *                      from the one in db.js for now; the 
- *                      `createPgClient({ pool })` overload would let
- *                      us share, but that requires exposing db.js's
- *                      module-scope pool first. Two-pool footprint is
- *                      harmless at demo scale. Auto-shutdown hooks
- *                      into SvelteKit's lifecycle.
+ *                      shorthand + lifecycle). It wraps db.js's shared
+ *                      process-wide Pool, so the worker has one explicit
+ *                      PostgreSQL connection budget and one shutdown owner.
  *
- *  - createTaskRunner: the durable task framework. Auto-migrates
- *                      `svti_tasks` at construction; runs
+ *  - createTaskRunner: the durable task framework. Its tables are created
+ *                      by the versioned pre-deploy migration; runtime DDL is
+ *                      disabled. The runner owns
  *                      internal dispatch + recovery + cleanup sweeps.
  *                      Demo time scales (fenceTtl 10s, heartbeat 1.5s,
  *                      recovery 2s, dispatch 1s) so force-takeover and
@@ -25,13 +22,13 @@
  *                      the Redis mirror so the in-flight handler aborts
  *                      on the very next heartbeat tick.
  *
- * All three depend on env.DATABASE_URL (and Redis for the fence). Any
- * absent dependency makes `tasks` null; the demo page gracefully shows
- * a "Postgres required" placeholder.
+ * The runner depends on env.DATABASE_URL; Redis is optional and only enables
+ * the second fence source. Without PostgreSQL, `tasks` stays null and the demo
+ * page gracefully shows a "Postgres required" placeholder.
  *
- * Registers the `simulate-work` task at module load so it is ready
- * before any RPC fires. The handler honors the AbortSignal so a
- * heartbeat-detected fence loss bails immediately.
+ * Runtime init registers `simulate-work` before any RPC is accepted. The
+ * handler honors AbortSignal so a heartbeat-detected fence loss bails
+ * immediately.
  */
 
 import { createPgClient } from 'svelte-adapter-uws-extensions/postgres'
@@ -39,6 +36,7 @@ import { createTaskRunner } from 'svelte-adapter-uws-extensions/postgres/tasks'
 import { createIdempotencyStore } from 'svelte-adapter-uws-extensions/postgres/idempotency'
 import { createRedisFence } from 'svelte-adapter-uws-extensions/redis/fence'
 import { env } from '$env/dynamic/private'
+import { databasePool } from '$lib/server/db'
 import { redis } from '$lib/server/redis'
 import { metrics } from '$lib/server/metrics'
 
@@ -49,42 +47,10 @@ export const TASKS_IDEMPOTENCY_TABLE = 'demos_jobs_idempotency'
  * PgClient for the demo. Null if DATABASE_URL is empty - the demo
  * page detects this and renders a "Postgres required" panel.
  */
-export const pgClient = env.DATABASE_URL
-	? createPgClient({ connectionString: env.DATABASE_URL })
-	: null
-
-const fence = pgClient && env.REDIS_URL
-	? createRedisFence(redis)
-	: null
-
-const idempotency = pgClient
-	? createIdempotencyStore(pgClient, {
-			table: TASKS_IDEMPOTENCY_TABLE,
-			ttl: 60 * 60,
-			cleanupInterval: 5 * 60 * 1000
-		})
-	: null
-
-/**
- * The task runner. Time scales tuned for the demo: fence loss + recovery
- * happen within seconds so force-takeover is visible.
- */
-export const tasks = pgClient
-	? createTaskRunner(pgClient, {
-			table: TASKS_TABLE,
-			idempotency,
-			fence,
-			fenceTtl: 10,
-			heartbeatInterval: 1500,
-			recoveryInterval: 2000,
-			recoveryBatchSize: 5,
-			dispatchInterval: 1000,
-			dispatchBatchSize: 5,
-			cleanupInterval: 5 * 60 * 1000,
-			rowTtl: 10 * 60,
-			metrics
-		})
-	: null
+export let pgClient = null
+export let tasks = null
+let idempotency = null
+let activationPromise = null
 
 /**
  * Demo task handler. Sleeps in 200ms ticks so an aborted fence (force-
@@ -124,18 +90,61 @@ async function simulateWork(ctx) {
 	}
 }
 
-if (tasks) {
-	tasks.register('simulate-work', simulateWork, {
-		retry: {
-			maxAttempts: 3,
-			backoff: (attempt) => 250 * attempt
-		}
-	})
-	// fires autoMigrate at construction, but the cron tick may
-	// run before it lands. Surface a clean "ready" log so any boot-time
-	// migration error is visible; downstream code uses tasks.list() /
-	// tasks.counts() which await the same migration internally.
-	tasks
-		.ready()
-		.catch((err) => console.warn('[demos/jobs] tasks.ready() warning:', err?.message ?? err))
+/**
+ * Construct timer-owning task primitives only from the adapter runtime init
+ * hook. This keeps Vite's build analysis free of PostgreSQL connections and
+ * background sweeps. The preflight SELECTs are DDL-free and fail startup if a
+ * deployment skipped the versioned migration.
+ */
+export function activateTaskInfrastructure() {
+	if (!env.DATABASE_URL) return Promise.resolve()
+	if (activationPromise) return activationPromise
+
+	activationPromise = (async () => {
+		pgClient = createPgClient({ pool: databasePool, connectionString: env.DATABASE_URL })
+		await Promise.all([
+			pgClient.query(`SELECT 1 FROM ${TASKS_TABLE} LIMIT 0`),
+			pgClient.query(`SELECT 1 FROM ${TASKS_IDEMPOTENCY_TABLE} LIMIT 0`)
+		])
+
+		const fence = env.REDIS_URL ? createRedisFence(redis) : null
+		idempotency = createIdempotencyStore(pgClient, {
+			table: TASKS_IDEMPOTENCY_TABLE,
+			autoMigrate: false,
+			ttl: 60 * 60,
+			cleanupInterval: 5 * 60 * 1000
+		})
+
+		// Time scales tuned for the demo: fence loss + recovery happen within
+		// seconds so force-takeover is visible.
+		tasks = createTaskRunner(pgClient, {
+			table: TASKS_TABLE,
+			autoMigrate: false,
+			idempotency,
+			fence,
+			fenceTtl: 10,
+			heartbeatInterval: 1500,
+			recoveryInterval: 2000,
+			recoveryBatchSize: 5,
+			dispatchInterval: 1000,
+			dispatchBatchSize: 5,
+			cleanupInterval: 5 * 60 * 1000,
+			rowTtl: 10 * 60,
+			metrics
+		})
+		tasks.register('simulate-work', simulateWork, {
+			retry: {
+				maxAttempts: 3,
+				backoff: (attempt) => 250 * attempt
+			}
+		})
+	})()
+
+	return activationPromise
+}
+
+/** Stop every timer owned by the task and idempotency primitives. */
+export function destroyTaskInfrastructure() {
+	tasks?.destroy()
+	idempotency?.destroy()
 }

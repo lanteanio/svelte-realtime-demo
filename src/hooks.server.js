@@ -3,14 +3,12 @@
  *
  * handleError: catches unhandled errors during SSR and API routes.
  *
- * The top-level init runs once when this module first loads (server startup).
- * It migrates the schema if needed, then ensures well-known boards exist
- * (like the stress test board used by the E2E suite).
+ * Database migrations are an explicit pre-traffic deployment step. Runtime
+ * startup only ensures well-known application data exists (like the stress
+ * test board used by the E2E suite), and the request hook awaits that work.
  */
 
 import { ensureBoard } from '$lib/server/db'
-import pg from 'pg'
-import { env } from '$env/dynamic/private'
 import { live } from 'svelte-realtime/server'
 
 // Dev-mode safety net: warn once if a stream subscribes to a topic and
@@ -19,20 +17,41 @@ import { live } from 'svelte-realtime/server'
 // level. Production-stripped via NODE_ENV gate inside the helper.
 live.silentTopicWarning({ thresholdMs: 30_000 })
 
-if (env.DATABASE_URL) {
-	const pool = new pg.Pool({ connectionString: env.DATABASE_URL })
-	pool.query(`
-		ALTER TABLE board ADD COLUMN IF NOT EXISTS last_activity timestamptz DEFAULT now() NOT NULL
-	`).then(() => pool.end()).then(() => {
-		// Wait for migration before creating boards that reference last_activity
-		return ensureBoard({ title: 'stress', slug: 'stress-me-out' })
-	}).catch((err) => {
-		console.warn('Startup warning:', err.message)
-	})
-} else {
-	ensureBoard({ title: 'stress', slug: 'stress-me-out' }).catch((err) => {
-		console.warn('Could not ensure stress test board:', err.message)
-	})
+let applicationReady = null
+let applicationInitialized = false
+
+function initializeApplicationData() {
+	if (!applicationReady) {
+		const pending = ensureBoard({ title: 'stress', slug: 'stress-me-out' })
+			.then((value) => {
+				applicationInitialized = true
+				return value
+			})
+			.catch((error) => {
+				// A dependency outage must fail this request, not poison the worker
+				// forever with a cached rejected promise. The next request retries.
+				if (applicationReady === pending) applicationReady = null
+				throw error
+			})
+		applicationReady = pending
+	}
+	return applicationReady
+}
+
+export async function handle({ event, resolve }) {
+	// The readiness route reports dependency health itself and must answer even
+	// when Postgres is down; gating it here would turn its structured 503 into
+	// an opaque 500. Let it (and its sub-paths) through untouched.
+	if (event.url.pathname === '/healthz' || event.url.pathname.startsWith('/healthz/')) {
+		return resolve(event)
+	}
+	// Steady state: the one-time init promise is already resolved, so skip the
+	// await entirely. If the schema migration was skipped or Postgres is
+	// unavailable, fail closed instead of serving a partially initialized app.
+	if (!applicationInitialized) {
+		await initializeApplicationData()
+	}
+	return resolve(event)
 }
 
 export function handleError({ error }) {

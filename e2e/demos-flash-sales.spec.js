@@ -1,9 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { waitForWS } from './helpers.js'
 
 const PRODUCT_IDS = ['phone', 'watch', 'speaker']
 
 async function reset(page) {
 	await page.goto('/demos/flash-sales')
+	await waitForWS(page)
 	// Clear any state left over from a prior test run before asserting.
 	await page.getByTestId('reset').click()
 	for (const id of PRODUCT_IDS) {

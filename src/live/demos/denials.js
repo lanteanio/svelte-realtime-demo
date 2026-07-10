@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/denials - subscribe-denied banner with org switcher.
  *

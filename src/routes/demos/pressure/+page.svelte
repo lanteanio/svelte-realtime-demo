@@ -100,8 +100,12 @@
 						<dd class="font-bold tabular-nums" data-testid="subscriber-ratio">{(snap?.subscriberRatio ?? 0).toFixed(2)}</dd>
 					</div>
 					<div>
-						<dt class="opacity-60">publish/s</dt>
-						<dd class="font-bold tabular-nums" data-testid="publish-rate">{(snap?.publishRate ?? 0).toFixed(0)}</dd>
+						<dt class="opacity-60">{snap?.publishRateSource === 'generated-load-dev' ? 'generated/s' : 'publish/s'}</dt>
+						<dd
+							class="font-bold tabular-nums"
+							data-testid="publish-rate"
+							data-rate-source={snap?.publishRateSource ?? 'adapter'}
+						>{(snap?.publishRate ?? 0).toFixed(0)}</dd>
 					</div>
 					<div>
 						<dt class="opacity-60">heap</dt>
@@ -117,7 +121,10 @@
 
 		<div class="card bg-base-200">
 			<div class="card-body py-3">
-				<h2 class="card-title text-sm">publishRate (last {SPARK_WINDOW * 0.5}s)</h2>
+				<h2 class="card-title text-sm">
+					{snap?.publishRateSource === 'generated-load-dev' ? 'generatedRate (dev)' : 'publishRate'}
+					(last {SPARK_WINDOW * 0.5}s)
+				</h2>
 				<div class="flex items-end h-16 gap-px" data-testid="sparkline">
 					{#each history as v, i (i + ':' + v)}
 						<div
@@ -220,10 +227,10 @@
 		<p>
 			Live snapshot: <code>platform.pressure</code> getter sampled
 			every 500ms and republished as a <code>set</code>-merge
-			stream. publishRate is computed by the adapter from the
-			worker's actual publish frequency over the last sample
-			window, so the sparkline reflects every publish from every
-			RPC and every cron fire on this worker.
+			stream. In production, publishRate is computed by the adapter
+			from the worker's actual publish frequency. Vite development
+			has no pressure sampler, so a clearly labelled generatedRate
+			meters only this page's load-generator events instead.
 		</p>
 	</aside>
 </div>

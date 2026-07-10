@@ -1,5 +1,8 @@
 services:
   app:
+    # deploy.sh replaces this with a revision-specific tag. The fallback keeps
+    # ad-hoc `docker compose build/up` workflows working for local operators.
+    image: ${APP_IMAGE:-svelte-realtime-demo-app:local}
     build:
       context: .
       args:
@@ -40,6 +43,10 @@ services:
       # change; setting it enables the AUTH handshake in lockstep with the
       # redis service's --requirepass below.
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@127.0.0.1:6379
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-10}
+      DATABASE_CONNECT_TIMEOUT_MS: ${DATABASE_CONNECT_TIMEOUT_MS:-2000}
+      REDIS_SESSION_TIMEOUT_MS: ${REDIS_SESSION_TIMEOUT_MS:-1000}
+      READINESS_TIMEOUT_MS: ${READINESS_TIMEOUT_MS:-2500}
       # CRITICAL: svelte-realtime gates dev-only diagnostics on
       # `process.env.NODE_ENV !== 'production'`. With NODE_ENV unset, the
       # framework treats the process as dev and arms a per-platform
@@ -77,9 +84,16 @@ services:
       # via `docker compose up -d app`.
       CURSOR_THROTTLE_MS: ${CURSOR_THROTTLE_MS:-8}
       CURSOR_TOPIC_THROTTLE_MS: ${CURSOR_TOPIC_THROTTLE_MS:-8}
+      # entrypoint.sh fingerprints the read-only Let's Encrypt source files.
+      # Once a renewed cert/key pair is stable for two polls, each replica
+      # exits gracefully after independent jitter; restart: unless-stopped
+      # brings it back with a fresh node-readable copy. Staggering keeps at
+      # least part of the SO_REUSEPORT pool available during normal renewal.
+      CERT_RELOAD_POLL_SECONDS: ${CERT_RELOAD_POLL_SECONDS:-30}
+      CERT_RELOAD_JITTER_MAX_SECONDS: ${CERT_RELOAD_JITTER_MAX_SECONDS:-30}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     ulimits:
@@ -87,22 +101,59 @@ services:
         soft: 65536
         hard: 65536
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "scripts/container-healthcheck.mjs"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     deploy:
-      replicas: 4
+      replicas: ${APP_REPLICAS:-4}
+
+  # Canonical pre-traffic schema path. It runs for fresh volumes and upgrades,
+  # records checksums, then exits before any app replica is eligible to start.
+  migrate:
+    image: ${APP_IMAGE:-svelte-realtime-demo-app:local}
+    build:
+      context: .
+      args:
+        DEMO_NEWS_WEBHOOK_SECRET: build-stub
+    network_mode: host
+    environment:
+      DATABASE_URL: postgres://stickynotes_app:${STICKYNOTES_APP_PASSWORD:?required}@127.0.0.1:5432/stickynotes
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["npm", "run", "migrate"]
+    restart: "no"
 
   certbot:
     image: certbot/certbot
     volumes:
       - certs:/etc/letsencrypt
+      - ./scripts/verify-served-cert.sh:/usr/local/bin/verify-served-cert:ro
+    environment:
+      DOMAIN: ${DOMAIN:?required}
+      # Avoid relying on public-IP hairpin routing from the bridge network;
+      # SNI still verifies the configured public domain.
+      CERT_SERVE_HOST: host.docker.internal
+      CERT_SERVE_TIMEOUT_SECONDS: ${CERT_SERVE_TIMEOUT_SECONDS:-150}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
     entrypoint: sh
     command:
       - -c
       - |
+        set -u
         trap exit TERM
         while :; do
-          certbot renew --standalone --preferred-challenges http
+          certbot renew --standalone --preferred-challenges http \
+            || echo "certbot renew failed; retrying at the next interval"
+          sh /usr/local/bin/verify-served-cert \
+            || echo "verify-served-cert failed; retrying at the next interval"
           sleep 12h & wait $${!}
         done
     restart: unless-stopped

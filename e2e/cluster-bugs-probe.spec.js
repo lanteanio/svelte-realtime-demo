@@ -17,9 +17,10 @@
  */
 
 import { test, expect } from '@playwright/test'
+import { assertSafeE2ETarget } from '../scripts/test-target.mjs'
 
-const INSTANCE_A = process.env.BASE_URL || 'http://localhost:3091'
-const INSTANCE_B = process.env.INSTANCE_B || 'http://localhost:3092'
+const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
+const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
 
 // Requires two distinct instances; see the matching guard in
 // cluster-probe.spec.js. Skip rather than ERR_CONNECTION_REFUSED when the

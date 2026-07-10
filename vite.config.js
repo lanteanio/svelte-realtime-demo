@@ -14,6 +14,26 @@ import realtime from 'svelte-realtime/vite'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+	// Local Playwright writes traces/reports under the project root. Those
+	// artifacts are not application inputs and must not trigger a full browser
+	// reload in the middle of an assertion.
+	server: {
+		watch: {
+			ignored: ['**/playwright-report/**', '**/test-results/**', '**/audits/**']
+		}
+	},
+	// The cursor client is first imported by the lazily visited board route.
+	// Pre-bundle all client-side runtime seams so first navigation cannot make
+	// Vite discover a new common chunk and reload an already-hydrating page.
+	optimizeDeps: {
+		include: [
+			'svelte-adapter-uws/client',
+			'svelte-adapter-uws/plugins/presence/client',
+			'svelte-adapter-uws/plugins/cursor/client',
+			'svelte-realtime/client',
+			'lucide-svelte'
+		]
+	},
 	// Explicit `sourcemap: false` so a future config drift cannot ship
 	// server-source maps to production.
 	build: {

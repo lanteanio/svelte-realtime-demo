@@ -1,3 +1,4 @@
+// realtime-allow-public -- this anonymous collaborative demo is intentionally public.
 /**
  * Note CRUD and arrangement actions - live RPCs and streams.
  *
@@ -28,6 +29,7 @@ import {
 } from '$lib/server/db'
 import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
 import { TOPICS } from '$lib/server/topics'
+import { acknowledgeNoteFlush, mergeNoteMutation, reconcileBatchPosition } from '$lib/server/note-buffer'
 import { activityEvent } from './activity'
 
 /**
@@ -105,10 +107,11 @@ export const createNote = live.idempotent({ ttl: 60 }, async (ctx, boardId, { co
  * lands, but the window is bounded by the time-to-next-moveNote on the
  * dragging replica (<16ms at 120Hz drag).
  */
-const _noteCache = new Map() // noteId -> { boardId, note, dirty, lastTouch }
+const _noteCache = new Map() // noteId -> { boardId, note, dirty, version, flushPromise, lastTouch }
 const _FLUSH_INTERVAL_MS = 100
 const _CACHE_TTL_MS = 10_000
 let _flushTimer = null
+let _lastFlushWarningAt = 0
 
 function _ensureFlushTimer() {
 	if (_flushTimer) return
@@ -118,29 +121,52 @@ function _ensureFlushTimer() {
 
 async function _flushNoteCache() {
 	const now = Date.now()
-	const dirtyIds = []
+	const dirtyEntries = []
 	for (const [id, entry] of _noteCache) {
-		if (entry.dirty) dirtyIds.push(id)
-		else if (now - entry.lastTouch > _CACHE_TTL_MS) _noteCache.delete(id)
+		if (entry.dirty && !entry.flushPromise) dirtyEntries.push([id, entry])
+		else if (!entry.dirty && !entry.flushPromise && now - entry.lastTouch > _CACHE_TTL_MS) _noteCache.delete(id)
 	}
 	if (_noteCache.size === 0 && _flushTimer) {
 		clearInterval(_flushTimer)
 		_flushTimer = null
 	}
-	if (dirtyIds.length === 0) return
+	if (dirtyEntries.length === 0) return
 
-	for (const id of dirtyIds) {
-		const entry = _noteCache.get(id)
-		if (!entry) continue
-		entry.dirty = false
+	await Promise.all(dirtyEntries.map(async ([id, entry]) => {
+		const version = entry.version
 		const { x, y } = entry.note
+		const flushPromise = dbUpdateNote(id, { x, y })
+		entry.flushPromise = flushPromise
 		try {
-			const fresh = await dbUpdateNote(id, { x, y })
+			const fresh = await flushPromise
+			// An invalidating mutation may have removed/replaced this entry while
+			// the write was in flight. Never mutate a replacement cache entry.
+			if (_noteCache.get(id) !== entry) return
+			if (!fresh) {
+				_noteCache.delete(id)
+				return
+			}
 			// Merge DB-side fields back so any concurrent foreign edit lands
-			// on our cached shape before the next broadcast.
-			if (fresh) entry.note = { ...fresh, x: entry.note.x, y: entry.note.y }
-		} catch { /* swallow; next flush retries */ }
-	}
+			// on our cached shape before the next broadcast. Preserve the latest
+			// in-memory position if more move frames arrived during this write.
+			acknowledgeNoteFlush(entry, version, fresh)
+		} catch (err) {
+			// Keep dirty=true so the latest position is durable once PostgreSQL
+			// recovers. Throttle the warning because a drag buffer ticks at 10Hz.
+			if (Date.now() - _lastFlushWarningAt >= 5000) {
+				_lastFlushWarningAt = Date.now()
+				console.warn('[notes] buffered position flush failed; retrying', {
+					code: err?.code,
+					name: err?.name
+				})
+			}
+		} finally {
+			// A delete can temporarily detach and then restore this entry when
+			// its DELETE fails. Clear this exact settled generation even while
+			// detached so a restored dirty entry remains eligible for retry.
+			if (entry.flushPromise === flushPromise) entry.flushPromise = null
+		}
+	}))
 }
 
 /**
@@ -149,12 +175,27 @@ async function _flushNoteCache() {
  * the fresh row. For batch arrangements that touch many notes at once,
  * use _invalidateAllNotesCache().
  */
-function _invalidateNoteCache(noteId) {
-	_noteCache.delete(noteId)
+function _mergeNoteCache(note) {
+	const entry = _noteCache.get(note.note_id)
+	if (!entry) return note
+	mergeNoteMutation(entry, note)
+	return entry.note
 }
 
-function _invalidateAllNotesCache() {
-	_noteCache.clear()
+function _cacheVersions() {
+	return new Map([..._noteCache].map(([id, entry]) => [id, entry.version]))
+}
+
+function _reconcileBatchCache(updated, versions) {
+	const effective = []
+	for (const note of updated) {
+		const entry = _noteCache.get(note.note_id)
+		effective.push(entry
+			? reconcileBatchPosition(entry, versions.get(note.note_id), note)
+			: note)
+	}
+	if (_noteCache.size > 0) _ensureFlushTimer()
+	return effective
 }
 
 /**
@@ -183,13 +224,14 @@ export const moveNote = live(async (ctx, boardId, noteId, x, y) => {
 		await verifyNoteOwnership(noteId, boardId)
 		const fresh = await dbGetNote(noteId)
 		if (!fresh) throw new LiveError('NOT_FOUND', 'Note not found')
-		entry = { boardId, note: fresh, dirty: false, lastTouch: now }
+		entry = { boardId, note: fresh, dirty: false, version: 0, flushPromise: null, lastTouch: now }
 		_noteCache.set(noteId, entry)
 		_ensureFlushTimer()
 	}
 
 	entry.note = { ...entry.note, x: cx, y: cy }
 	entry.dirty = true
+	entry.version++
 	entry.lastTouch = now
 	ctx.publish(TOPICS.notes(boardId), 'updated', entry.note)
 })
@@ -210,8 +252,8 @@ export const editNote = live.lock(
 		if (Object.keys(clean).length === 0) throw new LiveError('VALIDATION', 'No valid fields to update')
 		const note = await dbUpdateNote(noteId, clean)
 		if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
-		_invalidateNoteCache(noteId)
-		ctx.publish(TOPICS.notes(boardId), 'updated', note)
+		const merged = _mergeNoteCache(note)
+		ctx.publish(TOPICS.notes(boardId), 'updated', merged)
 		if (clean.content !== undefined) {
 			ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'edited a note'))
 		}
@@ -219,7 +261,7 @@ export const editNote = live.lock(
 			ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'recolored a note'))
 		}
 		touch(ctx, boardId)
-		return note
+		return merged
 	}
 )
 
@@ -236,15 +278,25 @@ export const focusNote = live(async (ctx, boardId, noteId, zIndex) => {
 	await verifyNoteOwnership(noteId, boardId)
 	const note = await dbUpdateNote(noteId, { z_index: validateZIndex(zIndex) })
 	if (!note) throw new LiveError('NOT_FOUND', 'Note not found')
-	_invalidateNoteCache(noteId)
-	ctx.publish(TOPICS.notes(boardId), 'updated', note)
-	return note
+	const merged = _mergeNoteCache(note)
+	ctx.publish(TOPICS.notes(boardId), 'updated', merged)
+	return merged
 })
 
 export const deleteNote = live(async (ctx, boardId, noteId) => {
 	await verifyNoteOwnership(noteId, boardId)
-	await dbDeleteNote(noteId)
-	_invalidateNoteCache(noteId)
+	const detached = _noteCache.get(noteId)
+	_noteCache.delete(noteId)
+	try {
+		await dbDeleteNote(noteId)
+	} catch (error) {
+		// Preserve a buffered position if the delete itself did not commit.
+		if (detached && !_noteCache.has(noteId)) {
+			_noteCache.set(noteId, detached)
+			_ensureFlushTimer()
+		}
+		throw error
+	}
 	ctx.publish(TOPICS.notes(boardId), 'deleted', { note_id: noteId })
 	ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'removed a note'))
 	touch(ctx, boardId)
@@ -257,6 +309,8 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 /** Sort notes by position (top-left to bottom-right) and reset z-order. */
 export const tidyNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
+	await _flushNoteCache()
+	const versions = _cacheVersions()
 	const allNotes = await listNotes(boardId)
 	if (allNotes.length === 0) return []
 
@@ -265,8 +319,8 @@ export const tidyNotes = live(async (ctx, boardId) => {
 		note_id: note.note_id, x: note.x, y: note.y, z_index: i
 	}))
 
-	const updated = await dbBatchUpdateNotes(updates)
-	_invalidateAllNotesCache()
+	const persisted = await dbBatchUpdateNotes(updates)
+	const updated = _reconcileBatchCache(persisted, versions)
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'tidied the board') }
@@ -278,6 +332,8 @@ export const tidyNotes = live(async (ctx, boardId) => {
 /** Group notes by color into cascading columns. */
 export const rearrangeNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
+	await _flushNoteCache()
+	const versions = _cacheVersions()
 	const allNotes = await listNotes(boardId)
 	if (allNotes.length === 0) return []
 
@@ -313,8 +369,8 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 		colIndex++
 	}
 
-	const updated = await dbBatchUpdateNotes(updates)
-	_invalidateAllNotesCache()
+	const persisted = await dbBatchUpdateNotes(updates)
+	const updated = _reconcileBatchCache(persisted, versions)
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'rearranged the board') }
@@ -326,6 +382,8 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 /** Scatter notes randomly across the canvas. */
 export const shuffleNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
+	await _flushNoteCache()
+	const versions = _cacheVersions()
 	const allNotes = await listNotes(boardId)
 	if (allNotes.length === 0) return []
 
@@ -341,8 +399,8 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 		z_index: i
 	}))
 
-	const updated = await dbBatchUpdateNotes(updates)
-	_invalidateAllNotesCache()
+	const persisted = await dbBatchUpdateNotes(updates)
+	const updated = _reconcileBatchCache(persisted, versions)
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'shuffled the board') }
@@ -354,6 +412,8 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 /** Group notes by their creator into cascading columns. */
 export const groupByAuthor = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
+	await _flushNoteCache()
+	const versions = _cacheVersions()
 	const allNotes = await listNotes(boardId)
 	if (allNotes.length === 0) return []
 
@@ -388,8 +448,8 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 		colIndex++
 	}
 
-	const updated = await dbBatchUpdateNotes(updates)
-	_invalidateAllNotesCache()
+	const persisted = await dbBatchUpdateNotes(updates)
+	const updated = _reconcileBatchCache(persisted, versions)
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'grouped notes by author') }

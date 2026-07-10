@@ -6,7 +6,7 @@
 	The left panel subscribes normally; the wire envelope carries no
 	`schemaVersion`, so the loader's v2 payload comes back unchanged.
 	The right panel uses `subscribeAt(counter, { schemaVersion: 1 })`
-	from `svelte-realtime/test-client`; the wire envelope claims
+	from `svelte-realtime/testing/client`; the wire envelope claims
 	`schemaVersion: 1`, and the server's migrate chain runs end-to-end
 	on the loader output, stamping `provenance: 'migrate[1]'`.
 
@@ -26,12 +26,12 @@
 		incrementCounter,
 		resetCounters
 	} from '$live/demos/schema-evolution'
-	import { subscribeAt } from 'svelte-realtime/test-client'
+	import { subscribeAt } from 'svelte-realtime/testing/client'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
 
-	// `subscribeAt` walks the test-client wire path and reads
+	// `subscribeAt` walks the testing-client wire path and reads
 	// `__streamPath` off the stream object. The SSR stub for `$live/`
 	// streams is a plain hydrate-readable without that metadata, so the
 	// call must run client-only. Set up in onMount, tear down on
@@ -107,7 +107,7 @@
 			normally (no <code>schemaVersion</code> on the wire, loader output
 			passes through). Right panel uses
 			<code>subscribeAt(counter, &#123; schemaVersion: 1 &#125;)</code>
-			from <code>svelte-realtime/test-client</code> - the server's
+			from <code>svelte-realtime/testing/client</code> - the server's
 			<code>migrate[1]</code> runs end-to-end on the initial subscribe
 			response. Increment a counter and watch the right panel's row
 			flip its provenance badge back to <code>loader</code>: the live
@@ -219,13 +219,13 @@
 			stream subscription, set only by server responses. Production
 			code can never present a stale <code>schemaVersion</code> from
 			a fresh tab. The <code>subscribeAt</code> helper from
-			<code>svelte-realtime/test-client</code> takes a stream and an
+			<code>svelte-realtime/testing/client</code> takes a stream and an
 			explicit <code>schemaVersion</code>, walks the same wire path
 			as a real reconnecting stale client, and returns a parallel
 			Svelte store.
 		</p>
 		<p>
-			<strong>Production code never imports <code>/test-client</code>.</strong>
+			<strong>Production code never imports <code>/testing/client</code>.</strong>
 			The path is a loud signal that this is a debug / demo
 			affordance.
 		</p>

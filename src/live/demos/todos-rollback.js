@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/todos-rollback - optimistic mutate with concurrent-failure rollback.
  *

@@ -1,0 +1,7 @@
+services:
+  app:
+    # A release predating /healthz cannot execute the current image-local
+    # healthcheck. Rollback therefore disables Docker health temporarily and
+    # uses bounded process-count plus external page/WebSocket smoke gates.
+    healthcheck:
+      disable: true

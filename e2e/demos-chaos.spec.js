@@ -1,14 +1,22 @@
 import { test, expect } from '@playwright/test'
+import { waitForWS } from './helpers.js'
 
 test.describe('/demos/chaos', () => {
-	test('start with seed produces tick decisions', async ({ page }) => {
+	async function openChaos(page) {
 		await page.goto('/demos/chaos')
+		// SSR controls are visible before Svelte has hydrated. Waiting for the
+		// realtime status proves client startup completed before any click.
+		await waitForWS(page)
+	}
+
+	test('start with seed produces tick decisions', async ({ page }) => {
+		await openChaos(page)
 		await page.getByTestId('seed-input').fill('1234')
 		await page.getByTestId('start-button').click()
+		await expect(page.getByTestId('stop-button')).toBeVisible()
 		// Decision strip populates within ~1.5s (10 ticks/sec).
-		await expect(page.getByTestId('decision-strip').locator('div')).toHaveCount(60, { timeout: 8_000 }).catch(() => {})
-		const cellCount = await page.getByTestId('decision-strip').locator('[data-testid^="tick-"]').count()
-		expect(cellCount).toBeGreaterThan(2)
+		const cells = page.getByTestId('decision-strip').locator('[data-testid^="tick-"]')
+		await expect.poll(() => cells.count(), { timeout: 8_000 }).toBeGreaterThan(2)
 		await page.getByTestId('stop-button').click()
 	})
 
@@ -18,7 +26,7 @@ test.describe('/demos/chaos', () => {
 		const N = 20  // first 20 ticks; deterministic regardless of how many extra arrived
 
 		async function getFirstN(page) {
-			await page.goto('/demos/chaos')
+			await openChaos(page)
 			await page.getByTestId('seed-input').fill(SEED)
 			await page.evaluate((d) => {
 				const el = document.querySelector('[data-testid="drop-rate-input"]')
@@ -52,13 +60,13 @@ test.describe('/demos/chaos', () => {
 	})
 
 	test('preset buttons populate seed and drop rate inputs', async ({ page }) => {
-		await page.goto('/demos/chaos')
+		await openChaos(page)
 		await page.getByTestId('preset-42').click()
 		await expect(page.getByTestId('seed-input')).toHaveValue('42')
 	})
 
 	test('stop button removes running state', async ({ page }) => {
-		await page.goto('/demos/chaos')
+		await openChaos(page)
 		await page.getByTestId('start-button').click()
 		await expect(page.getByTestId('stop-button')).toBeVisible({ timeout: 3_000 })
 		await page.getByTestId('stop-button').click()

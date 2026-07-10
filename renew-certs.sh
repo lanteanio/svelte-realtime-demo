@@ -2,9 +2,12 @@
 set -euo pipefail
 
 echo "Renewing certificates..."
-docker compose exec certbot certbot renew --standalone
+docker compose exec -T certbot certbot renew --standalone
 
-echo "Restarting app to pick up new certs..."
-docker compose restart app
-
-echo "Done!"
+echo "Waiting for the public listener to serve the certificate in the shared volume..."
+CERT_SERVE_TIMEOUT_SECONDS=${CERT_SERVE_TIMEOUT_SECONDS:-150}
+if ! docker compose exec -T -e CERT_SERVE_TIMEOUT_SECONDS="$CERT_SERVE_TIMEOUT_SECONDS" \
+	certbot sh /usr/local/bin/verify-served-cert; then
+	docker compose ps app >&2 || true
+	exit 1
+fi

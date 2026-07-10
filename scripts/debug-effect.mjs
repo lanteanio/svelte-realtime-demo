@@ -9,13 +9,16 @@
 // publishes are not reaching the user's worker exactly once.
 //
 // Usage (from repo root):
-//   node scripts/debug-effect.mjs                                 # live URL
-//   TARGET=http://localhost:5174/demos/effect node scripts/...    # local dev
+//   node scripts/debug-effect.mjs                                 # local dev
+//   TARGET=https://staging.example/demos/effect ALLOW_REMOTE_E2E=1 node scripts/...
 //   RUNS=30 node scripts/debug-effect.mjs                         # more samples
 
 import { chromium } from 'playwright'
+import { assertSafeE2ETarget } from './test-target.mjs'
 
-const TARGET = process.env.TARGET ?? 'https://svelte-realtime-demo.lantean.io/demos/effect'
+const TARGET = assertSafeE2ETarget(
+	process.env.TARGET ?? 'http://127.0.0.1:3000/demos/effect'
+).href
 const RUNS = Number(process.env.RUNS ?? 15)
 
 let bad = 0

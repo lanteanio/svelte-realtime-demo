@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/upload - cross-device file uploads with content-addressed
  * chunk dedup, on top of `live.upload`.

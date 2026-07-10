@@ -1,9 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { waitForWS } from './helpers.js'
 
 const RUN = `e2e-upload-${Date.now()}`
 
 async function gotoFreshUpload(page) {
 	await page.goto('/demos/upload')
+	await waitForWS(page)
 	await expect(page.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
 	await page.getByTestId('clear-button').click()
 	await expect(page.getByTestId('files-list-empty')).toBeVisible({ timeout: 5_000 })
@@ -122,6 +124,7 @@ test.describe('/demos/upload', () => {
 		const ctxA = await browser.newContext()
 		const a = await ctxA.newPage()
 		await a.goto('/demos/upload')
+		await waitForWS(a)
 		await expect(a.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
 		const cookies = await ctxA.cookies()
 		const identityCookie = cookies.find((c) => c.name === 'identity')
@@ -142,6 +145,7 @@ test.describe('/demos/upload', () => {
 		await ctxB.addCookies([{ ...identityCookie, secure: isHttps }])
 		const b = await ctxB.newPage()
 		await b.goto('/demos/upload')
+		await waitForWS(b)
 		await expect(b.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
 
 		// Wait for B's onPush handler to register before A uploads. Without

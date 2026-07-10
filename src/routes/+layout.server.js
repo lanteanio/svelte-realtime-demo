@@ -6,10 +6,9 @@
  * under `identity-session:<id>`. See $lib/server/identity-session for
  * the storage contract.
  *
- * The cookie is NOT httpOnly because the client-side JS needs to read
- * it (the WebSocket upgrade handler in hooks.ws.js also reads it). The
- * cookie value itself is not sensitive - it is a lookup key into the
- * server-side store, not the identity itself.
+ * The cookie is httpOnly: browsers attach it to both page requests and the
+ * WebSocket upgrade automatically, and no client-side code needs to read the
+ * session bearer token.
  */
 
 import { dev } from '$app/environment'
@@ -22,7 +21,7 @@ import {
 
 const COOKIE_OPTS = {
 	path: '/',
-	httpOnly: false,
+	httpOnly: true,
 	secure: !dev,
 	sameSite: 'lax',
 	maxAge: SESSION_COOKIE_MAX_AGE

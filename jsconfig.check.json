@@ -1,0 +1,24 @@
+{
+	"extends": "./jsconfig.json",
+	"include": [
+		"playwright.config.js",
+		"svelte.config.js",
+		"vite.config.js",
+		"scripts/**/*.mjs",
+		"src/lib/server/advisory-lock.js",
+		"src/lib/server/note-buffer.js",
+		"src/lib/server/redis-options.js",
+		"src/lib/server/validate.js",
+		"src/live/$types.d.ts",
+		"src/lib/components/ActivityTicker.svelte",
+		"src/lib/components/BoardCard.svelte",
+		"src/lib/components/Canvas.svelte",
+		"src/lib/components/PresenceBar.svelte",
+		"tests/unit/**/*.test.js"
+	],
+	"exclude": [
+		"node_modules/**",
+		".svelte-kit/**",
+		"build/**"
+	]
+}

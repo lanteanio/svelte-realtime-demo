@@ -3,10 +3,11 @@ set -euo pipefail
 
 DOMAIN=${1:?Usage: ./init-certs.sh <domain> <email>}
 EMAIL=${2:?Usage: ./init-certs.sh <domain> <email>}
+export DOMAIN
 
 echo "Obtaining Let's Encrypt certificate for $DOMAIN..."
 
-docker compose run --rm -p 80:80 certbot certonly \
+docker compose run --rm --entrypoint certbot -p 80:80 certbot certonly \
   --standalone \
   --preferred-challenges http \
   -d "$DOMAIN" \

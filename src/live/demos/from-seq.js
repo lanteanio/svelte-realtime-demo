@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/from-seq: three-tier reconnect via delta.fromSeq.
  *

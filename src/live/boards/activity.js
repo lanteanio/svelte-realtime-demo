@@ -1,3 +1,4 @@
+// realtime-allow-public -- this anonymous collaborative demo is intentionally public.
 /**
  * Activity feed - live stream only (no RPCs).
  *

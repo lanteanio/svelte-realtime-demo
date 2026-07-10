@@ -9,6 +9,43 @@ export async function waitForWS(page) {
 	await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
+/** True only for the application's realtime socket, never Vite's HMR socket. */
+export function isAppWebSocket(ws) {
+	try {
+		return new URL(ws.url()).pathname === '/ws';
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Wait for the application WebSocket. Register `onOpen` synchronously with
+ * Playwright's websocket event so initial subscribe frames cannot race past
+ * the test before it attaches frame listeners.
+ */
+export function waitForAppWebSocket(page, { timeout = 15000, onOpen } = {}) {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			page.off('websocket', handleWebSocket);
+			reject(new Error(`Application WebSocket did not appear within ${timeout}ms`));
+		}, timeout);
+
+		function handleWebSocket(ws) {
+			if (!isAppWebSocket(ws)) return;
+			clearTimeout(timer);
+			page.off('websocket', handleWebSocket);
+			try {
+				onOpen?.(ws);
+				resolve(ws);
+			} catch (error) {
+				reject(error);
+			}
+		}
+
+		page.on('websocket', handleWebSocket);
+	});
+}
+
 /**
  * Create a fresh board and return its URL path.
  * Waits for WS connection before submitting to prevent RPC failures.

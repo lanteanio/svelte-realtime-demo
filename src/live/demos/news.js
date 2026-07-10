@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/news - live newsroom showcasing four realtime primitives in one
  * page: a cron-driven view firehose, a three-window aggregate over that
@@ -31,7 +32,7 @@
  *      windowed aggregate. One reducer (counts per story id), one compute
  *      (top-5), three windows: last30s sliding (3s hops), thisMinute
  *      tumbling (per-minute boundary), lifetime (never resets). Demo-
- *      friendly time scales over the spec's hour/day/lifetime so the
+ *      friendly time scales over a production hour/day/lifetime so the
  *      visual diff is visible inside an e2e test run.
  *
  *  - live.derived(['demos:news:topk:lifetime', topic], fn) - server-side

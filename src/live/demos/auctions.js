@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/auctions: deadline-bounded parallel `live.push` collection.
  *

@@ -1,5 +1,6 @@
 import { defineConfig } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { resolveE2EBaseURL } from './scripts/test-target.mjs';
 
 // Auto-load .env from the project root into process.env so tests that
 // depend on operational secrets (e.g. METRICS_SCRAPE_TOKEN for the
@@ -16,75 +17,124 @@ try {
 	}
 } catch { /* no .env, that's fine */ }
 
-const BASE_URL = process.env.BASE_URL || 'https://svelte-realtime-demo.lantean.io';
+const BASE_URL = resolveE2EBaseURL(process.env);
 
 // The suite splits into two projects:
 //
-// - `main`: workers=3, runs the default e2e set in parallel. Excludes
+// - `main`: workers=1, runs the default e2e set serially. Excludes
 //   tests that are structurally incompatible with parallel workers
 //   (the "alone on the page" tests assert no other presence entries
 //   exist, which is false under workers>1 sharing one cluster), and
 //   excludes the stress + destroyer specs which connect 1K+ bots and
 //   would starve the cluster's quiet-cluster tests.
-// - `isolated`: workers=1, runs only the parallel-incompatible specs.
-//   No retries -- the stress / destroyer / alone tests want a clean
-//   pass/fail signal under isolation, not a flaky-retry crutch.
+// - `isolated`: workers=1, runs only the tests that assert they are alone.
+// - resilience/cluster/stress/destroyer/diagnostics: opt-in projects exposed
+//   by the local tier runner. They are not registered during a default
+//   `playwright test`, which keeps expensive and assertion-free probes out
+//   of the everyday pass count.
 //
-// `npm run test:e2e` runs both projects sequentially; `npm run
-// test:e2e:fast` runs just `main` for quick iteration; `npm run
-// test:e2e:isolated` runs just the isolated suite (which is where
-// stress ceiling probes live and operators want focused output).
+// `npm run test:e2e:safe` provisions dependencies and runs both core
+// projects sequentially. Optional tiers have dedicated commands.
+/** @type {import('@playwright/test').Project[]} */
+const projects = [
+	{
+		name: 'main',
+		workers: 1,
+		retries: 0,
+		testIgnore: [
+			'**/_*.spec.js',
+			'**/cluster-probe.spec.js',
+			'**/cluster-bugs-probe.spec.js',
+			'**/demos-cluster-cron.spec.js',
+			'**/resilience.spec.js',
+			'**/stress.spec.js',
+			'**/destroyer.spec.js',
+			'**/destroyer-presence.spec.js'
+		],
+		grepInvert: /alone on the page/,
+		use: { browserName: 'chromium' }
+	},
+	{
+		name: 'isolated',
+		workers: 1,
+		retries: 0,
+		testMatch: [
+			'**/demos-auctions.spec.js',
+			'**/demos-notifications.spec.js'
+		],
+		grep: /alone on the page/,
+		use: { browserName: 'chromium' }
+	}
+];
+
+const optionalProject = process.env.E2E_OPTIONAL_PROJECT;
+if (optionalProject === 'resilience') {
+	projects.push({
+		name: 'resilience',
+		workers: 1,
+		retries: 0,
+		timeout: 240_000,
+		testMatch: ['**/resilience.spec.js'],
+		use: { browserName: 'chromium' }
+	});
+} else if (optionalProject === 'cluster') {
+	projects.push({
+		name: 'cluster',
+		workers: 1,
+		retries: 0,
+		testMatch: [
+			'**/cluster-probe.spec.js',
+			'**/cluster-bugs-probe.spec.js',
+			'**/demos-cluster-cron.spec.js'
+		],
+		use: { browserName: 'chromium' }
+	});
+} else if (optionalProject === 'stress') {
+	projects.push({
+		name: 'stress',
+		workers: 1,
+		retries: 0,
+		timeout: 600_000,
+		testMatch: ['**/stress.spec.js'],
+		use: { browserName: 'chromium' }
+	});
+} else if (optionalProject === 'destroyer') {
+	projects.push({
+		name: 'destroyer',
+		workers: 1,
+		retries: 0,
+		timeout: 600_000,
+		testMatch: ['**/destroyer.spec.js', '**/destroyer-presence.spec.js'],
+		use: { browserName: 'chromium' }
+	});
+} else if (optionalProject === 'diagnostics') {
+	projects.push({
+		name: 'diagnostics',
+		workers: 1,
+		retries: 0,
+		timeout: 120_000,
+		testMatch: ['**/_*.spec.js'],
+		use: { browserName: 'chromium' }
+	});
+}
+
 export default defineConfig({
 	testDir: './e2e',
 	timeout: 30_000,
 	expect: { timeout: 10_000 },
 	fullyParallel: false,
-	retries: 1,
-	reporter: 'html',
+	retries: 0,
+	// HTML report writes under the watched project root and can make Vite's
+	// dev server reload the page during a local test. The provisioned harness
+	// uses the streaming line reporter; ad-hoc interactive runs keep HTML.
+	reporter: process.env.CI || process.env.LOCAL_E2E === '1'
+		? 'line'
+		: [['html', { open: 'never' }]],
 	use: {
 		baseURL: BASE_URL,
-		trace: 'on-first-retry',
+		trace: 'retain-on-failure',
 		screenshot: 'only-on-failure',
-		video: 'on-first-retry'
+		video: 'retain-on-failure'
 	},
-	projects: [
-		{
-			name: 'main',
-			workers: 3,
-			testIgnore: [
-				'**/stress.spec.js',
-				'**/destroyer.spec.js',
-				'**/destroyer-presence.spec.js'
-			],
-			grepInvert: /alone on the page/,
-			use: { browserName: 'chromium' }
-		},
-		{
-			name: 'isolated',
-			workers: 1,
-			retries: 0,
-			timeout: 600_000,
-			// `dependencies: ['main']` was tried and rejected: Playwright's
-			// dependency mechanism is fail-fast (if a dep fails, dependents
-			// skip), AND `--project=isolated` ALSO runs declared dependencies
-			// -- so isolated could neither run after a main flake nor stand
-			// alone. The shell `&&` in `test:e2e:all` is a cleaner sequencer:
-			// both projects always get to run, the caller controls order, and
-			// isolated remains usable standalone via `test:e2e:isolated`.
-			// What still matters: do NOT run `test:e2e:fast` (main) and
-			// `test:e2e:isolated` simultaneously against the same demo -- the
-			// stress test's 1K-bot ramp saturates cluster pub/sub and the
-			// "alone" tests can't pass while main's 3 workers each hold a
-			// presence-attached page.
-			testMatch: [
-				'**/stress.spec.js',
-				'**/destroyer.spec.js',
-				'**/destroyer-presence.spec.js',
-				'**/demos-auctions.spec.js',
-				'**/demos-notifications.spec.js'
-			],
-			grep: /alone on the page|Stress Test|Destroyer Test|Presence Destroyer/,
-			use: { browserName: 'chromium' }
-		}
-	]
+	projects
 });

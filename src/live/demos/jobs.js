@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/jobs - durable Postgres-backed task runner with Redis fence,
  * retry policy, force-takeover, and a live.cron-driven stats / list
@@ -39,8 +40,8 @@
  *    `onStateChange` callback would replace the polling pattern in
  *    production for instant per-row reactivity.
  *
- * Storage is in `demos_jobs_tasks` (auto-migrated at construction
- * by the runner; ). Demo-friendly: rowTtl = 10 minutes,
+ * Storage is in `demos_jobs_tasks` (created by the versioned pre-traffic
+ * migration; runtime DDL is disabled). Demo-friendly: rowTtl = 10 minutes,
  * cleanup every 5 minutes.
  */
 

@@ -9,15 +9,24 @@
 
 import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
+import { resolveE2EBaseURL, toWebSocketURL } from '../scripts/test-target.mjs';
+import { joinBoardWithRetry } from './ws-rpc.js';
 
-const WS_URL = 'wss://svelte-realtime-demo.lantean.io/ws';
+const WS_URL = toWebSocketURL(resolveE2EBaseURL());
 const BOARD_URL = '/board/stress-me-out';
-const LEVELS = [1000, 2000, 3000, 5000, 7000, 10000];
+const LEVELS = process.env.DESTROYER_LEVELS
+	? process.env.DESTROYER_LEVELS.split(',').map((value) => Number.parseInt(value.trim(), 10)).filter(Number.isFinite)
+	: [1000, 2000, 3000, 5000, 7000, 10000];
 
-let msgIdCounter = 0;
-function nextId() { return 'p' + (msgIdCounter++).toString(36); }
+if (LEVELS.length === 0 || LEVELS.some((level, index) => level < 1000 || (index > 0 && level <= LEVELS[index - 1]))) {
+	throw new Error('DESTROYER_LEVELS must be an increasing comma-separated list starting at 1000');
+}
+const MIN_JOIN_RATE = Number(process.env.DESTROYER_MIN_JOIN_RATE ?? 0.9);
+if (!Number.isFinite(MIN_JOIN_RATE) || MIN_JOIN_RATE <= 0 || MIN_JOIN_RATE > 1) {
+	throw new Error('DESTROYER_MIN_JOIN_RATE must be greater than 0 and at most 1');
+}
 
-function connectAndJoin(boardId, index) {
+function connectUser(index) {
 	return new Promise((resolve, reject) => {
 		const name = `P${index}`;
 		const color = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
@@ -36,14 +45,6 @@ function connectAndJoin(boardId, index) {
 
 		ws.on('open', () => {
 			clearTimeout(timer);
-			// Join board presence immediately
-			try {
-				ws.send(JSON.stringify({
-					rpc: 'boards/cursors/joinBoard',
-					id: nextId(),
-					args: [boardId]
-				}));
-			} catch {}
 			resolve({ ws, index });
 		});
 
@@ -95,20 +96,20 @@ test.describe('Presence Destroyer', () => {
 			let connected = 0;
 			let failed = 0;
 			const connectStart = Date.now();
-			const batchSize = 100;
+			const batchSize = 25;
 
 			for (let batch = 0; batch < toAdd; batch += batchSize) {
 				const end = Math.min(batch + batchSize, toAdd);
 				const promises = [];
 				for (let i = batch; i < end; i++) {
 					promises.push(
-						connectAndJoin(boardId, allUsers.length + i)
+						connectUser(allUsers.length + i)
 							.then((user) => { allUsers.push(user); connected++; })
 							.catch(() => { failed++; })
 					);
 				}
 				await Promise.all(promises);
-				await new Promise((r) => setTimeout(r, 50));
+				await new Promise((r) => setTimeout(r, 100));
 			}
 
 			const connectTime = Date.now() - connectStart;
@@ -116,6 +117,23 @@ test.describe('Presence Destroyer', () => {
 			console.log(`  Connected: ${connected} new, ${failed} failed (${connectRate}%)`);
 			console.log(`  Total active: ${allUsers.length}`);
 			console.log(`  Connect time: ${connectTime}ms (${(connectTime / Math.max(toAdd, 1)).toFixed(1)}ms/user)`);
+
+			const newUsers = allUsers.slice(allUsers.length - connected);
+			let joined = 0;
+			let joinFailed = 0;
+			for (let batch = 0; batch < newUsers.length; batch += 25) {
+				await Promise.all(newUsers.slice(batch, batch + 25).map(async (user) => {
+					try {
+						await joinBoardWithRetry(user.ws, boardId)
+						joined++
+					} catch {
+						joinFailed++
+					}
+				}))
+				await new Promise((r) => setTimeout(r, 100))
+			}
+			const acknowledgedJoinRate = joined / Math.max(newUsers.length, 1)
+			console.log(`  Board joins: ${joined} ok, ${joinFailed} failed (${(acknowledgedJoinRate * 100).toFixed(1)}%)`)
 
 			// Wait for presence to propagate
 			await new Promise((r) => setTimeout(r, 3000));
@@ -145,13 +163,17 @@ test.describe('Presence Destroyer', () => {
 			console.log(`  Presence: ${presenceText}`);
 			console.log(`  JS Heap: ${heapMB} MB`);
 
-			const joinRate = connected / Math.max(connected + failed, 1);
+			const connectRateValue = connected / Math.max(connected + failed, 1);
 			if (!serverAlive) {
 				console.log(`\n  STOPPED: server unresponsive at ${targetCount}`);
 				break;
 			}
-			if (joinRate < 0.5) {
-				console.log(`\n  STOPPED: join rate below 50% at ${targetCount}`);
+			if (connectRateValue < 0.5) {
+				console.log(`\n  STOPPED: connection rate below 50% at ${targetCount}`);
+				break;
+			}
+			if (acknowledgedJoinRate < MIN_JOIN_RATE) {
+				console.log(`\n  STOPPED: acknowledged board-join rate below ${(MIN_JOIN_RATE * 100).toFixed(0)}% at ${targetCount}`);
 				break;
 			}
 

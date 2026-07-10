@@ -1,7 +1,6 @@
 // @ts-check
 import { test, expect, devices } from '@playwright/test';
-
-const BASE = 'https://svelte-realtime-demo.lantean.io';
+import { waitForWS } from './helpers.js';
 
 // Use iPhone 13 profile for realistic mobile viewport + touch
 const iPhone = devices['iPhone 13'];
@@ -12,7 +11,8 @@ test.use({
 
 test.describe('Mobile Touch', () => {
 	test('can create a board and navigate to it', async ({ page }) => {
-		await page.goto(BASE);
+		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Mobile ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).tap();
 		await page.waitForURL(/\/board\//, { timeout: 15000 });
@@ -20,14 +20,15 @@ test.describe('Mobile Touch', () => {
 	});
 
 	test('navbar shows "Demo" on mobile width', async ({ page }) => {
-		await page.goto(BASE);
+		await page.goto('/');
 		// On mobile, the short title should be visible
 		const shortTitle = page.locator('.sm\\:hidden', { hasText: 'Demo' });
 		await expect(shortTitle).toBeVisible();
 	});
 
 	test('can create a note with double-tap', async ({ page }) => {
-		await page.goto(BASE);
+		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Touch ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).tap();
 		await page.waitForURL(/\/board\//, { timeout: 15000 });
@@ -47,7 +48,8 @@ test.describe('Mobile Touch', () => {
 	});
 
 	test('can drag a note with touch', async ({ page }) => {
-		await page.goto(BASE);
+		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Drag ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).tap();
 		await page.waitForURL(/\/board\//, { timeout: 15000 });
@@ -111,7 +113,8 @@ test.describe('Mobile Touch', () => {
 	});
 
 	test('note controls are visible on mobile without hover', async ({ page }) => {
-		await page.goto(BASE);
+		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Controls ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).tap();
 		await page.waitForURL(/\/board\//, { timeout: 15000 });
@@ -132,7 +135,8 @@ test.describe('Mobile Touch', () => {
 	});
 
 	test('can delete a note on mobile', async ({ page }) => {
-		await page.goto(BASE);
+		await page.goto('/');
+		await waitForWS(page);
 		await page.getByPlaceholder('New board name...').fill(`Delete ${Date.now()}`);
 		await page.getByRole('button', { name: 'Create' }).tap();
 		await page.waitForURL(/\/board\//, { timeout: 15000 });

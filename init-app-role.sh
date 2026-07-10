@@ -27,9 +27,9 @@ psql -v ON_ERROR_STOP=1 \
 	$$;
 	ALTER ROLE stickynotes_app WITH PASSWORD :'app_password';
 	-- Postgres 15+ revoked CREATE on schema public from PUBLIC by default;
-	-- the app role needs both USAGE (to reference objects in the schema)
-	-- and CREATE (to CREATE TABLE / CREATE FUNCTION when the SET ROLE
-	-- block in 01-schema.sql runs).
+	-- The same deliberately non-superuser role executes the explicit migration
+	-- service and the runtime. CREATE is needed only by that pre-traffic
+	-- migration step; application startup itself performs no DDL.
 	GRANT USAGE, CREATE ON SCHEMA public TO stickynotes_app;
 EOSQL
 

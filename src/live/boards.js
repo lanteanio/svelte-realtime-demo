@@ -1,3 +1,4 @@
+// realtime-allow-public -- this anonymous collaborative demo is intentionally public.
 /**
  * Board CRUD - live RPCs and streams.
  *
@@ -10,7 +11,7 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard, tryAdvisoryLock, advisoryUnlock } from '$lib/server/db'
+import { listBoards, createBoard as dbCreateBoard, deleteStaleBoards, withAdvisoryLock } from '$lib/server/db'
 import { generateSlug } from '$lib/names'
 import { validateBoardTitle } from '$lib/server/validate'
 import { TOPICS } from '$lib/server/topics'
@@ -78,18 +79,14 @@ export const boards = live.stream(TOPICS.boards, async () => {
 const CLEANUP_LOCK_ID = 900001
 
 export const cleanupStaleBoards = live.cron('* * * * *', TOPICS.boards, async (ctx) => {
-	const acquired = await tryAdvisoryLock(CLEANUP_LOCK_ID)
-	if (!acquired) return
-	try {
-		const stale = await listStaleBoards(BOARD_TTL_MS, PROTECTED_SLUGS)
-		for (const board of stale) {
-			await dbDeleteBoard(board.board_id)
-		}
+	await withAdvisoryLock(CLEANUP_LOCK_ID, async (lockClient) => {
+		// The conditional DELETE runs on the checked-out lock session and
+		// re-checks last_activity atomically, avoiding a touch/delete TOCTOU.
+		// It remains deadlock-free even when DATABASE_POOL_MAX=1.
+		const stale = await deleteStaleBoards(BOARD_TTL_MS, PROTECTED_SLUGS, lockClient)
 		if (stale.length > 0) {
 			ctx.platform.publishBatched(stale.map(board => ({ topic: TOPICS.boards, event: 'deleted', data: { board_id: board.board_id } })))
 			console.log(`[cleanup] Deleted ${stale.length} stale board(s): ${stale.map(b => b.slug).join(', ')}`)
 		}
-	} finally {
-		await advisoryUnlock(CLEANUP_LOCK_ID)
-	}
+	})
 })

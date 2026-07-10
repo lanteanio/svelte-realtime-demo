@@ -1,0 +1,4 @@
+# Shell entrypoints execute inside Linux containers/hosts. Keep their bytes
+# portable even when the checkout itself lives on Windows with core.autocrlf.
+*.sh text eol=lf
+

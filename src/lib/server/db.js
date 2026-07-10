@@ -16,18 +16,85 @@
 
 import pg from 'pg'
 import { env } from '$env/dynamic/private'
+import { runWithAdvisoryLock } from '$lib/server/advisory-lock'
 
-const pool = env.DATABASE_URL
-	? new pg.Pool({ connectionString: env.DATABASE_URL })
+const DEFAULT_POOL_MAX = 10
+const DEFAULT_CONNECT_TIMEOUT_MS = 2000
+
+function poolMax(value) {
+	const parsed = Number(value)
+	return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_POOL_MAX
+}
+
+function connectionTimeoutMs(value) {
+	const parsed = Number(value)
+	return Number.isInteger(parsed) && parsed >= 100 && parsed <= 30_000
+		? parsed
+		: DEFAULT_CONNECT_TIMEOUT_MS
+}
+
+/**
+ * The process-wide PostgreSQL pool. Every database-backed subsystem wraps
+ * this same pool so one worker has one explicit connection budget.
+ */
+export const databasePool = env.DATABASE_URL
+	? new pg.Pool({
+			connectionString: env.DATABASE_URL,
+			max: poolMax(env.DATABASE_POOL_MAX),
+			// A readiness probe must not sit forever in Pool.connect() while the
+			// database host is unreachable. Individual query budgets are supplied
+			// by the callers that need a tighter bound.
+			connectionTimeoutMillis: connectionTimeoutMs(env.DATABASE_CONNECT_TIMEOUT_MS)
+		})
 	: null
+
+if (databasePool) {
+	// pg emits idle-client failures on the Pool itself. Without a listener,
+	// an ordinary database restart becomes an uncaught EventEmitter error and
+	// terminates the Node process. Active queries still reject their callers;
+	// this listener only makes idle failures observable and recoverable.
+	databasePool.on('error', (err) => {
+		console.error('[postgres] idle client error', {
+			name: err?.name,
+			code: err?.code,
+			severity: err?.severity,
+			routine: err?.routine
+		})
+	})
+}
+
+let closePromise = null
+
+/** Close the shared pool exactly once during graceful worker shutdown. */
+export function closeDatabase() {
+	if (!databasePool) return Promise.resolve()
+	closePromise ??= databasePool.end()
+	return closePromise
+}
+
+// The adapter emits this only after HTTP/WebSocket drain. Closing from the
+// earlier hooks.ws shutdown hook would reject requests still finishing during
+// a graceful deploy.
+if (databasePool) {
+	process.once('sveltekit:shutdown', () => {
+		closeDatabase().catch((error) => {
+			console.error('[postgres] pool shutdown failed', {
+				name: error?.name,
+				code: error?.code
+			})
+		})
+	})
+}
+
+const pool = databasePool
 
 // ============================================================
 // PostgreSQL implementation
 // ============================================================
 
 /** Run a parameterized query and return the rows. */
-async function sql(query, params = []) {
-	const { rows } = await pool.query(query, params)
+async function sql(query, params = [], queryable = pool) {
+	const { rows } = await queryable.query(query, params)
 	return rows
 }
 
@@ -74,29 +141,23 @@ function pgTouchBoard(boardId) {
  * Delete a board and all its notes (notes cascade via FK).
  * Used by the cleanup job to remove stale boards.
  */
-function pgDeleteBoard(boardId) {
-	return sql(`DELETE FROM board WHERE board_id = $1`, [boardId])
+function pgDeleteBoard(boardId, queryable = pool) {
+	return sql(`DELETE FROM board WHERE board_id = $1`, [boardId], queryable)
 }
 
 /**
- * Find all boards that haven't been active for longer than maxAgeMs.
- * Skips protected boards (like 'stress-me-out') by slug.
+ * Atomically delete boards that are still stale at statement execution time.
+ * Returning the deleted rows lets the caller publish exactly what committed,
+ * without a SELECT/DELETE race against a concurrent touchBoard().
  */
-function pgListStaleBoards(maxAgeMs, protectedSlugs = []) {
+function pgDeleteStaleBoards(maxAgeMs, protectedSlugs = [], queryable = pool) {
 	const cutoff = new Date(Date.now() - maxAgeMs)
-	if (protectedSlugs.length === 0) {
-		return sql(`
-			SELECT board_id, title, slug
-			  FROM board
-			 WHERE last_activity < $1
-		`, [cutoff])
-	}
 	return sql(`
-		SELECT board_id, title, slug
-		  FROM board
+		DELETE FROM board
 		 WHERE last_activity < $1
-		   AND slug != ALL($2)
-	`, [cutoff, protectedSlugs])
+		   AND slug != ALL($2::text[])
+		 RETURNING board_id, title, slug
+	`, [cutoff, protectedSlugs], queryable)
 }
 
 /**
@@ -104,9 +165,12 @@ function pgListStaleBoards(maxAgeMs, protectedSlugs = []) {
  * Used at startup to guarantee well-known boards (like the stress test board).
  */
 async function pgEnsureBoard({ title, slug }) {
-	const existing = await pgGetBoardBySlug(slug)
-	if (existing) return existing
-	return pgCreateBoard({ title, slug })
+	return sql(`
+		INSERT INTO board (title, slug)
+		     VALUES ($1, $2)
+		ON CONFLICT (slug) DO UPDATE SET slug = EXCLUDED.slug
+		  RETURNING board_id, title, slug, background, last_activity
+	`, [title, slug]).then(rows => rows[0])
 }
 
 function pgCreateBoard({ title, slug }) {
@@ -273,11 +337,15 @@ function memDeleteBoard(boardId) {
 	}
 }
 
-function memListStaleBoards(maxAgeMs, protectedSlugs = []) {
+function memDeleteStaleBoards(maxAgeMs, protectedSlugs = []) {
 	const cutoff = Date.now() - maxAgeMs
-	return [...boardsMap.values()]
-		.filter(b => b.last_activity < cutoff && !protectedSlugs.includes(b.slug))
-		.map(({ board_id, title, slug }) => ({ board_id, title, slug }))
+	const deleted = []
+	for (const board of boardsMap.values()) {
+		if (board.last_activity >= cutoff || protectedSlugs.includes(board.slug)) continue
+		deleted.push({ board_id: board.board_id, title: board.title, slug: board.slug })
+		memDeleteBoard(board.board_id)
+	}
+	return deleted
 }
 
 async function memEnsureBoard({ title, slug }) {
@@ -383,7 +451,7 @@ export const createBoard = pool ? pgCreateBoard : memCreateBoard
 export const updateBoard = pool ? pgUpdateBoard : memUpdateBoard
 export const touchBoard = pool ? pgTouchBoard : memTouchBoard
 export const deleteBoard = pool ? pgDeleteBoard : memDeleteBoard
-export const listStaleBoards = pool ? pgListStaleBoards : memListStaleBoards
+export const deleteStaleBoards = pool ? pgDeleteStaleBoards : memDeleteStaleBoards
 export const listNotes = pool ? pgListNotes : memListNotes
 export const createNote = pool ? pgCreateNote : memCreateNote
 export const updateNote = pool ? pgUpdateNote : memUpdateNote
@@ -392,21 +460,13 @@ export const ensureBoard = pool ? pgEnsureBoard : memEnsureBoard
 export const deleteNote = pool ? pgDeleteNote : memDeleteNote
 
 /**
- * Try to acquire a Postgres advisory lock (non-blocking).
- * Returns true if the lock was acquired, false if another replica holds it.
- * In dev mode (no Postgres), always returns true so the cron runs normally.
+ * Run a critical section while holding a session-scoped advisory lock.
+ *
+ * The acquire and release queries deliberately use the same checked-out
+ * client. Calling pool.query() for each statement can select two different
+ * backend sessions, leaving the original session lock stranded in the pool.
+ * Returns undefined when another replica already holds the lock.
  */
-export async function tryAdvisoryLock(lockId) {
-	if (!pool) return true
-	const { rows } = await pool.query('SELECT pg_try_advisory_lock($1)', [lockId])
-	return rows[0].pg_try_advisory_lock
-}
-
-/**
- * Release a Postgres advisory lock.
- * No-op in dev mode.
- */
-export async function advisoryUnlock(lockId) {
-	if (!pool) return
-	await pool.query('SELECT pg_advisory_unlock($1)', [lockId])
+export async function withAdvisoryLock(lockId, criticalSection) {
+	return runWithAdvisoryLock(pool, lockId, criticalSection)
 }

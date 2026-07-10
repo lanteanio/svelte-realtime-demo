@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { getCanvas, waitForBoardReady, waitForWS } from './helpers.js';
+import { getCanvas, waitForAppWebSocket, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('Presence & Cursors', () => {
 	let boardUrl;
@@ -82,20 +82,29 @@ test.describe('Presence & Cursors', () => {
 	});
 
 	test('moving cursor sends data over WebSocket', async ({ page }) => {
-		// Listen for websocket before navigating so we catch it
-		const wsPromise = page.waitForEvent('websocket', { timeout: 15000 });
+		const sentFrames = [];
+		const wsPromise = waitForAppWebSocket(page, {
+			timeout: 15_000,
+			onOpen(ws) {
+				ws.on('framesent', (frame) => sentFrames.push(frame.payload));
+			}
+		});
 		await page.goto(boardUrl, { waitUntil: 'commit' });
-		const ws = await wsPromise;
+		await wsPromise;
+		await waitForWS(page);
 		await waitForBoardReady(page);
-
-		const framePromise = ws.waitForEvent('framesent', { timeout: 5000 });
 
 		const canvas = getCanvas(page);
 		const box = await canvas.boundingBox();
 		await page.mouse.move(box.x + 100, box.y + 100);
 		await page.mouse.move(box.x + 200, box.y + 200);
 
-		await framePromise;
+		await expect.poll(
+			() => sentFrames.some((payload) => (
+				typeof payload === 'string' && payload.includes('"type":"cursor"')
+			)),
+			{ timeout: 5_000 }
+		).toBe(true);
 	});
 
 	test('other user cursor appears in overlay', { timeout: 60000 }, async ({ browser }) => {

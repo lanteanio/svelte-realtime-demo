@@ -93,13 +93,14 @@ For OS-level tuning (sysctl, ulimits, conntrack), see the [svelte-adapter-uws pr
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js 22.19+ (the highest direct-dependency floor, enforced by
+  `package.json` and exercised in CI)
 - Docker (for Postgres and Redis, or bring your own)
 
 ### Install
 
 ```bash
-npm install
+npm ci
 ```
 
 ### Configure
@@ -112,13 +113,14 @@ cp .env.example .env
 
 The defaults point at `localhost` which works if Postgres and Redis are running in Docker on standard ports.
 
-### Create the database
+### Create or upgrade the database
+
+The same checksummed migration path handles an empty database and every
+upgrade. Run it before starting a new application revision:
 
 ```bash
-psql $DATABASE_URL -f schema.sql
+npm run migrate
 ```
-
-The `last_activity` column is auto-migrated on startup if missing.
 
 ### Dev mode
 
@@ -139,7 +141,9 @@ npm start
 
 The included `docker-compose.yml` sets up everything: app, Postgres, Redis, and a certbot container for automatic Let's Encrypt TLS. HTTPS out of the box, no reverse proxy.
 
-The app runs as 2 independent replicas using `network_mode: host` and `SO_REUSEPORT`. The Linux kernel distributes incoming connections across both processes. Redis handles cross-process pub/sub.
+The app runs as 4 independent replicas by default using `network_mode: host`
+and `SO_REUSEPORT`. The Linux kernel distributes incoming connections across
+the processes. Redis handles cross-process pub/sub.
 
 1. Point a domain at your server (A record)
 2. Create a `.env` file:
@@ -147,12 +151,15 @@ The app runs as 2 independent replicas using `network_mode: host` and `SO_REUSEP
 ```bash
 DOMAIN=your-domain.com
 POSTGRES_PASSWORD=pick-a-strong-password
+STICKYNOTES_APP_PASSWORD=pick-a-different-strong-password
+DEMO_NEWS_WEBHOOK_SECRET=generate-a-long-random-secret
 ```
 
-3. Get the initial certificate:
+3. Get the initial certificate. The explicit entrypoint is required because
+   the long-running certbot service itself uses a shell renewal loop:
 
 ```bash
-docker compose run --rm certbot certonly --standalone -d your-domain.com
+docker compose run --rm --entrypoint certbot -p 80:80 certbot certonly --standalone -d your-domain.com
 ```
 
 4. Start everything:
@@ -161,7 +168,18 @@ docker compose run --rm certbot certonly --standalone -d your-domain.com
 docker compose up -d
 ```
 
-The app listens on port 443 directly (host networking). Certbot renews automatically every 12 hours. Postgres and Redis data are persisted in Docker volumes.
+The `migrate` service completes before any app replica is allowed to start.
+The app listens on port 443 directly (host networking). Certbot checks for
+renewals every 12 hours. Running replicas fingerprint the read-only source
+certificate and key; after a renewed pair is stable, they restart gracefully
+with independent jitter and copy the new material before accepting traffic.
+Postgres and Redis data are persisted in Docker volumes.
+
+For production updates, use `./deploy.sh`. It requires a clean checkout, builds
+an image tagged with the exact Git revision, runs migrations, waits for every
+replica's dependency-aware `/healthz` check, verifies the public page and
+WebSocket upgrade, and restores the previous image automatically if readiness
+or smoke verification fails.
 
 To scale replicas:
 
@@ -192,21 +210,22 @@ Playwright tests covering:
 - Cursor destroyer (ramp with live cursor movement)
 
 ```bash
-# Run everything
-npm run test:e2e
+# Everyday verification: static checks, unit tests, build, then safe E2E
+npm test
 
-# Run without the stress/destroyer tests (faster)
-npx playwright test --grep-invert "Stress|Destroyer"
+# Individual E2E tiers (each provisions isolated Postgres/Redis + local app)
+npm run test:e2e:isolated
+npm run test:e2e:cluster
+npm run test:e2e:stress
+npm run test:e2e:diagnostics
+npm run test:e2e:destroyer
 
-# Run only the stress test
-npx playwright test e2e/stress.spec.js
-
-# Run the destroyer from the server (bypass NAT limits)
-node e2e/destroyer-standalone.js
-node e2e/destroyer-standalone.js --cursors
+# Explicit expensive ladder: safe + cluster + stress + 10K destroyer
+# Continues through failures and prints an aggregate result.
+npm run test:all
 ```
 
-Tests run against `https://svelte-realtime-demo.lantean.io`. Change `baseURL` in `playwright.config.js` to test elsewhere.
+The normal target is always a dynamically allocated loopback port. Assertion-free `_*.spec.js` probes run only in the explicit diagnostics project. To point a low-level Playwright command at a remote test environment, set both `BASE_URL` and `ALLOW_REMOTE_E2E=1`; without that opt-in the configuration refuses any non-loopback host. Never enable the opt-in for production.
 
 ---
 
@@ -215,7 +234,11 @@ Tests run against `https://svelte-realtime-demo.lantean.io`. Change `baseURL` in
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | _(none)_ | Postgres connection string. When unset, uses in-memory store. |
+| `DATABASE_POOL_MAX` | `10` | Maximum shared PostgreSQL connections per app process (4 replicas = at most 40). |
+| `DATABASE_CONNECT_TIMEOUT_MS` | `2000` | Bounded PostgreSQL connection wait. |
 | `REDIS_URL` | `redis://localhost:6379` | Redis for pub/sub, presence, cursors, and rate limiting. |
+| `REDIS_SESSION_TIMEOUT_MS` | `1000` | Per-operation identity-session budget before ephemeral fallback. |
+| `READINESS_TIMEOUT_MS` | `2500` | Per-dependency readiness budget. |
 | `HOST` | `0.0.0.0` | Server bind address. |
 | `PORT` | `3000` | Server port. |
 
@@ -226,7 +249,7 @@ Tests run against `https://svelte-realtime-demo.lantean.io`. Change `baseURL` in
 ```
 src/
 ├── hooks.ws.js                     -- WebSocket lifecycle (identity, presence, cursors)
-├── hooks.server.js                 -- DB migration, stress board, error handler
+├── hooks.server.js                 -- Stress-board bootstrap + error handler
 ├── app.html                        -- HTML shell with Svelte favicon
 ├── app.css                         -- Tailwind + DaisyUI setup
 ├── routes/
@@ -264,41 +287,22 @@ src/
 
 ## Database
 
-Two tables. No users, no sessions. Identity lives in a cookie. Activity is ephemeral.
-
-```sql
-CREATE TABLE board (
-    board_id       uuid         DEFAULT gen_random_uuid() PRIMARY KEY,
-    title          text         NOT NULL,
-    slug           text         NOT NULL UNIQUE,
-    background     text         DEFAULT '#f5f5f4' NOT NULL,
-    last_activity  timestamptz  DEFAULT now() NOT NULL,
-    created_at     timestamptz  DEFAULT now() NOT NULL
-);
-
-CREATE TABLE note (
-    note_id      uuid         DEFAULT gen_random_uuid() PRIMARY KEY,
-    board_id     uuid         NOT NULL REFERENCES board (board_id) ON DELETE CASCADE,
-    content      text         DEFAULT '' NOT NULL,
-    x            integer      DEFAULT 200 NOT NULL,
-    y            integer      DEFAULT 200 NOT NULL,
-    color        text         DEFAULT '#fef08a' NOT NULL,
-    creator_name text         NOT NULL,
-    z_index      integer      DEFAULT 0 NOT NULL,
-    is_archived  boolean      DEFAULT FALSE NOT NULL,
-    created_at   timestamptz  DEFAULT now() NOT NULL
-);
-```
-
-Full schema including indexes and auto-archive trigger in `schema.sql`.
+The canonical schema is the ordered, checksummed SQL under `migrations/`.
+It contains the `board` and `note` application tables, the durable jobs-demo
+tables, validation-mirroring constraints, measured query indexes, and the
+auto-archive function. `scripts/migrate.mjs` serializes migration runners and
+records applied checksums in `schema_migration`.
 
 ---
 
 ## How identity works
 
-No login. Every visitor gets a random two-word name (like "Cosmic Penguin") and a random color, stored in a cookie. Same tab, new tab, page reload -- same identity. New incognito window -- fresh identity.
-
-The cookie is validated on both the WebSocket upgrade path (`hooks.ws.js`) and the HTTP layout load (`+layout.server.js`). Only cookies with a valid UUID, a name between 1-40 characters, and a valid hex color are accepted.
+No login. Every visitor gets a random two-word name (like "Cosmic Penguin")
+and a random color. An opaque 128-bit session id is held in a `Secure`,
+`SameSite=Lax`, `HttpOnly` cookie; the identity itself lives in Redis with a
+30-day sliding TTL. Browsers attach the cookie to HTTP and WebSocket upgrades
+without exposing the bearer token to client JavaScript. If Redis is down, a
+request gets a bounded ephemeral identity fallback rather than hanging.
 
 900 possible name combinations (30 adjectives x 30 nouns). Collisions are harmless -- names are for display only, the UUID is what matters.
 

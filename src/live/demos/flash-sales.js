@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/flash-sales: atomic inventory decrement under contention,
  * one-coupon-per-user, plus a stress path that surfaces LOCK_TIMEOUT.

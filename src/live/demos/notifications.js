@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/notifications - live.push request/reply + cluster registry
  * + 6-field live.cron scheduler.

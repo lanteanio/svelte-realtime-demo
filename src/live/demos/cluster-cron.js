@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/cluster-cron - Redis-backed leader election visualised end-to-end.
  *

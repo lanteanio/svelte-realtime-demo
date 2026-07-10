@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/chaos - deterministic chaos with seed + drop rate.
  *

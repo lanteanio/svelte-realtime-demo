@@ -53,19 +53,33 @@ WORKDIR /app
 # identically to the build stage. Slight cost: a second npm install during
 # rebuilds; offset by a meaningfully smaller image and zero devDeps shipped.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends git \
+	&& npm ci --omit=dev \
+	&& npm cache clean --force \
+	&& apt-get purge -y --auto-remove git \
+	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/build ./build
 COPY entrypoint.sh ./
+COPY migrations ./migrations/
+COPY scripts/container-healthcheck.mjs scripts/deployment-smoke.mjs scripts/migrate.mjs ./scripts/
 RUN chmod +x entrypoint.sh
 
 # Bind directly on host:443. Host networking (see docker-compose.yml) means
 # the app shares the host's net namespace, and the file capability set on
 # the node binary above lets the unprivileged `node` user bind below 1024.
-ENV PORT=443
+ENV PORT=443 \
+	LOCAL_HEALTH_SOCKET=/tmp/svelte-realtime-health.sock
 EXPOSE 443
 
 # Runs as root initially so entrypoint.sh can copy the letsencrypt privkey
 # (mode 0600 root) into a node-readable location, then `exec gosu node` to
 # drop privileges before running the app.
 ENTRYPOINT ["./entrypoint.sh"]
+
+# The app endpoint is dependency-aware: it returns 200 only after both
+# PostgreSQL and Redis answer their bounded probes. The Unix socket is local
+# to this container, so one SO_REUSEPORT replica cannot certify a sibling.
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+	CMD ["node", "scripts/container-healthcheck.mjs"]

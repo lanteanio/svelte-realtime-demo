@@ -22,11 +22,27 @@
 
 import cluster from 'node:cluster';
 import { WebSocket } from 'ws';
+import {
+	assertSafeE2ETarget,
+	resolveE2EBaseURL,
+	toWebSocketURL
+} from '../scripts/test-target.mjs';
 
 const args = process.argv.slice(2);
 const WITH_CURSORS = args.includes('--cursors');
-const WS_URL = args.find(a => a.startsWith('wss://')) || 'wss://svelte-realtime-demo.lantean.io/ws';
-const HTTP_URL = WS_URL.replace('wss://', 'https://').replace('/ws', '');
+const urlFlag = args.indexOf('--url');
+const explicitUrl = args.find((arg) => arg.startsWith('--url='))?.slice('--url='.length)
+	|| (urlFlag >= 0 ? args[urlFlag + 1] : null)
+	|| args.find((arg) => /^(?:ws|wss):\/\//.test(arg));
+const WS_URL = explicitUrl
+	? assertSafeE2ETarget(explicitUrl).href
+	: toWebSocketURL(resolveE2EBaseURL());
+const httpTarget = new URL(WS_URL);
+httpTarget.protocol = httpTarget.protocol === 'wss:' ? 'https:' : 'http:';
+httpTarget.pathname = '';
+httpTarget.search = '';
+httpTarget.hash = '';
+const HTTP_URL = httpTarget.href.replace(/\/$/, '');
 const BOARD_SLUG = 'stress-me-out';
 
 // Multi-process: WORKERS=N forks N child Node processes that each handle

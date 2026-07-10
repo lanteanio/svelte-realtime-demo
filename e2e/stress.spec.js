@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
+import { resolveE2EBaseURL, toWebSocketURL } from '../scripts/test-target.mjs';
+import { joinBoardWithRetry } from './ws-rpc.js';
 
-const WS_URL = 'wss://svelte-realtime-demo.lantean.io/ws';
+const WS_URL = toWebSocketURL(resolveE2EBaseURL());
 const BOARD_URL = '/board/stress-me-out';
-const BOARD_SLUG = 'plucky-jellyfish-209';
-
-let msgIdCounter = 0;
-function nextId() { return 's' + (msgIdCounter++).toString(36); }
 
 /**
  * Connect a fake user via WebSocket.
@@ -41,21 +39,11 @@ function connectUser(index) {
 }
 
 /**
- * Join board presence and start moving cursor.
- * Uses the actual svelte-realtime RPC wire format:
- *   { rpc: "path", id: "uniqueId", args: [...] }
+ * Start moving a joined cursor through the same one-way adapter wire path
+ * used by Canvas.svelte. Cursor movement intentionally has no RPC response.
  */
 function startCursorMovement(user, boardSlug) {
 	const { ws } = user;
-
-	// Join board presence via RPC
-	try {
-		ws.send(JSON.stringify({
-			rpc: 'boards/cursors/joinBoard',
-			id: nextId(),
-			args: [boardSlug]
-		}));
-	} catch {}
 
 	// Random starting position and velocity
 	let x = 50 + Math.random() * 1100;
@@ -77,9 +65,9 @@ function startCursorMovement(user, boardSlug) {
 		try {
 			if (ws.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
-					rpc: 'boards/cursors/moveCursor',
-					id: nextId(),
-					args: [boardSlug, { x: Math.round(x), y: Math.round(y) }]
+					type: 'cursor',
+					topic: `board:${boardSlug}`,
+					data: { x: Math.round(x), y: Math.round(y) }
 				}));
 			}
 		} catch {}
@@ -144,9 +132,26 @@ test.describe('Stress Test', () => {
 		const connectTime = Date.now() - connectStart;
 		console.log(`\nAll connected in ${connectTime}ms (${(connectTime / TOTAL).toFixed(1)}ms/user)\n`);
 
-		// All users join board and start moving cursors
-		console.log(`Starting cursor movement for ${users.length} users...`);
-		const intervals = users.map((user) => startCursorMovement(user, boardId));
+		// Require acknowledged board joins; socket-open counts alone do not
+		// establish realtime capacity.
+		const joinedUsers = [];
+		let joinFailed = 0;
+		for (let batch = 0; batch < users.length; batch += 25) {
+			await Promise.all(users.slice(batch, batch + 25).map(async (user) => {
+				try {
+					await joinBoardWithRetry(user.ws, boardId)
+					joinedUsers.push(user)
+				} catch {
+					joinFailed++
+				}
+			}))
+			await new Promise((r) => setTimeout(r, 100))
+		}
+		const joinRate = joinedUsers.length / TOTAL
+		console.log(`Board joins: ${joinedUsers.length} ok, ${joinFailed} failed (${(joinRate * 100).toFixed(1)}%)`)
+
+		console.log(`Starting cursor movement for ${joinedUsers.length} joined users...`);
+		const intervals = joinedUsers.map((user) => startCursorMovement(user, boardId));
 
 		// Wait a moment for joins to propagate, then reload to see cursors
 		await page.waitForTimeout(2000);
@@ -245,6 +250,7 @@ test.describe('Stress Test', () => {
 
 		console.log(`\n=== FINAL RESULTS ===`);
 		console.log(`Connected:         ${connected}/${TOTAL} (${(connected / TOTAL * 100).toFixed(1)}%)`);
+		console.log(`Board joined:      ${joinedUsers.length}/${TOTAL} (${(joinRate * 100).toFixed(1)}%)`);
 		console.log(`Failed:            ${failed}`);
 		console.log(`Connect time:      ${connectTime}ms`);
 		console.log(`FPS under load:    ${metrics.estimatedFPS}`);
@@ -257,6 +263,7 @@ test.describe('Stress Test', () => {
 		// admission shed.
 		const minConnected = Number(process.env.STRESS_MIN_CONNECTED ?? 0.9)
 		expect(connected / TOTAL).toBeGreaterThanOrEqual(minConnected);
+		expect(joinRate).toBeGreaterThanOrEqual(minConnected);
 		expect(canvasVisible).toBe(true);
 		expect(alive).toBe(true);
 

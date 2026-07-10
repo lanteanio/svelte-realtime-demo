@@ -101,9 +101,6 @@ export function validateNoteFields(fields) {
 	assertPlainObject(fields)
 	const clean = {}
 	if (fields.content !== undefined) clean.content = validateNoteContent(fields.content)
-	if (fields.x !== undefined) clean.x = validateCoord(fields.x, 'x')
-	if (fields.y !== undefined) clean.y = validateCoord(fields.y, 'y')
 	if (fields.color !== undefined) clean.color = validateNoteColor(fields.color)
-	if (fields.z_index !== undefined) clean.z_index = validateZIndex(fields.z_index)
 	return clean
 }

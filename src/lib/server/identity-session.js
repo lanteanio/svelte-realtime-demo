@@ -27,6 +27,7 @@
  */
 import { randomBytes, randomUUID } from 'node:crypto'
 import { redis } from '$lib/server/redis'
+import { sessionBreaker } from '$lib/server/redis-breakers'
 import { generateIdentity } from '$lib/names'
 
 const SESSION_TTL_SEC = 60 * 60 * 24 * 30
@@ -38,6 +39,57 @@ const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/i
 const VALID_ORGS = new Set(['acme', 'globex'])
 // 22 chars base64url = 16 bytes = 128 bits. Matches what randomBytes(16).toString('base64url') emits.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{22}$/
+const DEFAULT_REDIS_TIMEOUT_MS = 1000
+
+function redisTimeoutMs(value) {
+	const parsed = Number(value)
+	return Number.isFinite(parsed) && parsed >= 50 && parsed <= 10_000
+		? Math.round(parsed)
+		: DEFAULT_REDIS_TIMEOUT_MS
+}
+
+const REDIS_TIMEOUT_MS = redisTimeoutMs(process.env.REDIS_SESSION_TIMEOUT_MS)
+
+/**
+ * Session persistence has an independent failure domain from realtime Redis.
+ * A burst of new/legacy identities may temporarily degrade cookie persistence,
+ * but must not open the breaker used by presence, cursors, pub/sub, and leader
+ * election. createSession already has a safe ephemeral-identity fallback.
+ */
+/**
+ * Bound session-store work behind its own recovery-capable breaker. A Redis
+ * outage or identity burst must degrade persistence, never hold SSR open or
+ * disable unrelated realtime infrastructure.
+ */
+async function withSessionStore(operation) {
+	sessionBreaker.guard()
+	let timer
+	try {
+		const timeout = new Promise((_, reject) => {
+			timer = setTimeout(() => {
+				const err = new Error('Redis session operation timed out')
+				err.code = 'REDIS_SESSION_TIMEOUT'
+				reject(err)
+			}, REDIS_TIMEOUT_MS)
+			if (timer.unref) timer.unref()
+		})
+		const result = await Promise.race([operation(redis.redis), timeout])
+		sessionBreaker.success()
+		return result
+	} catch (err) {
+		sessionBreaker.failure(err)
+		throw err
+	} finally {
+		clearTimeout(timer)
+	}
+}
+
+function assertTransaction(results) {
+	for (const [err] of results ?? []) {
+		if (err) throw err
+	}
+	return results
+}
 
 function fullKey(sessionId) {
 	return redis.key(KEY_PREFIX + sessionId)
@@ -68,13 +120,15 @@ function validate(hash) {
 export async function lookupSession(sessionId) {
 	if (!sessionId || typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return null
 	try {
-		const hash = await redis.redis.hgetall(fullKey(sessionId))
+		const results = assertTransaction(await withSessionStore((client) => client
+			.multi()
+			.hgetall(fullKey(sessionId))
+			.expire(fullKey(sessionId), SESSION_TTL_SEC)
+			.exec()))
+		const hash = results[0][1]
 		if (!hash || Object.keys(hash).length === 0) return null
 		const identity = validate(hash)
 		if (!identity) return null
-		// Sliding-window TTL: every read pushes expiry 30 days out. Idle
-		// sessions decay; active sessions stay alive.
-		redis.redis.expire(fullKey(sessionId), SESSION_TTL_SEC).catch(() => {})
 		return identity
 	} catch {
 		return null
@@ -102,8 +156,11 @@ export async function createSession(overrides) {
 	const sessionId = newSessionId()
 	const hash = { id, name, color, org }
 	try {
-		await redis.redis.hset(fullKey(sessionId), hash)
-		await redis.redis.expire(fullKey(sessionId), SESSION_TTL_SEC)
+		assertTransaction(await withSessionStore((client) => client
+			.multi()
+			.hset(fullKey(sessionId), hash)
+			.expire(fullKey(sessionId), SESSION_TTL_SEC)
+			.exec()))
 	} catch {
 		// Redis breaker tripped - return the identity anyway so the page
 		// can still render. The session will not persist; the next request
@@ -125,13 +182,15 @@ export async function updateSessionField(sessionId, field, value) {
 	if (!sessionId || !SESSION_ID_RE.test(sessionId)) return false
 	try {
 		const key = fullKey(sessionId)
-		// Refuse to write a field onto a non-existent session - avoids
-		// resurrecting an expired session under the same id.
-		const exists = await redis.redis.exists(key)
-		if (!exists) return false
-		await redis.redis.hset(key, field, value)
-		await redis.redis.expire(key, SESSION_TTL_SEC)
-		return true
+		// One atomic script refuses to resurrect an expired session, applies
+		// the mutation, and refreshes the sliding TTL.
+		const updated = await withSessionStore((client) => client.eval(`
+			if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+			redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+			redis.call('EXPIRE', KEYS[1], ARGV[3])
+			return 1
+		`, 1, key, field, value, SESSION_TTL_SEC))
+		return updated === 1
 	} catch {
 		return false
 	}

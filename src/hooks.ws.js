@@ -13,9 +13,20 @@ import path from 'node:path'
 import os from 'node:os'
 import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
-import { bus, limiter, presence, cursor, replay, registry, leader, redis } from '$lib/server/redis'
+import {
+	activateRedisInfrastructure,
+	bus,
+	limiter,
+	presence,
+	cursor,
+	replay,
+	registry,
+	leader,
+	redis
+} from '$lib/server/redis'
 import { metrics } from '$lib/server/metrics'
-import { tasks } from '$lib/server/tasks'
+import { activateTaskInfrastructure, destroyTaskInfrastructure } from '$lib/server/tasks'
+import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
@@ -39,6 +50,44 @@ process.on('SIGUSR2', () => {
 		console.error(`[heap-dump] failed pid=${process.pid} dir=${HEAP_SNAPSHOT_DIR}`, err)
 	}
 })
+
+const _asyncWarningAt = new Map()
+let stopPressureTicker = () => {}
+
+function reportAsyncFailure(label, error) {
+	const now = Date.now()
+	if (now - (_asyncWarningAt.get(label) ?? 0) < 5000) return
+	_asyncWarningAt.set(label, now)
+	console.warn(`[realtime] ${label} degraded`, {
+		name: error?.name,
+		code: error?.code
+	})
+}
+
+/**
+ * Run an extension hook from an adapter hook that is synchronous. Hooks that
+ * complete synchronously (the cursor/presence message hot path at 125Hz) stay
+ * allocation-free; the Promise wrapper and .catch are attached only when a hook
+ * actually returns a thenable, so a real async rejection is still observed.
+ */
+function bestEffort(label, operation) {
+	try {
+		const result = operation()
+		if (result && typeof result.then === 'function') {
+			result.catch((error) => reportAsyncFailure(label, error))
+		}
+	} catch (error) {
+		reportAsyncFailure(label, error)
+	}
+}
+
+async function awaitBestEffort(label, operation) {
+	try {
+		return await operation()
+	} catch (error) {
+		reportAsyncFailure(label, error)
+	}
+}
 
 /**
  * Message-tier admission control. Pairs with the handshake-tier
@@ -146,7 +195,12 @@ export async function upgrade({ cookies }) {
  * here is sync today, but `init` is awaited by the adapter so this
  * shape is forward-compatible.
  */
-export function init({ platform }) {
+export async function init({ platform }) {
+	// Migrations run as an explicit pre-traffic deployment step. Refuse to
+	// accept realtime traffic if the versioned jobs schema is missing.
+	await activateTaskInfrastructure()
+	activateRedisInfrastructure()
+	await startLocalHealthServer()
 	// Stash the replay extension on the source platform so realtime's
 	// auto-replay routing (svelte-realtime next.21) can find the buffer
 	// on every wrapped seam. `bus.wrap()` (extensions next.15) forwards
@@ -160,7 +214,12 @@ export function init({ platform }) {
 	// roster is HGETALL-aggregated across replicas via a shared HASH
 	// (`__live-presence:{topic}`).
 	platform.redis = redis.redis
-	bus.activate(platform)
+	await awaitBestEffort('Redis bus activation', () => bus.activate(platform))
+	// Capture a complete cluster wrapper before the reactive layer replaces
+	// platform.publish. The reactive surrogate cannot reconstruct production
+	// adapter methods that are non-enumerable; the pressure topic has no
+	// derived watchers, so publishing through this direct bus seam is correct.
+	const pressurePlatform = bus.wrap(platform)
 	setCronPlatform(platform)
 
 	// Tune the dev-mode warnings to match the demo gallery's
@@ -198,7 +257,7 @@ export function init({ platform }) {
 	// boot. Pre-fix the ticker armed only on subscribe; if the leader
 	// hadn't yet had a subscribe land on it, the snapshot was never
 	// published and every subscriber's loader returned null forever.
-	armPressureTicker(platform)
+	stopPressureTicker = armPressureTicker(pressurePlatform)
 }
 
 /**
@@ -216,12 +275,15 @@ export function init({ platform }) {
  *   cleanly.
  */
 export async function shutdown() {
-	// `tasks` is null when DATABASE_URL is empty; destroy() drops the
-	// dispatch / recovery / cleanup timers so the worker exits promptly.
-	tasks?.destroy()
+	// Drop task/idempotency timers before closing their shared PostgreSQL pool.
+	destroyTaskInfrastructure()
+	stopPressureTicker()
+	stopPressureTicker = () => {}
 	await Promise.allSettled([
 		leader.stop(),
-		registry.destroy()
+		presence.destroy(),
+		registry.destroy(),
+		stopLocalHealthServer()
 	])
 }
 
@@ -238,13 +300,13 @@ export function open(ws, ctx) {
 	// degraded / recovered events into an empty set and the layout's
 	// `{#if $health === 'degraded'}` banner is silently dead. Required
 	// as of `svelte-adapter-uws-extensions@0.5.0-next.13`.
-	bus.hooks.open(ws, ctx)
-	presence.join(ws, 'global', platform)
+	bestEffort('Redis bus open hook', () => bus.hooks.open(ws, ctx))
+	bestEffort('global presence join', () => presence.join(ws, 'global', platform))
 	// Register the connection in realtime's local push registry (so
 	// live.push routes via platform.request) and in the cluster registry
 	// (so cross-instance pushes find this user via Redis).
 	pushHooks.open(ws, ctx)
-	registry.hooks.open(ws, ctx)
+	bestEffort('connection registry open hook', () => registry.hooks.open(ws, ctx))
 }
 
 /**
@@ -291,8 +353,8 @@ function denialFor(topic, ws) {
 export function subscribe(ws, topic, ctx) {
 	const reason = denialFor(topic, ws)
 	if (reason) return reason
-	presence.hooks.subscribe(ws, topic, ctx)
-	cursor.hooks.subscribe(ws, topic, ctx)
+	bestEffort('presence subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
+	bestEffort('cursor subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
 }
 
 /**
@@ -316,8 +378,8 @@ export function subscribeBatch(ws, topics, ctx) {
 			(denials ??= {})[topic] = reason
 			continue
 		}
-		presence.hooks.subscribe(ws, topic, ctx)
-		cursor.hooks.subscribe(ws, topic, ctx)
+		bestEffort('presence batch-subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
+		bestEffort('cursor batch-subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
 	}
 	return denials
 }
@@ -329,7 +391,7 @@ export function subscribeBatch(ws, topics, ctx) {
  * for just that topic so departed users disappear immediately.
  */
 export function unsubscribe(ws, topic, ctx) {
-	presence.hooks.unsubscribe(ws, topic, ctx)
+	bestEffort('presence unsubscribe hook', () => presence.hooks.unsubscribe(ws, topic, ctx))
 }
 
 /**
@@ -346,8 +408,8 @@ export function unsubscribe(ws, topic, ctx) {
  * connection (acceptable - a thrown close is an exceptional path).
  */
 export const close = connectionMetricsHook(metrics, (ws, ctx) => {
-	presence.hooks.close(ws, ctx)
-	cursor.hooks.close(ws, ctx)
+	bestEffort('presence close hook', () => presence.hooks.close(ws, ctx))
+	bestEffort('cursor close hook', () => cursor.hooks.close(ws, ctx))
 	// Pass ctx so pushHooks.close routes through the realtime close
 	// that drains stream-subscription bookkeeping (silent-topic
 	// watchdogs, _topicWsCounts, __onUnsubscribe callbacks). Without
@@ -355,7 +417,7 @@ export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	// push-only and the silent-topic watchdog never disarms when test
 	// pages close, producing 30s-delayed warning floods.
 	pushHooks.close(ws, ctx)
-	registry.hooks.close(ws, ctx)
+	bestEffort('connection registry close hook', () => registry.hooks.close(ws, ctx))
 	// Per-demo cleanup that needs WS context (most demos use Redis
 	// for state and don't need a close hook; chaos.js keeps a
 	// per-user state Map in-process that would orphan on disconnect).
@@ -418,8 +480,14 @@ export const message = createMessage({
 		let parsed
 		try { parsed = JSON.parse(_unhandledDecoder.decode(data)) } catch { return }
 		if (!parsed || typeof parsed !== 'object') return
-		cursor.hooks.message(ws, { data: parsed, platform })
-		presence.hooks.message(ws, { data: parsed, platform })
+		if (parsed.type === 'cursor-snapshot' && typeof parsed.topic === 'string') {
+			// The installed cursor hook starts this Promise without returning it;
+			// dispatch directly so an outage cannot become an unhandled rejection.
+			bestEffort('cursor snapshot hook', () => cursor.snapshot(ws, parsed.topic, platform))
+		} else {
+			bestEffort('cursor message hook', () => cursor.hooks.message(ws, { data: parsed, platform }))
+		}
+		bestEffort('presence message hook', () => presence.hooks.message(ws, { data: parsed, platform }))
 	}
 })
 

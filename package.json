@@ -3,15 +3,33 @@
 	"private": true,
 	"version": "0.6.0-next.0",
 	"type": "module",
+	"engines": {
+		"node": ">=22.19.0"
+	},
 	"scripts": {
 		"dev": "vite dev",
-		"build": "vite build",
+		"build": "node scripts/build.mjs",
 		"preview": "vite preview",
 		"start": "node --env-file=.env build",
 		"prepare": "svelte-kit sync || echo ''",
-		"test:e2e": "playwright test --project=main",
-		"test:e2e:isolated": "playwright test --project=isolated",
-		"test:e2e:all": "playwright test --project=main && playwright test --project=isolated"
+		"migrate": "node scripts/migrate.mjs",
+		"check:deps": "npm audit --audit-level=high",
+		"check:syntax": "node scripts/check-js.mjs",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./jsconfig.check.json && npm run check:syntax",
+		"test": "node scripts/test-safe.mjs",
+		"test:all": "node scripts/test-all.mjs",
+		"test:unit": "node scripts/run-unit.mjs",
+		"test:e2e": "npm run test:e2e:safe",
+		"test:e2e:main": "node scripts/run-local-e2e.mjs main",
+		"test:e2e:safe": "node scripts/run-local-e2e.mjs safe",
+		"test:e2e:isolated": "node scripts/run-local-e2e.mjs isolated",
+		"test:e2e:cluster": "node scripts/run-local-e2e.mjs cluster",
+		"test:e2e:resilience": "node scripts/run-local-e2e.mjs resilience",
+		"test:e2e:stress": "node scripts/run-local-e2e.mjs stress",
+		"test:e2e:destroyer": "node scripts/run-local-e2e.mjs destroyer",
+		"test:e2e:diagnostics": "node scripts/run-local-e2e.mjs diagnostics",
+		"test:e2e:complete": "node scripts/run-local-e2e.mjs complete",
+		"test:e2e:all": "npm run test:e2e:complete"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.58.2",
@@ -20,17 +38,19 @@
 		"@tailwindcss/vite": "^4.1.0",
 		"daisyui": "^5.0.0",
 		"svelte": "^5.51.0",
+		"svelte-check": "^4.3.4",
 		"tailwindcss": "^4.1.0",
-		"undici": "^8.3.0",
-		"vite": "^7.3.1",
-		"ws": "^8.19.0"
+		"typescript": "^5.9.3",
+		"undici": "^8.5.0",
+		"vite": "^7.3.5",
+		"ws": "^8.21.0"
 	},
 	"dependencies": {
 		"lucide-svelte": "^0.577.0",
 		"pg": "^8.16.2",
-		"svelte-adapter-uws": "^0.5.8",
-		"svelte-adapter-uws-extensions": "^0.5.10",
-		"svelte-realtime": "^0.5.10",
+		"svelte-adapter-uws": "^0.6.0-next.72",
+		"svelte-adapter-uws-extensions": "^0.6.0-next.51",
+		"svelte-realtime": "^0.6.0-next.80",
 		"uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.67.0"
 	}
 }

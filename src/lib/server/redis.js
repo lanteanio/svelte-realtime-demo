@@ -6,14 +6,16 @@
  * run a single instance, everything still works - Redis just acts as
  * local state in that case.
  *
- * Each utility is created once at module load and shared across all
- * connections. The adapter hooks (hooks.ws.js) wire them into the
- * WebSocket lifecycle.
+ * Stateless utilities are created once at module load and shared across all
+ * connections. Timer/command-starting utilities stay dormant until the
+ * adapter's runtime init hook activates them; Vite's server analysis can
+ * therefore import this module without opening Redis sockets.
  *
- * A circuit breaker wraps all Redis-backed utilities. If Redis goes down
+ * A circuit breaker wraps the realtime Redis utilities. If Redis goes down
  * (5 consecutive failures), the breaker trips and operations fail fast
- * instead of blocking. When Redis recovers, the breaker resets
- * automatically after 30 seconds.
+ * instead of blocking. Identity-session persistence owns a separate breaker
+ * so a login/session burst cannot disable presence, cursors, or pub/sub. When
+ * Redis recovers, both breakers reset automatically after 30 seconds.
  */
 
 import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
@@ -24,12 +26,30 @@ import { createCursor } from 'svelte-adapter-uws-extensions/redis/cursor'
 import { createReplay } from 'svelte-adapter-uws-extensions/redis/replay'
 import { createConnectionRegistry } from 'svelte-adapter-uws-extensions/redis/registry'
 import { createLeader } from 'svelte-adapter-uws-extensions/redis/leader'
-import { createCircuitBreaker } from 'svelte-adapter-uws-extensions/breaker'
 import { env } from '$env/dynamic/private'
 import { metrics } from '$lib/server/metrics'
+import { redisConnectionOptions } from '$lib/server/redis-options'
+import { observeRedisCommandRejections } from '$lib/server/redis-command-safety'
+import { realtimeBreaker } from '$lib/server/redis-breakers'
 
 /** Shared Redis connection. All utilities below share this client. */
-export const redis = createRedisClient({ url: env.REDIS_URL })
+export const redis = createRedisClient({
+	url: env.REDIS_URL,
+	options: redisConnectionOptions()
+})
+
+// Some extension-owned reconnect/timer paths issue commands outside an
+// application await boundary. Observe both the primary client and every
+// subscriber duplicate so a dropped command Promise cannot terminate the
+// worker; normal awaiting callers still receive the rejection unchanged.
+observeRedisCommandRejections(redis.redis)
+const duplicateRedis = redis.duplicate.bind(redis)
+redis.duplicate = (...args) => observeRedisCommandRejections(duplicateRedis(...args))
+
+// Every command path handles its own rejection and reports it to the breaker.
+// Keep ioredis from emitting its fallback "Unhandled error event" diagnostic
+// while it reconnects in the background.
+redis.redis.on('error', () => {})
 
 /**
  * Circuit breaker for Redis. Trips after 5 consecutive failures,
@@ -37,11 +57,7 @@ export const redis = createRedisClient({ url: env.REDIS_URL })
  * degrade gracefully when Redis is down - the app stays functional,
  * just without cross-instance features.
  */
-export const breaker = createCircuitBreaker({
-	failureThreshold: 5,
-	resetTimeout: 30000,
-	onStateChange: (from, to) => console.log(`[redis breaker] ${from} -> ${to}`)
-})
+export const breaker = realtimeBreaker
 
 /** Pub/sub bus for broadcasting events across server instances. */
 export const bus = createPubSubBus(redis, { breaker })
@@ -62,12 +78,22 @@ export const limiter = createRateLimit(redis, { points: 100, interval: 10000, br
  * - select: only expose id/name/color to other users (not the full
  *   userData which could contain private fields)
  */
-export const presence = createPresence(redis, {
-	key: 'id',
-	heartbeat: 30000,
-	select: (u) => ({ id: u.id, name: u.name, color: u.color }),
-	breaker
-})
+let presenceInstance = null
+
+function activePresence() {
+	if (!presenceInstance) {
+		throw new Error('Redis presence used before activateRedisInfrastructure()')
+	}
+	return presenceInstance
+}
+
+/** Dormant presence facade; construction starts its heartbeat timer. */
+export const presence = {
+	join(...args) { return activePresence().join(...args) },
+	leave(...args) { return activePresence().leave(...args) },
+	get hooks() { return activePresence().hooks },
+	destroy() { return presenceInstance?.destroy() }
+}
 
 /**
  * Cursor position tracker for live cursor overlays.
@@ -167,10 +193,55 @@ export const replay = createReplay(redis, {
  * round-trip cost. No `attributes` option: the demo only uses
  * `registry.request`, not the attribute-filtered `sendTo`.
  */
-export const registry = createConnectionRegistry(redis, {
-	identify: (ws) => ws.getUserData()?.id,
-	breaker
-})
+let registryInstance = null
+
+function activeRegistry() {
+	registryInstance ??= createConnectionRegistry(redis, {
+		identify: (ws) => ws.getUserData()?.id,
+		breaker
+	})
+	return registryInstance
+}
+
+async function resetFailedRegistry(failed) {
+	if (registryInstance !== failed) return
+	registryInstance = null
+	// Cleanup failure must not mask the original subscribe/open failure.
+	await failed.destroy().catch(() => {})
+}
+
+/**
+ * Stable facade passed to svelte-realtime. The installed registry leaves its
+ * subscriber non-null when the first SUBSCRIBE rejects; recreate that private
+ * instance so the next connection can recover without a process restart.
+ */
+export const registry = {
+	request(...args) { return activeRegistry().request(...args) },
+	lookup(...args) { return activeRegistry().lookup(...args) },
+	send(...args) { return activeRegistry().send(...args) },
+	sendCoalesced(...args) { return activeRegistry().sendCoalesced(...args) },
+	sendTo(...args) { return activeRegistry().sendTo(...args) },
+	size() { return registryInstance?.size() ?? 0 },
+	hooks: {
+		async open(ws, ctx) {
+			const current = activeRegistry()
+			try {
+				await current.hooks.open(ws, ctx)
+			} catch (error) {
+				await resetFailedRegistry(current)
+				throw error
+			}
+		},
+		close(ws, ctx) {
+			return registryInstance?.hooks.close(ws, ctx)
+		}
+	},
+	async destroy() {
+		const current = registryInstance
+		registryInstance = null
+		await current?.destroy()
+	}
+}
 
 /**
  * Cluster-wide leader-election primitive.
@@ -190,4 +261,29 @@ export const registry = createConnectionRegistry(redis, {
  * `cron{status:'not-leader'}` metric increment until the next renew
  * succeeds.
  */
-export const leader = createLeader(redis, { breaker, metrics })
+let leaderInstance = null
+
+/**
+ * Activate utilities whose constructors issue commands or start timers.
+ * Called exactly once from hooks.ws init, never during build-time imports.
+ */
+export function activateRedisInfrastructure() {
+	if (!presenceInstance) {
+		presenceInstance = createPresence(redis, {
+			key: 'id',
+			heartbeat: 30000,
+			select: (u) => ({ id: u.id, name: u.name, color: u.color }),
+			breaker
+		})
+	}
+	if (!leaderInstance) leaderInstance = createLeader(redis, { breaker, metrics })
+}
+
+/** Dormant, fail-closed leader facade for modules imported during analysis. */
+export const leader = {
+	isLeader() { return leaderInstance?.isLeader() ?? false },
+	currentLeader() { return leaderInstance?.currentLeader() ?? Promise.resolve(null) },
+	stop() { return leaderInstance?.stop() ?? Promise.resolve() },
+	get instanceId() { return leaderInstance?.instanceId ?? null },
+	get key() { return leaderInstance?.key ?? null }
+}

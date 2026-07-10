@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/chat - rooms + presence + idempotent send + denials banner.
  *

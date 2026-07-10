@@ -1,7 +1,8 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/schema-evolution: live.stream `version` + `migrate` hooks,
  * exercised end-to-end via `subscribeAt` from
- * `svelte-realtime/test-client`.
+ * `svelte-realtime/testing/client`.
  *
  * The pitch. One stream registered at `version: 2` with a `migrate[1]`
  * forward function. The page subscribes once normally (the wire
@@ -24,8 +25,8 @@
  *
  * The headline primitive: `live.stream({ version, migrate })`.
  * The demo-only affordance: `subscribeAt(stream, { schemaVersion })`
- * from `svelte-realtime/test-client`. Production code never imports
- * `/test-client`.
+ * from `svelte-realtime/testing/client`. Production code never imports
+ * `/testing/client`.
  *
  * Storage is in-memory.
  */

@@ -1,16 +1,22 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, waitForBoardReady, waitForWS } from './helpers.js';
+import {
+	createBoard,
+	isAppWebSocket,
+	waitForAppWebSocket,
+	waitForBoardReady,
+	waitForWS
+} from './helpers.js';
 
 test.describe('WebSocket Connection', () => {
 	test('WebSocket connects on page load', async ({ page }) => {
-		const wsPromise = page.waitForEvent('websocket', { timeout: 10000 });
+		const wsPromise = waitForAppWebSocket(page, { timeout: 10_000 });
 		await page.goto('/');
 		const ws = await wsPromise;
 		expect(ws.url()).toContain('/ws');
 	});
 
 	test('WebSocket protocol matches page protocol (wss for https, ws for http)', async ({ page, baseURL }) => {
-		const wsPromise = page.waitForEvent('websocket', { timeout: 10000 });
+		const wsPromise = waitForAppWebSocket(page, { timeout: 10_000 });
 		await page.goto('/');
 		const ws = await wsPromise;
 		// Production / staging serves over https -> wss. Local dev / e2e
@@ -21,15 +27,19 @@ test.describe('WebSocket Connection', () => {
 	});
 
 	test('WebSocket exchanges frames after connection', async ({ page }) => {
-		const wsPromise = page.waitForEvent('websocket', { timeout: 10000 });
+		let sentFrames = 0;
+		let receivedFrames = 0;
+		const wsPromise = waitForAppWebSocket(page, {
+			timeout: 10_000,
+			onOpen(ws) {
+				ws.on('framesent', () => sentFrames++);
+				ws.on('framereceived', () => receivedFrames++);
+			}
+		});
 		await page.goto('/');
-		const ws = await wsPromise;
-
-		const sent = ws.waitForEvent('framesent', { timeout: 5000 });
-		await sent;
-
-		const received = ws.waitForEvent('framereceived', { timeout: 5000 });
-		await received;
+		await wsPromise;
+		await expect.poll(() => sentFrames, { timeout: 5_000 }).toBeGreaterThan(0);
+		await expect.poll(() => receivedFrames, { timeout: 5_000 }).toBeGreaterThan(0);
 	});
 
 	test('connection status shows green wifi icon when connected', async ({ page }) => {
@@ -50,8 +60,9 @@ test.describe('WebSocket Connection', () => {
 	});
 
 	test('WebSocket reconnects after navigation', async ({ page }) => {
+		const wsPromise = waitForAppWebSocket(page, { timeout: 10_000 });
 		await page.goto('/');
-		await page.waitForEvent('websocket', { timeout: 10000 });
+		await wsPromise;
 
 		const boardUrl = await createBoard(page, `WS Nav ${Date.now()}`);
 
@@ -64,10 +75,11 @@ test.describe('WebSocket Connection', () => {
 		const wsConnections = [];
 
 		page.on('websocket', (ws) => {
-			wsConnections.push({ url: ws.url(), openedAt: Date.now(), closed: false });
+			if (!isAppWebSocket(ws)) return;
+			const entry = { url: ws.url(), openedAt: Date.now(), closed: false };
+			wsConnections.push(entry);
 			ws.on('close', () => {
-				const entry = wsConnections.find((c) => c.url === ws.url() && !c.closed);
-				if (entry) entry.closed = true;
+				entry.closed = true;
 			});
 		});
 
@@ -114,10 +126,11 @@ test.describe('WebSocket Connection', () => {
 		const wsConnections = [];
 
 		page.on('websocket', (ws) => {
-			wsConnections.push({ url: ws.url(), closed: false });
+			if (!isAppWebSocket(ws)) return;
+			const entry = { url: ws.url(), closed: false };
+			wsConnections.push(entry);
 			ws.on('close', () => {
-				const entry = wsConnections.find((c) => !c.closed);
-				if (entry) entry.closed = true;
+				entry.closed = true;
 			});
 		});
 

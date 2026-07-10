@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { waitForWS } from './helpers.js'
 
 async function gotoFreshJobs(page) {
 	await page.goto('/demos/jobs')
+	await waitForWS(page)
 	// Skip the entire suite if Postgres isn't wired (the page will show
 	// the unavailable banner instead of the form). The deployable subset
 	// runs against a server with DATABASE_URL set; bare in-memory dev

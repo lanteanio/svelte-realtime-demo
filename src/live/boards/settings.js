@@ -1,3 +1,4 @@
+// realtime-allow-public -- this anonymous collaborative demo is intentionally public.
 /**
  * Board settings - live RPC and stream.
  *

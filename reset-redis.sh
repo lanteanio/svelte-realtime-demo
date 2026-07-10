@@ -11,6 +11,7 @@ fi
 cd "$(dirname "$0")"
 
 echo "Flushing Redis..."
-docker compose exec -T redis redis-cli FLUSHALL
+docker compose exec -T redis sh -c \
+	'if [ -n "$REDIS_PASSWORD" ]; then exec redis-cli -a "$REDIS_PASSWORD" --no-auth-warning FLUSHALL; else exec redis-cli FLUSHALL; fi'
 
 echo "Done! Redis is empty."

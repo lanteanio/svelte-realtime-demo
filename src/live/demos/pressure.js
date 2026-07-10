@@ -1,8 +1,9 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/pressure - live admission-shedding control panel.
  *
  * The pitch: the destroyer test (e2e/destroyer-standalone.js) ramps
- * 10K connections to find the ceiling. With Phase 3.1's two-tier
+ * 10K connections to find the ceiling. With the two-tier
  * admission control wired, the server sheds cleanly long before it
  * falls over. This page makes that visible: a live readout of
  * `platform.pressure`, an in-page load generator, and a list of
@@ -50,7 +51,37 @@ const LOAD_CAP = 5000
 const LAST_SNAPSHOT_KEY = 'demos:pressure:last-snapshot'
 const SHED_KEY = 'demos:pressure:shed'
 
-let armed = false
+let ticker = null
+let tickerGeneration = 0
+
+// Vite's development platform intentionally exposes a zero-valued pressure
+// snapshot. Keep the production readout authoritative, but meter this demo's
+// own generated events in development so the load control still has honest,
+// windowed telemetry instead of pretending the adapter reported a rate.
+const USE_DEV_GENERATED_RATE = process.env.NODE_ENV !== 'production'
+let devGeneratedCount = 0
+let devGeneratedRate = 0
+let devGeneratedWindowStartedAt = Date.now()
+
+function recordGeneratedPublishes(count) {
+	if (!USE_DEV_GENERATED_RATE) return
+	const now = Date.now()
+	if (devGeneratedCount === 0 && now - devGeneratedWindowStartedAt >= 1000) {
+		devGeneratedWindowStartedAt = now
+	}
+	devGeneratedCount += count
+}
+
+function sampleGeneratedPublishRate(now) {
+	if (!USE_DEV_GENERATED_RATE) return 0
+	const elapsed = now - devGeneratedWindowStartedAt
+	if (elapsed >= 1000) {
+		devGeneratedRate = devGeneratedCount * 1000 / elapsed
+		devGeneratedCount = 0
+		devGeneratedWindowStartedAt = now
+	}
+	return devGeneratedRate
+}
 
 /**
  * Boot-time arm of the per-worker snapshot ticker. Called once per worker
@@ -77,9 +108,10 @@ let armed = false
  *   in `init({ platform })`.
  */
 export function armPressureTicker(platform) {
-	if (armed) return
-	armed = true
-	setInterval(async () => {
+	if (ticker) return stopPressureTicker
+	const generation = ++tickerGeneration
+	ticker = setInterval(async () => {
+		if (generation !== tickerGeneration) return
 		// Leader-gated: every replica fires the timer (Node's setInterval
 		// is per-process) but only the leader computes and publishes a
 		// snapshot. Without the gate, N replicas would each publish their
@@ -97,24 +129,37 @@ export function armPressureTicker(platform) {
 		const heapTotalMB = mem.heapTotal / (1024 * 1024)
 		const heapUsedMB = mem.heapUsed / (1024 * 1024)
 		const heapPct = mem.heapTotal > 0 ? mem.heapUsed / mem.heapTotal : 0
+		const now = Date.now()
+		const adapterPublishRate = snap.publishRate ?? 0
+		const generatedPublishRate = sampleGeneratedPublishRate(now)
+		const useGeneratedRate = USE_DEV_GENERATED_RATE && adapterPublishRate === 0 && generatedPublishRate > 0
 		const payload = {
 			active: !!snap.active,
 			subscriberRatio: snap.subscriberRatio ?? 0,
-			publishRate: snap.publishRate ?? 0,
+			publishRate: useGeneratedRate ? generatedPublishRate : adapterPublishRate,
+			publishRateSource: useGeneratedRate ? 'generated-load-dev' : 'adapter',
 			memoryMB: snap.memoryMB ?? 0,
 			heapUsedMB,
 			heapTotalMB,
 			heapPct,
 			reason: snap.reason ?? 'NONE',
-			ts: Date.now(),
+			ts: now,
 			instanceId: leader.instanceId
 		}
 		// Persist for new subscribers' loader; publish for live ones.
 		// SET with a short TTL so a leadership flip followed by silence
 		// doesn't leave a stale snapshot at the top of the page forever.
 		try { await redis.redis.set(LAST_SNAPSHOT_KEY, JSON.stringify(payload), 'EX', 30) } catch {}
+		if (generation !== tickerGeneration) return
 		platform.publish(TOPICS.demoPressureTick, 'set', payload)
 	}, TICK_INTERVAL_MS)
+	return stopPressureTicker
+}
+
+function stopPressureTicker() {
+	tickerGeneration++
+	if (ticker) clearInterval(ticker)
+	ticker = null
 }
 
 export const pressureSnapshot = live.stream(
@@ -208,6 +253,7 @@ export const generateLoad = live(async (ctx, count) => {
 	let sent = 0
 	if (safe <= SMALL_THRESHOLD) {
 		ctx.platform.publishBatched(buildChunk(0, safe))
+		recordGeneratedPublishes(safe)
 		sent = safe
 	} else {
 		const chunks = Math.max(1, Math.round(SPREAD_MS / CHUNK_MS))
@@ -215,6 +261,7 @@ export const generateLoad = live(async (ctx, count) => {
 		for (let c = 0; c < chunks && sent < safe; c++) {
 			const n = Math.min(perChunk, safe - sent)
 			ctx.platform.publishBatched(buildChunk(sent, n))
+			recordGeneratedPublishes(n)
 			sent += n
 			if (c < chunks - 1 && sent < safe) {
 				await new Promise((resolve) => setTimeout(resolve, CHUNK_MS))

@@ -42,7 +42,7 @@
 </script>
 
 <span class="countdown font-mono text-xs {urgency}">
-	<span style="--value:{minutes};" aria-live="polite" aria-label="{minutes}">{minutes}</span>
+	<span style="--value:{minutes};" aria-live="polite" aria-label={String(minutes)}>{minutes}</span>
 	:
-	<span style="--value:{seconds}; --digits: 2;" aria-live="polite" aria-label="{seconds}">{seconds}</span>
+	<span style="--value:{seconds}; --digits: 2;" aria-live="polite" aria-label={String(seconds)}>{seconds}</span>
 </span>

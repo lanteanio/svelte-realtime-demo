@@ -1,3 +1,4 @@
+// realtime-allow-public -- this gallery demo is intentionally public.
 /**
  * /demos/topk - four leaderboards from one event firehose, declared in
  * one config via `live.aggregate({ windows })`.
@@ -34,7 +35,7 @@
  *    aggregate; the two compose without ceremony.
  *
  * Demo-friendly time scales (10s / 1min / minute / lifetime) instead
- * of the spec's 10min / daily / monthly / lifetime - visible diff in
+ * of a production 10min / daily / monthly / lifetime - visible diff in
  * test-runtime instead of "wait until midnight." Educational pitch is
  * identical; values are tunable.
  */
