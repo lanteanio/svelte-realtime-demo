@@ -30,9 +30,6 @@ _screenshots
 # V8 heap snapshots
 *.heapsnapshot
 
-# Local working notes; not part of the repository history.
-audits/
-
 # Certificates and private keys (Let's Encrypt artifacts, self-signed dev certs,
 # Windows certificate bundles). Never commit these - even dev-only material can
 # tip an attacker about deployment shape and leak ACL-relevant identifiers.

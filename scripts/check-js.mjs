@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { join, relative } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1')
-const SKIP = new Set(['.git', '.svelte-kit', 'audits', 'build', 'node_modules', 'playwright-report', 'test-results'])
+const SKIP = new Set(['.git', '.svelte-kit', 'build', 'node_modules', 'playwright-report', 'test-results'])
 const files = []
 
 await collect(ROOT)

@@ -13,7 +13,6 @@ build
 .env.*
 !.env.example
 !.env.test
-audits
 test-results
 playwright-report
 _screenshots

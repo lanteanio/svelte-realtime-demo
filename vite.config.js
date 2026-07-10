@@ -19,7 +19,7 @@ export default defineConfig({
 	// reload in the middle of an assertion.
 	server: {
 		watch: {
-			ignored: ['**/playwright-report/**', '**/test-results/**', '**/audits/**']
+			ignored: ['**/playwright-report/**', '**/test-results/**']
 		}
 	},
 	// The cursor client is first imported by the lazily visited board route.
