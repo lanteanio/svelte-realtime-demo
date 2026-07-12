@@ -62,6 +62,15 @@ services:
       ORIGIN: https://${DOMAIN:?required}
       SSL_CERT: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
       SSL_KEY: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
+      # Cert renewal here is restart-based: entrypoint.sh fingerprints the
+      # Let's Encrypt source (CERT_RELOAD_* below) and each replica exits so
+      # restart: unless-stopped brings it back on the fresh copy. The adapter's
+      # in-process cert reload (SSL_WATCH, a uWS SNI server-name swap) is
+      # redundant with that, and the swap does not coexist with this
+      # host-networking + SO_REUSEPORT layout: left on, the listener refuses
+      # external TLS handshakes. Default off; only set SSL_WATCH=1 if you also
+      # remove the restart-based renewal above.
+      SSL_WATCH: ${SSL_WATCH:-0}
       # Required in production: news.js throws at module load when
       # NODE_ENV=production and this is unset, because the legacy fallback
       # was a static string checked into the repo (forgeable webhook events).
@@ -75,6 +84,15 @@ services:
       # endpoint stays open - no behavior change for existing deployments
       # scraping without auth.
       METRICS_SCRAPE_TOKEN: ${METRICS_SCRAPE_TOKEN:-}
+      # Bearer token for the fail-closed /__realtime/* admin plane (introspect,
+      # DLQ inspect/replay, lifeline metrics). Unset = every admin request is
+      # denied. Generate with `openssl rand -hex 32`.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # Optional demo secrets with safe dev fallbacks; set real values in
+      # production so outbound-webhook signatures and lobby share-codes stay
+      # unguessable across deploys.
+      DEMO_OUTBOUND_WEBHOOK_SECRET: ${DEMO_OUTBOUND_WEBHOOK_SECRET:-}
+      ROOMS_CODE_SECRET: ${ROOMS_CODE_SECRET:-}
       # Cursor per-connection and per-topic throttle, in milliseconds. Default
       # 8ms = ~120Hz both layers; set to 16 / 33 to match a 60Hz / 30Hz client
       # publish rate (CURSOR_INTERVAL_MS on the destroyer side). The two must
