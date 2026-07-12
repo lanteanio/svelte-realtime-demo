@@ -14,7 +14,7 @@
 		"src/lib/components/BoardCard.svelte",
 		"src/lib/components/Canvas.svelte",
 		"src/lib/components/PresenceBar.svelte",
-		"tests/unit/**/*.test.js"
+		"test/unit/**/*.test.js"
 	],
 	"exclude": [
 		"node_modules/**",

@@ -2,7 +2,7 @@
 /**
  * /demos/pressure - live admission-shedding control panel.
  *
- * The pitch: the destroyer test (e2e/destroyer-standalone.js) ramps
+ * The pitch: the destroyer test (test/e2e/destroyer-standalone.js) ramps
  * 10K connections to find the ceiling. With the two-tier
  * admission control wired, the server sheds cleanly long before it
  * falls over. This page makes that visible: a live readout of
@@ -143,6 +143,16 @@ export function armPressureTicker(platform) {
 			heapTotalMB,
 			heapPct,
 			reason: snap.reason ?? 'NONE',
+			// 0.6 additions to the adapter snapshot. `value` is the 0..1
+			// composite pressure scalar; PSI + CFS-throttle only report on
+			// Linux cgroups (null elsewhere - the page hides them);
+			// backpressure fields expose the socket-buffer axis the
+			// closeOnBackpressureLimit knob acts on.
+			value: snap.value ?? 0,
+			psi: snap.psi ?? null,
+			cpuThrottle: snap.cpuThrottle ?? null,
+			maxBufferedBytes: snap.maxBufferedBytes ?? 0,
+			backpressuredConnections: snap.backpressuredConnections ?? 0,
 			ts: now,
 			instanceId: leader.instanceId
 		}

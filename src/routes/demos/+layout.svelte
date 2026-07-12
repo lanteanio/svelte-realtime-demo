@@ -36,7 +36,22 @@
 		{ slug: 'flash-sales',       title: 'Flash sales' },
 		{ slug: 'pagination',        title: 'Pagination' },
 		{ slug: 'effect',            title: 'live.effect' },
-		{ slug: 'from-seq',          title: 'delta.fromSeq' }
+		{ slug: 'from-seq',          title: 'delta.fromSeq' },
+		{ slug: 'collab-editor',     title: 'CRDT selections' },
+		{ slug: 'multiplayer',       title: 'Multiplayer lounge' },
+		{ slug: 'kanban',            title: 'CRDT kanban' },
+		{ slug: 'offline',           title: 'Offline queue' },
+		{ slug: 'arena',             title: 'AoI arena' },
+		{ slug: 'shooter',           title: 'Lag-comp shooter' },
+		{ slug: 'lobbies',           title: 'Lobbies' },
+		{ slug: 'tenants',           title: 'Multi-tenancy' },
+		{ slug: 'flags',             title: 'Feature flags' },
+		{ slug: 'alarms',            title: 'Durable alarms' },
+		{ slug: 'forget',            title: 'Right to erasure' },
+		{ slug: 'privacy',           title: 'Aggregate privacy' },
+		{ slug: 'ops',               title: 'Ops dashboard' },
+		{ slug: 'outbound-webhooks', title: 'Outbound webhooks' },
+		{ slug: 'phases',            title: 'Attach + batch' }
 	]
 
 	const currentSlug = $derived.by(() => {

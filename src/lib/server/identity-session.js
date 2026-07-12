@@ -29,6 +29,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { redis } from '$lib/server/redis'
 import { sessionBreaker } from '$lib/server/redis-breakers'
 import { generateIdentity } from '$lib/names'
+import { boundedIntEnv } from '$lib/server/env-int'
 
 const SESSION_TTL_SEC = 60 * 60 * 24 * 30
 export const SESSION_COOKIE_MAX_AGE = SESSION_TTL_SEC
@@ -40,15 +41,7 @@ const VALID_ORGS = new Set(['acme', 'globex'])
 // 22 chars base64url = 16 bytes = 128 bits. Matches what randomBytes(16).toString('base64url') emits.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{22}$/
 const DEFAULT_REDIS_TIMEOUT_MS = 1000
-
-function redisTimeoutMs(value) {
-	const parsed = Number(value)
-	return Number.isFinite(parsed) && parsed >= 50 && parsed <= 10_000
-		? Math.round(parsed)
-		: DEFAULT_REDIS_TIMEOUT_MS
-}
-
-const REDIS_TIMEOUT_MS = redisTimeoutMs(process.env.REDIS_SESSION_TIMEOUT_MS)
+const REDIS_TIMEOUT_MS = boundedIntEnv(process.env.REDIS_SESSION_TIMEOUT_MS, { min: 50, max: 10_000, fallback: DEFAULT_REDIS_TIMEOUT_MS })
 
 /**
  * Session persistence has an independent failure domain from realtime Redis.
@@ -106,7 +99,12 @@ function validate(hash) {
 	if (typeof hash.name !== 'string' || hash.name.length < 1 || hash.name.length > 40) return null
 	if (typeof hash.color !== 'string' || !HEX_COLOR_RE.test(hash.color)) return null
 	const org = VALID_ORGS.has(hash.org) ? hash.org : null
-	return { id: hash.id, name: hash.name, color: hash.color, org }
+	// Optional strict-isolation tenant (set only from /demos/tenants). The
+	// realtime tenant resolver reads this; null keeps the connection on the
+	// unscoped single-tenant fast path. Same value set as org - the demo
+	// reuses the two fictional companies as tenants.
+	const tenant = VALID_ORGS.has(hash.tenant) ? hash.tenant : null
+	return { id: hash.id, name: hash.name, color: hash.color, org, tenant }
 }
 
 /**
@@ -154,6 +152,9 @@ export async function createSession(overrides) {
 	const org = VALID_ORGS.has(overrides?.org) ? overrides.org : 'acme'
 
 	const sessionId = newSessionId()
+	// tenant is never seeded at creation; it exists only after an explicit
+	// opt-in from /demos/tenants (updateSessionField). Fresh identities are
+	// unscoped.
 	const hash = { id, name, color, org }
 	try {
 		assertTransaction(await withSessionStore((client) => client
@@ -166,7 +167,7 @@ export async function createSession(overrides) {
 		// can still render. The session will not persist; the next request
 		// will mint another. Acceptable for a demo: no real auth is gated.
 	}
-	return { sessionId, identity: { id, name, color, org } }
+	return { sessionId, identity: { id, name, color, org, tenant: null } }
 }
 
 /**

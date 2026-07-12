@@ -1,0 +1,272 @@
+import { test, expect } from '@playwright/test';
+import { WebSocket } from 'ws';
+import { resolveE2EBaseURL, toWebSocketURL } from '../../scripts/test-target.mjs';
+import { joinBoardWithRetry } from './ws-rpc.js';
+
+const WS_URL = toWebSocketURL(resolveE2EBaseURL());
+const BOARD_URL = '/board/stress-me-out';
+
+/**
+ * Connect a fake user via WebSocket.
+ */
+function connectUser(index) {
+	return new Promise((resolve, reject) => {
+		const name = `Bot ${index}`;
+		const color = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+		const id = crypto.randomUUID();
+		const cookie = `identity=${encodeURIComponent(JSON.stringify({ id, name, color }))}`;
+
+		const ws = new WebSocket(WS_URL, {
+			headers: { Cookie: cookie },
+			rejectUnauthorized: false
+		});
+
+		const timer = setTimeout(() => {
+			ws.close();
+			reject(new Error(`User ${index} timed out`));
+		}, 15000);
+
+		ws.on('open', () => {
+			clearTimeout(timer);
+			resolve({ ws, id, name, color, index });
+		});
+
+		ws.on('error', (err) => {
+			clearTimeout(timer);
+			reject(err);
+		});
+	});
+}
+
+/**
+ * Start moving a joined cursor through the same one-way adapter wire path
+ * used by Canvas.svelte. Cursor movement intentionally has no RPC response.
+ */
+function startCursorMovement(user, boardSlug) {
+	const { ws } = user;
+
+	// Random starting position and velocity
+	let x = 50 + Math.random() * 1100;
+	let y = 50 + Math.random() * 550;
+	let vx = (Math.random() - 0.5) * 8;
+	let vy = (Math.random() - 0.5) * 8;
+
+	return setInterval(() => {
+		// Bounce off walls
+		x += vx; y += vy;
+		if (x < 10 || x > 1200) { vx = -vx; x = Math.max(10, Math.min(1200, x)); }
+		if (y < 10 || y > 650) { vy = -vy; y = Math.max(10, Math.min(650, y)); }
+		// Slight randomness
+		vx += (Math.random() - 0.5) * 1.5;
+		vy += (Math.random() - 0.5) * 1.5;
+		vx = Math.max(-12, Math.min(12, vx));
+		vy = Math.max(-12, Math.min(12, vy));
+
+		try {
+			if (ws.readyState === WebSocket.OPEN) {
+				ws.send(JSON.stringify({
+					type: 'cursor',
+					topic: `board:${boardSlug}`,
+					data: { x: Math.round(x), y: Math.round(y) }
+				}));
+			}
+		} catch {}
+	}, 50); // 20 updates/sec per user
+}
+
+test.describe('Stress Test', () => {
+	test.setTimeout(600_000);
+
+	test('1000 users with live cursors on one board', async ({ browser }) => {
+		const ctx = await browser.newContext();
+		const page = await ctx.newPage();
+
+		// Navigate to the stress board and extract the real board UUID
+		await page.goto(BOARD_URL);
+		await page.locator('h1').waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
+		await page.waitForTimeout(2000);
+
+		// Extract boardId (UUID) from the page - RPCs need the UUID, not the slug
+		const boardId = await page.evaluate(() => {
+			for (const s of document.querySelectorAll('script')) {
+				const match = s.textContent?.match(/boardId[:"]\s*"?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+				if (match) return match[1];
+			}
+			return null;
+		});
+
+		if (!boardId) {
+			throw new Error('Could not extract boardId UUID from page. The bots need the UUID, not the slug.');
+		}
+
+		// Env overrides so the same spec can drive 1K / 2K / 5K runs to
+		// chart the ceiling without per-run edits. Defaults preserve the
+		// 1000-user baseline.
+		const TOTAL = Number(process.env.STRESS_TOTAL ?? 1000);
+		const BATCH = Number(process.env.STRESS_BATCH ?? 50);
+		console.log(`\n=== STRESS TEST: ${TOTAL} CURSORS ON ${BOARD_URL} ===`);
+		console.log(`Board UUID: ${boardId}\n`);
+		const users = [];
+		let connected = 0;
+		let failed = 0;
+
+		console.log(`Connecting ${TOTAL} users...`);
+		const connectStart = Date.now();
+
+		for (let batch = 0; batch < TOTAL; batch += BATCH) {
+			const promises = [];
+			for (let i = batch; i < Math.min(batch + BATCH, TOTAL); i++) {
+				promises.push(
+					connectUser(i)
+						.then((user) => { users.push(user); connected++; })
+						.catch(() => { failed++; })
+				);
+			}
+			await Promise.all(promises);
+			if ((batch + BATCH) % 200 === 0 || batch + BATCH >= TOTAL) {
+				console.log(`  ${connected} connected, ${failed} failed`);
+			}
+			await new Promise((r) => setTimeout(r, 100));
+		}
+
+		const connectTime = Date.now() - connectStart;
+		console.log(`\nAll connected in ${connectTime}ms (${(connectTime / TOTAL).toFixed(1)}ms/user)\n`);
+
+		// Require acknowledged board joins; socket-open counts alone do not
+		// establish realtime capacity.
+		const joinedUsers = [];
+		let joinFailed = 0;
+		for (let batch = 0; batch < users.length; batch += 25) {
+			await Promise.all(users.slice(batch, batch + 25).map(async (user) => {
+				try {
+					await joinBoardWithRetry(user.ws, boardId)
+					joinedUsers.push(user)
+				} catch {
+					joinFailed++
+				}
+			}))
+			await new Promise((r) => setTimeout(r, 100))
+		}
+		const joinRate = joinedUsers.length / TOTAL
+		console.log(`Board joins: ${joinedUsers.length} ok, ${joinFailed} failed (${(joinRate * 100).toFixed(1)}%)`)
+
+		console.log(`Starting cursor movement for ${joinedUsers.length} joined users...`);
+		const intervals = joinedUsers.map((user) => startCursorMovement(user, boardId));
+
+		// Wait a moment for joins to propagate, then reload to see cursors
+		await page.waitForTimeout(2000);
+		await page.reload();
+		await page.waitForTimeout(3000);
+
+		// Measure frame performance during cursor storm
+		const metrics = await page.evaluate(() => {
+			return new Promise((resolve) => {
+				const frames = [];
+				let lastTime = performance.now();
+
+				function measure() {
+					const now = performance.now();
+					frames.push(now - lastTime);
+					lastTime = now;
+					if (frames.length < 120) {
+						requestAnimationFrame(measure);
+					} else {
+						const sorted = frames.sort((a, b) => a - b);
+						resolve({
+							frameCount: frames.length,
+							avgFrameTime: (frames.reduce((a, b) => a + b, 0) / frames.length).toFixed(1),
+							p50: sorted[Math.floor(sorted.length * 0.5)].toFixed(1),
+							p95: sorted[Math.floor(sorted.length * 0.95)].toFixed(1),
+							p99: sorted[Math.floor(sorted.length * 0.99)].toFixed(1),
+							maxFrameTime: sorted[sorted.length - 1].toFixed(1),
+							estimatedFPS: (1000 / (frames.reduce((a, b) => a + b, 0) / frames.length)).toFixed(0)
+						});
+					}
+				}
+				requestAnimationFrame(measure);
+			});
+		});
+
+		console.log(`=== FRAME METRICS (1000 cursors active) ===`);
+		console.log(`Frames sampled:    ${metrics.frameCount}`);
+		console.log(`Avg frame time:    ${metrics.avgFrameTime}ms`);
+		console.log(`Estimated FPS:     ${metrics.estimatedFPS}`);
+		console.log(`p50 frame time:    ${metrics.p50}ms`);
+		console.log(`p95 frame time:    ${metrics.p95}ms`);
+		console.log(`p99 frame time:    ${metrics.p99}ms`);
+		console.log(`Max frame time:    ${metrics.maxFrameTime}ms`);
+
+		const canvasVisible = await page.locator('div.relative.w-full.overflow-auto').isVisible();
+		console.log(`\nCanvas responsive:  ${canvasVisible}`);
+
+		// Canvas-based cursor overlay - we can't count individual cursors in canvas,
+		// but we can verify the canvas element exists and is rendering (non-zero size)
+		const cursorCanvas = page.locator('canvas.absolute.pointer-events-none');
+		const canvasExists = await cursorCanvas.isVisible();
+		console.log(`Cursor canvas:     ${canvasExists ? 'visible' : 'not found'}`);
+
+		const presenceText = await page.locator('.text-xs.opacity-50').filter({ hasText: /online/ }).first().textContent().catch(() => 'N/A');
+		console.log(`Presence display:  ${presenceText}`);
+
+		// Let cursors fly for 10 seconds total
+		const elapsed = 5000; // ~5s already spent
+		if (elapsed < 10000) {
+			console.log(`\nCursors flying for ${((10000 - elapsed) / 1000).toFixed(0)}s more...`);
+			await new Promise((r) => setTimeout(r, 10000 - elapsed));
+		}
+
+		// Memory snapshot
+		const mem = await page.evaluate(() => {
+			const m = performance.memory;
+			return m ? {
+				jsHeapMB: (m.usedJSHeapSize / 1024 / 1024).toFixed(1),
+				totalHeapMB: (m.totalJSHeapSize / 1024 / 1024).toFixed(1)
+			} : { jsHeapMB: 'N/A', totalHeapMB: 'N/A' };
+		});
+
+		console.log(`\n=== MEMORY ===`);
+		console.log(`JS Heap used:      ${mem.jsHeapMB} MB`);
+		console.log(`JS Heap total:     ${mem.totalHeapMB} MB`);
+
+		// Stop and disconnect
+		console.log(`\nStopping cursor movement...`);
+		intervals.forEach((id) => clearInterval(id));
+
+		console.log(`Disconnecting ${users.length} users...`);
+		const closeStart = Date.now();
+		await Promise.all(users.map((u) =>
+			new Promise((resolve) => {
+				const timer = setTimeout(resolve, 5000); // Don't hang on close
+				u.ws.on('close', () => { clearTimeout(timer); resolve(); });
+				u.ws.close();
+			})
+		));
+		console.log(`All disconnected in ${Date.now() - closeStart}ms`);
+
+		// Health check
+		await page.reload();
+		await page.waitForTimeout(2000);
+		const alive = await page.locator('.navbar').first().isVisible();
+
+		console.log(`\n=== FINAL RESULTS ===`);
+		console.log(`Connected:         ${connected}/${TOTAL} (${(connected / TOTAL * 100).toFixed(1)}%)`);
+		console.log(`Board joined:      ${joinedUsers.length}/${TOTAL} (${(joinRate * 100).toFixed(1)}%)`);
+		console.log(`Failed:            ${failed}`);
+		console.log(`Connect time:      ${connectTime}ms`);
+		console.log(`FPS under load:    ${metrics.estimatedFPS}`);
+		console.log(`p95 frame time:    ${metrics.p95}ms`);
+		console.log(`App alive after:   ${alive}`);
+
+		// SLO at the 1K baseline is 90% connected; high-load exploratory
+		// runs (5K / 10K) can lower the bar via STRESS_MIN_CONNECTED to
+		// see the actual ceiling instead of hard-failing at the first
+		// admission shed.
+		const minConnected = Number(process.env.STRESS_MIN_CONNECTED ?? 0.9)
+		expect(connected / TOTAL).toBeGreaterThanOrEqual(minConnected);
+		expect(joinRate).toBeGreaterThanOrEqual(minConnected);
+		expect(canvasVisible).toBe(true);
+		expect(alive).toBe(true);
+
+		await ctx.close();
+	});
+});

@@ -17,21 +17,10 @@
 import pg from 'pg'
 import { env } from '$env/dynamic/private'
 import { runWithAdvisoryLock } from '$lib/server/advisory-lock'
+import { boundedIntEnv } from '$lib/server/env-int'
 
 const DEFAULT_POOL_MAX = 10
 const DEFAULT_CONNECT_TIMEOUT_MS = 2000
-
-function poolMax(value) {
-	const parsed = Number(value)
-	return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_POOL_MAX
-}
-
-function connectionTimeoutMs(value) {
-	const parsed = Number(value)
-	return Number.isInteger(parsed) && parsed >= 100 && parsed <= 30_000
-		? parsed
-		: DEFAULT_CONNECT_TIMEOUT_MS
-}
 
 /**
  * The process-wide PostgreSQL pool. Every database-backed subsystem wraps
@@ -40,11 +29,11 @@ function connectionTimeoutMs(value) {
 export const databasePool = env.DATABASE_URL
 	? new pg.Pool({
 			connectionString: env.DATABASE_URL,
-			max: poolMax(env.DATABASE_POOL_MAX),
+			max: boundedIntEnv(env.DATABASE_POOL_MAX, { min: 1, fallback: DEFAULT_POOL_MAX }),
 			// A readiness probe must not sit forever in Pool.connect() while the
 			// database host is unreachable. Individual query budgets are supplied
 			// by the callers that need a tighter bound.
-			connectionTimeoutMillis: connectionTimeoutMs(env.DATABASE_CONNECT_TIMEOUT_MS)
+			connectionTimeoutMillis: boundedIntEnv(env.DATABASE_CONNECT_TIMEOUT_MS, { min: 100, max: 30_000, fallback: DEFAULT_CONNECT_TIMEOUT_MS })
 		})
 	: null
 

@@ -61,7 +61,7 @@ RUN apt-get update \
 	&& rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/build ./build
-COPY entrypoint.sh ./
+COPY scripts/entrypoint.sh ./
 COPY migrations ./migrations/
 COPY scripts/container-healthcheck.mjs scripts/deployment-smoke.mjs scripts/migrate.mjs ./scripts/
 RUN chmod +x entrypoint.sh

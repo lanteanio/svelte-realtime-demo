@@ -7,6 +7,7 @@
 import { env } from '$env/dynamic/private'
 import { databasePool } from '$lib/server/db'
 import { breaker, redis } from '$lib/server/redis'
+import { boundedIntEnv } from '$lib/server/env-int'
 
 const REQUIRED_MIGRATIONS = [
 	'001_application_schema.sql',
@@ -14,15 +15,7 @@ const REQUIRED_MIGRATIONS = [
 	'003_demo_jobs_erasure_columns.sql'
 ]
 const DEFAULT_TIMEOUT_MS = 2500
-
-function timeoutMs(value) {
-	const parsed = Number(value)
-	return Number.isInteger(parsed) && parsed >= 250 && parsed <= 10_000
-		? parsed
-		: DEFAULT_TIMEOUT_MS
-}
-
-const READINESS_TIMEOUT_MS = timeoutMs(process.env.READINESS_TIMEOUT_MS)
+const READINESS_TIMEOUT_MS = boundedIntEnv(process.env.READINESS_TIMEOUT_MS, { min: 250, max: 10_000, fallback: DEFAULT_TIMEOUT_MS })
 
 async function withinBudget(operation) {
 	let timer

@@ -119,7 +119,7 @@ if (optionalProject === 'resilience') {
 }
 
 export default defineConfig({
-	testDir: './e2e',
+	testDir: './test/e2e',
 	timeout: 30_000,
 	expect: { timeout: 10_000 },
 	fullyParallel: false,

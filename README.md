@@ -37,6 +37,53 @@ Open the page, get a random name, drop notes on a shared canvas. Every note, cur
 | Board TTL | demo | Boards auto-delete after 1 hour of inactivity, with live countdown timer |
 | Mobile support | demo | Touch dragging, responsive navbar, controls visible without hover |
 
+The table above covers the sticky-notes board. Beyond it, the app ships a
+gallery of focused demo pages, one per framework primitive.
+
+---
+
+## Demo gallery
+
+Every page lives at `/demos/<slug>`, backed by one module in
+`src/live/demos/` and one Playwright spec in `test/e2e/`.
+
+| Route | What it shows |
+|---|---|
+| `checkout` | Idempotency under double-click |
+| `counter-resume` | Reconnect-resume with no flicker |
+| `chat` | Chat rooms with presence + denials |
+| `todos-rollback` | Optimistic mutate with rollback |
+| `denials` | Subscribe denials with org switcher |
+| `pressure` | Admission-shedding control panel |
+| `chaos` | Deterministic chaos (seeded drop rate) |
+| `notifications` | Push, reply, schedule |
+| `topk` | Top-K leaderboards: four windows, one config |
+| `news` | Cron + windowed aggregate + derived + inbound webhook |
+| `jobs` | Durable task runner with fence + retry |
+| `cluster-cron` | Leader election: one leader, one tick |
+| `upload` | Streaming uploads with content-addressed dedup |
+| `auctions` | Deadline-bounded bid race over live.push |
+| `schema-evolution` | Subscribe-time migrate hooks |
+| `flash-sales` | Atomic inventory under contention (live.lock) |
+| `pagination` | Cursor-based load-more with live merges |
+| `effect` | Server-side reactive side effects |
+| `from-seq` | Three-tier reconnect gap fill |
+| `collab-editor` | CRDT-anchored selections vs raw offsets |
+| `multiplayer` | Full-surface room: cursors, locks, typing, reactions |
+| `kanban` | Shared CRDT document, zero RPC handlers |
+| `offline` | Offline queue: post now, sync later, replay once |
+| `arena` | Area-of-interest culling with LOD bands |
+| `shooter` | Lag-compensated hit testing |
+| `lobbies` | Room browser, ownership, share codes |
+| `tenants` | Strict per-connection tenant isolation |
+| `flags` | Feature flags: flip once, everywhere |
+| `alarms` | Durable one-shot timers that survive restarts |
+| `forget` | Right to erasure: one call, every surface |
+| `privacy` | k-anonymity + differential privacy aggregates |
+| `ops` | The introspection dashboard |
+| `outbound-webhooks` | Sign, retry, dead-letter, replay |
+| `phases` | Attach lifecycle + atomic publish batch |
+
 ---
 
 ## Board lifecycle
@@ -175,7 +222,7 @@ certificate and key; after a renewed pair is stable, they restart gracefully
 with independent jitter and copy the new material before accepting traffic.
 Postgres and Redis data are persisted in Docker volumes.
 
-For production updates, use `./deploy.sh`. It requires a clean checkout, builds
+For production updates, use `./scripts/deploy.sh`. It requires a clean checkout, builds
 an image tagged with the exact Git revision, runs migrations, waits for every
 replica's dependency-aware `/healthz` check, verifies the public page and
 WebSocket upgrade, and restores the previous image automatically if readiness
@@ -205,6 +252,7 @@ Playwright tests covering:
 - WebSocket connection leak detection
 - Performance metrics (TTFB, FCP, CLS, resource sizes)
 - Mobile touch (drag, double-tap create, controls visible, responsive nav)
+- One spec per demo page (every entry in the demo gallery above)
 - 1000-user cursor stress test
 - Presence-only destroyer (ramp to 10K, find the connection ceiling)
 - Cursor destroyer (ramp with live cursor movement)
@@ -239,6 +287,8 @@ The normal target is always a dynamically allocated loopback port. Assertion-fre
 | `REDIS_URL` | `redis://localhost:6379` | Redis for pub/sub, presence, cursors, and rate limiting. |
 | `REDIS_SESSION_TIMEOUT_MS` | `1000` | Per-operation identity-session budget before ephemeral fallback. |
 | `READINESS_TIMEOUT_MS` | `2500` | Per-dependency readiness budget. |
+| `ADMIN_TOKEN` | _(none)_ | Bearer token for the `/__realtime/*` admin plane (introspect, DLQ inspect + replay, lifeline metrics). Unset = every admin request is denied. |
+| `DEMO_NEWS_WEBHOOK_SECRET` | _(dev fallback)_ | HMAC secret for the inbound newsroom webhook. Required in production. |
 | `HOST` | `0.0.0.0` | Server bind address. |
 | `PORT` | `3000` | Server port. |
 
@@ -247,41 +297,59 @@ The normal target is always a dynamically allocated loopback port. Assertion-fre
 ## Project structure
 
 ```
+scripts/                            -- build, migrate, deploy, cert + reset helpers, test runners
+migrations/                         -- ordered, checksummed SQL (see Database)
+test/
+├── e2e/                            -- Playwright specs: board app + one per demo page
+└── unit/                           -- unit tests (run via scripts/run-unit.mjs)
 src/
-├── hooks.ws.js                     -- WebSocket lifecycle (identity, presence, cursors)
+├── hooks.ws.js                     -- WebSocket lifecycle: identity, presence, cursors,
+│                                      tenant resolver, admin plane, coordinator wiring
 ├── hooks.server.js                 -- Stress-board bootstrap + error handler
 ├── app.html                        -- HTML shell with Svelte favicon
 ├── app.css                         -- Tailwind + DaisyUI setup
 ├── routes/
-│   ├── +layout.svelte              -- Navbar: identity, online count, colors, GitHub, theme
+│   ├── +layout.svelte              -- Navbar, connection status, 'outdated bundle' reload banner
 │   ├── +layout.server.js           -- Identity cookie: read or generate
-│   ├── +page.svelte                -- Home: board list + create form + TTL hint
-│   └── board/[slug]/
-│       ├── +page.svelte            -- Board: canvas, notes, FAB, undo/redo, rate limit toast
-│       └── +page.server.js         -- Resolve slug -> board_id
+│   ├── +page.svelte                -- Home: board list + searchable demo catalog
+│   ├── board/[slug]/               -- The sticky-notes board (canvas, FAB, undo/redo)
+│   ├── demos/                      -- One page per demo, shared sidebar layout
+│   ├── api/demos/                  -- Webhook sink + inbound news webhook + org/tenant switchers
+│   ├── healthz/                    -- Dependency-aware health (readiness is the adapter's /readyz)
+│   └── metrics/                    -- Prometheus-style metrics
 ├── lib/
 │   ├── names.js                    -- Random name/color/slug generator
+│   ├── configure-app.js            -- App-wide realtime client options, merged under page options
+│   ├── protocol-version.js         -- Shared wire/contract version (server + client)
 │   ├── server/
 │   │   ├── db.js                   -- Postgres + in-memory (touch, delete, stale cleanup)
+│   │   ├── redis.js                -- Redis client, pub/sub bus, coordinators (CRDT, smooth,
+│   │   │                              alarms, dead-letter, webhook controls), presence, breaker
+│   │   ├── topics.js               -- Topic registry: single source of truth for every topic
+│   │   ├── demo-purge.js           -- Cron purge of demo user-content
+│   │   ├── tasks.js                -- Durable task runner (jobs demo)
 │   │   ├── validate.js             -- Input validation (UUID, bounds, allowlist)
-│   │   └── redis.js                -- Redis client, pub/sub, rate limiter, presence, cursors, breaker
-│   └── components/
-│       ├── StickyNote.svelte       -- Draggable note: edit, color, delete, z-order, touch
-│       ├── Canvas.svelte           -- Board area: pointer tracking with rAF throttle
-│       ├── CursorOverlay.svelte    -- Canvas 2D cursor rendering with bitmap label cache
-│       ├── PresenceBar.svelte      -- Avatars with maxAge (8 desktop, 1 mobile, +N overflow)
-│       ├── ActivityTicker.svelte   -- Bottom bar: 5 most recent actions
-│       ├── BoardHeader.svelte      -- Title edit + background picker + TTL countdown
-│       ├── BoardCard.svelte        -- Board list item with presence badge + countdown
-│       └── CountdownTimer.svelte   -- DaisyUI countdown with color urgency
+│   │   └── ...                     -- identity sessions, readiness, metrics, upload staging
+│   └── components/                 -- Board UI (StickyNote, Canvas, CursorOverlay, ...)
 └── live/
-    ├── boards.js                   -- Board CRUD + stream + cleanup cron (1h TTL)
-    └── boards/
-        ├── notes.js                -- Note CRUD + batch arrangements + board touch
-        ├── activity.js             -- Activity feed (ephemeral, latest merge)
-        ├── settings.js             -- Board settings (set merge)
-        └── cursors.js              -- Presence join/leave + cursor movement
+    ├── boards.js + boards/         -- Board CRUD, notes, activity, settings, cursors
+    └── demos/                      -- One module per demo page; game demos add pure
+                                       .shared.js sim modules shared client/server
 ```
+
+---
+
+## Admin plane and probes
+
+- `/healthz` is the app's dependency-aware health check (Postgres, Redis,
+  identity store). The adapter's built-in health route is disabled
+  (`healthCheckPath: false` in `svelte.config.js`) so it cannot shadow it.
+- `/readyz` is the adapter's readiness probe; deploys and compose
+  healthchecks gate on it.
+- `/__realtime/*` is the fail-closed admin plane (introspect snapshot, DLQ
+  inspect + replay, lifeline metrics). Requests need `Authorization: Bearer
+  $ADMIN_TOKEN`; with `ADMIN_TOKEN` unset every request is denied. The
+  `/demos/ops` page renders the same introspect snapshot over the socket.
 
 ---
 

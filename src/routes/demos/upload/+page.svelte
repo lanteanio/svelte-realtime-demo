@@ -18,7 +18,8 @@
 -->
 <script>
 	import { onMount, onDestroy } from 'svelte'
-	import { onPush, configure } from 'svelte-realtime/client'
+	import { onPush } from 'svelte-realtime/client'
+	import { configureApp } from '$lib/configure-app'
 	import { status as wsStatus } from 'svelte-adapter-uws/client'
 	import {
 		uploadedFiles,
@@ -39,7 +40,7 @@
 	// can equal the adapter's maxPayloadLength exactly without overflow.
 	// 512KB picks an interesting middle: ~14 chunks for a 6.84MB file
 	// (clean dedup visualisation), no quibble with the adapter cap.
-	configure({ upload: { frameSize: 512 * 1024 } })
+	configureApp({ upload: { frameSize: 512 * 1024 } })
 
 	let { data } = $props()
 	const me = $derived(data.identity)

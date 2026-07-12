@@ -2,14 +2,14 @@ import { spawn } from 'node:child_process'
 import { readdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-const unitDirectory = new URL('../tests/unit/', import.meta.url)
+const unitDirectory = new URL('../test/unit/', import.meta.url)
 const files = (await readdir(unitDirectory))
 	.filter((name) => name.endsWith('.test.js'))
 	.sort()
 	.map((name) => fileURLToPath(new URL(name, unitDirectory)))
 
 if (files.length === 0) {
-	console.error('No unit tests found under tests/unit')
+	console.error('No unit tests found under test/unit')
 	process.exit(1)
 }
 

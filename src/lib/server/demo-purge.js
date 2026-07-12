@@ -5,7 +5,8 @@
  *
  *  - General purge (text content): every DEMO_PURGE_INTERVAL_MIN
  *    minutes (default 30). Covers chat, notifications, auctions,
- *    effect, jobs, denials, todos, pagination, news.
+ *    effect, jobs, denials, todos, pagination, news, offline,
+ *    tenants, flags, outbound-webhooks, phases.
  *
  *  - Upload purge (binary content): every
  *    DEMO_UPLOAD_PURGE_INTERVAL_MIN minutes (default 5). Separate
@@ -33,7 +34,13 @@
  * Skipped demos: checkout, counter-resume, pressure, chaos, topk,
  * schema-evolution, flash-sales, from-seq, cluster-cron - none of them
  * accept user content into persistent state, only read-only counters
- * or pre-seeded data.
+ * or pre-seeded data. Also skipped by design: alarms, forget, and
+ * privacy keep their state in TTL'd Redis keys; collab-editor's doc
+ * snapshot carries a 24h Redis TTL; arena, shooter, lobbies,
+ * multiplayer, and ops hold only ephemeral in-memory state. kanban has
+ * no purge yet and its shared board is unbounded - if it attracts
+ * abuse, drop the CRDT topic on a cron via the authority's
+ * drop(topic) primitive.
  */
 
 import { live } from 'svelte-realtime/server'
@@ -49,6 +56,11 @@ import { purge as purgeTodos } from '$live/demos/todos-rollback'
 import { purge as purgePagination } from '$live/demos/pagination'
 import { purge as purgeNews } from '$live/demos/news'
 import { purge as purgeUpload } from '$live/demos/upload'
+import { purge as purgeOffline } from '$live/demos/offline'
+import { purge as purgeTenants } from '$live/demos/tenants'
+import { purge as purgeFlags } from '$live/demos/flags'
+import { purge as purgeOutbound } from '$live/demos/outbound-webhooks'
+import { purge as purgePhases } from '$live/demos/phases'
 
 function resolveInterval(raw, fallback) {
 	const n = Number.isFinite(raw) ? Math.floor(raw) : fallback
@@ -69,7 +81,12 @@ const TARGETS = [
 	['denials',       purgeDenials],
 	['todos',         purgeTodos],
 	['pagination',    purgePagination],
-	['news',          purgeNews]
+	['news',          purgeNews],
+	['offline',       purgeOffline],
+	['tenants',       purgeTenants],
+	['flags',         purgeFlags],
+	['outbound',      purgeOutbound],
+	['phases',        purgePhases]
 ]
 
 async function runAll(ctx) {

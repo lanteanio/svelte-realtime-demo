@@ -1,0 +1,195 @@
+<!--
+	/demos/offline - durable offline queue with idempotent replay.
+
+	The wow flow to film:
+
+	1. DevTools > Network > Offline (or kill the network). Post three
+	   entries. Nothing errors: each call queues and the "queued edits"
+	   counter climbs to 3.
+
+	2. RELOAD THE TAB while still offline. The queue survives - the
+	   three mutations were persisted to IndexedDB, scoped to this
+	   identity via persistKey.
+
+	3. Go back online. `uploading` flips true while the drain replays,
+	   the three entries land in the list EXACTLY once (every persisted
+	   mutation carries an idempotency key; the server's live.idempotent
+	   wrapper answers a duplicate with the original result), and the
+	   checkpoint readout advances.
+
+	Mechanism: configure({ offline: { queue, persist, persistKey } })
+	turns queueing on; pendingMutations / uploading / offlineCheckpoint()
+	are the consumer surface this page renders.
+-->
+<script>
+	import { pendingMutations, uploading, offlineCheckpoint } from 'svelte-realtime/client'
+	import { configureApp } from '$lib/configure-app'
+	import { entriesStream, addEntry } from '$live/demos/offline'
+
+	let { data } = $props()
+	const me = $derived(data.identity)
+
+	// configureApp() keeps the app-wide options (resume grace, protocol
+	// version) while adding the offline queue. Enabling the queue here
+	// means every RPC in the tab gains offline queueing once this page has
+	// been visited - acceptable for a demo gallery, and exactly how a real
+	// app would wire it (once, at startup). persistKey scopes the
+	// IndexedDB queue to this identity so one browser profile never
+	// replays another login's mutations.
+	configureApp({
+		offline: {
+			queue: true,
+			persist: true,
+			persistKey: data.identity.id,
+			maxQueue: 100
+		}
+	})
+
+	let entries = $state([])
+	$effect(() => {
+		const off = entriesStream.subscribe((v) => { entries = Array.isArray(v) ? v : [] })
+		return () => off()
+	})
+
+	// offlineCheckpoint() is a plain function, not a store; re-read it
+	// whenever a drain finishes ($uploading flips back to false) plus
+	// once on mount. lastUploadedSeq is the highest enqueue seq that
+	// replayed successfully; gapDetected flags a hole in the upload
+	// order (a later mutation succeeded while an earlier one failed).
+	let checkpoint = $state({ lastUploadedSeq: 0, gapDetected: false })
+	$effect(() => {
+		if (!$uploading) checkpoint = offlineCheckpoint()
+	})
+
+	let draft = $state('')
+	let lastError = $state('')
+
+	function handlePost() {
+		const text = draft.trim()
+		if (!text) return
+		draft = ''
+		lastError = ''
+		// Deliberately NOT awaited: while offline the promise settles only
+		// when the queued call replays after reconnect (minutes, maybe).
+		// Blocking the composer on that would defeat the demo. Failures
+		// (validation, replay errors with live promise holders) surface
+		// inline through the catch.
+		addEntry(text).catch((err) => {
+			lastError = `${err?.code ?? 'ERROR'}: ${err?.message ?? err}`
+		})
+	}
+
+	function timeOf(ts) {
+		return new Date(ts).toLocaleTimeString()
+	}
+</script>
+
+<div class="max-w-3xl mx-auto p-8 space-y-4">
+	<header>
+
+		<h1 class="text-2xl font-bold mt-2">Offline queue: post now, sync later</h1>
+		<p class="text-sm opacity-70 mt-1">
+			A guestbook whose posts survive losing the network. With
+			<code>offline: &#123; queue: true, persist: true &#125;</code>,
+			an entry posted while disconnected queues in IndexedDB, survives
+			a full tab reload, and replays exactly once on reconnect - the
+			queue synthesizes an idempotency key per mutation and the
+			server's <code>live.idempotent</code> wrapper dedups the replay.
+		</p>
+		{#if me}
+			<p class="text-xs opacity-50 mt-1">
+				Posting as
+				<span class="inline-block w-2 h-2 rounded-full align-middle" style:background={me.color}></span>
+				<strong>{me.name}</strong>
+				<span class="font-mono">({me.id.slice(0, 8)})</span>
+			</p>
+		{/if}
+	</header>
+
+	<!-- Queue status strip -->
+	<section class="card bg-base-200" data-testid="off-status-strip">
+		<div class="card-body py-3">
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+				<span>
+					<span class="font-bold tabular-nums" data-testid="off-pending-count">{$pendingMutations}</span>
+					queued {$pendingMutations === 1 ? 'edit' : 'edits'}
+				</span>
+				{#if $uploading}
+					<span class="flex items-center gap-1 text-info" data-testid="off-uploading">
+						<span class="loading loading-spinner loading-xs"></span>
+						replaying...
+					</span>
+				{/if}
+				<span class="opacity-60">
+					checkpoint: seq
+					<span class="font-mono" data-testid="off-checkpoint-seq">{checkpoint.lastUploadedSeq}</span>
+				</span>
+				{#if checkpoint.gapDetected}
+					<span class="badge badge-warning badge-sm" data-testid="off-gap-badge">upload gap detected</span>
+				{/if}
+			</div>
+		</div>
+	</section>
+
+	<!-- Composer -->
+	<form onsubmit={(e) => { e.preventDefault(); handlePost() }} class="flex gap-2">
+		<input
+			class="input input-bordered flex-1 bg-base-200"
+			bind:value={draft}
+			maxlength="200"
+			placeholder="Sign the guestbook... (works offline)"
+			data-testid="off-input"
+		/>
+		<button
+			type="submit"
+			class="btn btn-primary"
+			disabled={!draft.trim()}
+			data-testid="off-post-button"
+		>
+			Post
+		</button>
+	</form>
+	{#if lastError}
+		<p class="text-xs text-error" data-testid="off-error">{lastError}</p>
+	{/if}
+
+	<!-- Entries -->
+	<section class="card bg-base-100 border border-base-300 min-h-[16rem]">
+		<div class="card-body py-3 space-y-2">
+			<h2 class="card-title text-sm">
+				Entries (<span data-testid="off-entries-count">{entries.length}</span>, newest first, capped at 50)
+			</h2>
+			<ul class="space-y-1 text-sm" data-testid="off-entries">
+				{#each entries as entry (entry.id)}
+					<li class="flex items-baseline gap-2" data-testid="off-entry-{entry.id}">
+						<span class="opacity-50 text-xs font-mono w-20 shrink-0">{timeOf(entry.at)}</span>
+						<span class="font-semibold shrink-0">{entry.by}</span>
+						<span class="flex-1 break-words min-w-0">{entry.text}</span>
+					</li>
+				{:else}
+					<li class="opacity-40 text-center py-6">No entries yet. Sign above - even offline.</li>
+				{/each}
+			</ul>
+		</div>
+	</section>
+
+	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
+		<p>
+			Client: <code>configure(&#123; offline: &#123; queue: true, persist: true,
+			persistKey &#125; &#125;)</code> queues RPCs while disconnected and
+			persists the queue to IndexedDB. The status strip renders the
+			consumer stores: <code>pendingMutations</code> (live queued count),
+			<code>uploading</code> (true while the reconnect drain replays), and
+			<code>offlineCheckpoint()</code> (last uploaded seq + gap flag).
+		</p>
+		<p>
+			Server: <code>addEntry</code> wraps in <code>live.idempotent</code>
+			over the cluster-shared Redis store - the documented pairing for the
+			durable queue, since every persisted mutation replays with an
+			idempotency key. Entries live in a Redis list (LPUSH + LTRIM 50)
+			behind a <code>live.stream</code> with <code>prepend: true</code>.
+			Source:
+			<a class="link" href="https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/offline.js">src/live/demos/offline.js</a>
+		</p>
+	</aside>
+</div>

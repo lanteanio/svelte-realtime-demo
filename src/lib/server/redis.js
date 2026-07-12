@@ -26,6 +26,12 @@ import { createCursor } from 'svelte-adapter-uws-extensions/redis/cursor'
 import { createReplay } from 'svelte-adapter-uws-extensions/redis/replay'
 import { createConnectionRegistry } from 'svelte-adapter-uws-extensions/redis/registry'
 import { createLeader } from 'svelte-adapter-uws-extensions/redis/leader'
+import { createCrdtCluster } from 'svelte-adapter-uws-extensions/redis/crdt'
+import { createSmoothCluster } from 'svelte-adapter-uws-extensions/redis/smooth'
+import { createTopicBroadcast } from 'svelte-adapter-uws-extensions/redis/topic-broadcast'
+import { createAlarmStore } from 'svelte-adapter-uws-extensions/redis/alarm-store'
+import { createDeadLetter } from 'svelte-adapter-uws-extensions/redis/dead-letter'
+import { createRetryBudget, createWebhookBreaker } from 'svelte-adapter-uws-extensions/redis/webhook-controls'
 import { env } from '$env/dynamic/private'
 import { metrics } from '$lib/server/metrics'
 import { redisConnectionOptions } from '$lib/server/redis-options'
@@ -92,6 +98,7 @@ export const presence = {
 	join(...args) { return activePresence().join(...args) },
 	leave(...args) { return activePresence().leave(...args) },
 	get hooks() { return activePresence().hooks },
+	purgeUser(...args) { return activePresence().purgeUser(...args) },
 	destroy() { return presenceInstance?.destroy() }
 }
 
@@ -221,6 +228,7 @@ export const registry = {
 	send(...args) { return activeRegistry().send(...args) },
 	sendCoalesced(...args) { return activeRegistry().sendCoalesced(...args) },
 	sendTo(...args) { return activeRegistry().sendTo(...args) },
+	purgeUser(...args) { return activeRegistry().purgeUser(...args) },
 	size() { return registryInstance?.size() ?? 0 },
 	hooks: {
 		async open(ws, ctx) {
@@ -264,6 +272,43 @@ export const registry = {
 let leaderInstance = null
 
 /**
+ * 0.6 cluster coordinators + durable stores. Constructed in
+ * activateRedisInfrastructure() (their constructors may subscribe or issue
+ * commands) and read by hooks.ws init, which attaches the coordinators to
+ * the platform (bus.wrap forwards them) and hands the stores to the
+ * matching svelte-realtime configure* seams:
+ *
+ * - crdt: single-writer snapshot persistence + edit relay so live.doc /
+ *   live.map / live.array replicas converge across the 4 replicas.
+ * - smooth: single-owner-per-topic tick authority for live.smooth; the
+ *   non-owning replicas forward commands and re-broadcast frames.
+ * - topicBroadcast: scatter-gather transport for cluster-wide
+ *   live.push({ topic }) / live.notify({ topic }).
+ * - alarmStore: durable live.alarm rows; delete() is the atomic
+ *   single-fire claim between the owner's timer and the leader's
+ *   recovery poll.
+ * - webhookControls: fleet-shared outbound-webhook retry budget +
+ *   endpoint ejection + the durable dead-letter queue the admin plane
+ *   inspects and replays. DLQ events are stamped with the publishing
+ *   user (data.userId) so live.forget can purge them.
+ */
+let crdtInstance = null
+let smoothInstance = null
+let topicBroadcastInstance = null
+let alarmStoreInstance = null
+let webhookControlsInstance = null
+
+export function redisCoordinators() {
+	return {
+		crdt: crdtInstance,
+		smooth: smoothInstance,
+		topicBroadcast: topicBroadcastInstance,
+		alarmStore: alarmStoreInstance,
+		webhookControls: webhookControlsInstance
+	}
+}
+
+/**
  * Activate utilities whose constructors issue commands or start timers.
  * Called exactly once from hooks.ws init, never during build-time imports.
  */
@@ -277,6 +322,31 @@ export function activateRedisInfrastructure() {
 		})
 	}
 	if (!leaderInstance) leaderInstance = createLeader(redis, { breaker, metrics })
+	crdtInstance ??= createCrdtCluster(redis, { breaker })
+	smoothInstance ??= createSmoothCluster(redis, { breaker })
+	topicBroadcastInstance ??= createTopicBroadcast(redis, { breaker, metrics })
+	alarmStoreInstance ??= createAlarmStore(redis, { breaker, metrics })
+	webhookControlsInstance ??= {
+		budget: createRetryBudget(redis, { breaker }),
+		breaker: createWebhookBreaker(redis, { breaker }),
+		deadLetter: createDeadLetter(redis, {
+			max: 1000,
+			breaker,
+			metrics,
+			forgetUserId: (record) => record?.data?.userId ?? null
+		})
+	}
+}
+
+/** Destroy the 0.6 coordinators (worker shutdown). Best-effort, idempotent. */
+export async function destroyRedisCoordinators() {
+	const doomed = [crdtInstance, smoothInstance, topicBroadcastInstance, alarmStoreInstance, webhookControlsInstance?.breaker]
+	crdtInstance = null
+	smoothInstance = null
+	topicBroadcastInstance = null
+	alarmStoreInstance = null
+	webhookControlsInstance = null
+	await Promise.allSettled(doomed.map((instance) => instance?.destroy?.()))
 }
 
 /** Dormant, fail-closed leader facade for modules imported during analysis. */

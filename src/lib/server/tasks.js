@@ -143,6 +143,15 @@ export function activateTaskInfrastructure() {
 	return activationPromise
 }
 
+/**
+ * The active idempotency store, or null before activation / without
+ * Postgres. Composed into the forget-store so live.forget can purge a
+ * user's cached RPC results.
+ */
+export function idempotencyStore() {
+	return idempotency
+}
+
 /** Stop every timer owned by the task and idempotency primitives. */
 export function destroyTaskInfrastructure() {
 	tasks?.destroy()

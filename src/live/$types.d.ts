@@ -58,6 +58,25 @@ declare module '$live/boards' {
   export const empty: Readable<undefined>;
 }
 
+declare module '$live/demos/alarms' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const schedule: (...args: any[]) => Promise<any>;
+  export const cancel: (...args: any[]) => Promise<any>;
+  export const pendingAlarm: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'VALIDATION';
+  export const timers: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/arena' {
+  import type { Readable } from 'svelte/store';
+  export const population: (...args: any[]) => Promise<any>;
+  export const arena: { status: import('svelte/store').Readable<string>, smooth: (...args: any[]) => import('svelte-realtime/smooth').SmoothEntity, [member: string]: any };
+  export const empty: Readable<undefined>;
+}
+
 declare module '$live/demos/auctions' {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
   import type { Readable } from 'svelte/store';
@@ -109,6 +128,16 @@ declare module '$live/demos/cluster-cron' {
   export const empty: Readable<undefined>;
 }
 
+declare module '$live/demos/collab-editor' {
+  import type { StreamStore } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const editorDoc: { status: import('svelte/store').Readable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
+  export const offsetRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: string) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, [action: string]: any };
+  export const crdtRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: string) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, [action: string]: any };
+  export const empty: Readable<undefined>;
+}
+
 declare module '$live/demos/counter-resume' {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
   import type { Readable } from 'svelte/store';
@@ -143,6 +172,17 @@ declare module '$live/demos/effect' {
   export const empty: Readable<undefined>;
 }
 
+declare module '$live/demos/flags' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const setFlag: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'FORBIDDEN' | 'VALIDATION';
+  export const banner: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const darkLaunch: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: Readable<undefined>;
+}
+
 declare module '$live/demos/flash-sales' {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
   import type { Readable } from 'svelte/store';
@@ -154,6 +194,15 @@ declare module '$live/demos/flash-sales' {
   export const recentSales: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const buyProduct: (...args: any[]) => Promise<any>;
   export const claimCoupon: (...args: any[]) => Promise<any>;
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/forget' {
+  import type { Readable } from 'svelte/store';
+  export const leaveTraces: (...args: any[]) => Promise<any>;
+  export const auditTraces: (...args: any[]) => Promise<any>;
+  export const forgetMe: (...args: any[]) => Promise<any>;
+  export const saveDraft: (...args: any[]) => Promise<any>;
   export const empty: Readable<undefined>;
 }
 
@@ -177,6 +226,31 @@ declare module '$live/demos/jobs' {
   export type ErrorCode = 'UNAVAILABLE' | 'VALIDATION';
   export const jobsList: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const jobsStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/kanban' {
+  import type { Readable } from 'svelte/store';
+  export const kanban: { status: import('svelte/store').Readable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/lobbies' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const resolveCode: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'VALIDATION';
+  export const lobby: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, [action: string]: (...args: any[]) => Promise<any> | ((...args: any[]) => StreamStore<any>) };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/multiplayer' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export type ErrorCode = 'VALIDATION';
+  export const lounge: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: string) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, [action: string]: any };
   export const empty: Readable<undefined>;
 }
 
@@ -210,6 +284,32 @@ declare module '$live/demos/notifications' {
   export const empty: Readable<undefined>;
 }
 
+declare module '$live/demos/offline' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export type ErrorCode = 'VALIDATION';
+  export const entriesStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const addEntry: (...args: any[]) => Promise<any>;
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/ops' {
+  import type { Readable } from 'svelte/store';
+  export const snapshot: (...args: any[]) => Promise<any>;
+  export const dlqSummary: (...args: any[]) => Promise<any>;
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/outbound-webhooks' {
+  import type { Readable } from 'svelte/store';
+  export const placeOrder: (...args: any[]) => Promise<any>;
+  export const recentReceipts: (...args: any[]) => Promise<any>;
+  export const deadLetters: (...args: any[]) => Promise<any>;
+  export const replayOrders: (...args: any[]) => Promise<any>;
+  export const empty: Readable<undefined>;
+}
+
 declare module '$live/demos/pagination' {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
   import type { Readable } from 'svelte/store';
@@ -217,6 +317,16 @@ declare module '$live/demos/pagination' {
   export const myPaginationState: (...args: any[]) => Promise<any>;
   export const appendLogEntry: (...args: any[]) => Promise<any>;
   export const logFeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/phases' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const postTwo: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'VALIDATION';
+  export const feed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const empty: Readable<undefined>;
 }
 
@@ -232,6 +342,22 @@ declare module '$live/demos/pressure' {
   export const empty: Readable<undefined>;
 }
 
+declare module '$live/demos/privacy' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const submitMood: (...args: any[]) => Promise<any>;
+  export const roundInfo: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'VALIDATION';
+  export const rawMood: {
+    "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  };
+  export const privateMood: {
+    "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  };
+  export const empty: Readable<undefined>;
+}
+
 declare module '$live/demos/schema-evolution' {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
   import type { Readable } from 'svelte/store';
@@ -241,6 +367,23 @@ declare module '$live/demos/schema-evolution' {
   export const resetCounters: (...args: any[]) => Promise<any>;
   export type ErrorCode = 'VALIDATION';
   export const counter: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/shooter' {
+  import type { Readable } from 'svelte/store';
+  export const shooter: { status: import('svelte/store').Readable<string>, smooth: (...args: any[]) => import('svelte-realtime/smooth').SmoothEntity, [member: string]: any };
+  export const empty: Readable<undefined>;
+}
+
+declare module '$live/demos/tenants' {
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
+  import type { Readable } from 'svelte/store';
+
+  export const addNote: (...args: any[]) => Promise<any>;
+  export const whoami: (...args: any[]) => Promise<any>;
+  export type ErrorCode = 'VALIDATION';
+  export const pad: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const empty: Readable<undefined>;
 }
 

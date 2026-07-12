@@ -22,6 +22,13 @@ import adapter from 'svelte-adapter-uws'
 const config = {
 	kit: {
 		adapter: adapter({
+			// The app ships its own /healthz route with per-dependency readiness
+			// (Postgres incl. applied migrations, Redis) - the adapter's built-in
+			// liveness probe would shadow it, so it is disabled. /readyz stays on:
+			// it is the only probe that knows about graceful drain (503 the moment
+			// shutdown begins), which the app route cannot see.
+			healthCheckPath: false,
+			readinessCheckPath: '/readyz',
 			websocket: {
 				upgradeRateLimit: 0,
 				upgradeAdmission: {

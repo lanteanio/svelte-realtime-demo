@@ -17,22 +17,13 @@
 	import '../app.css'
 	import { status, failure } from 'svelte-adapter-uws/client'
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
-	import { health, configure } from 'svelte-realtime/client'
+	import { health } from 'svelte-realtime/client'
+	import { configureApp } from '$lib/configure-app'
 	import { Wifi, WifiOff, Sun, Moon, User, Globe, Github, AlertTriangle } from 'lucide-svelte'
 
-	// Resume-grace window: when the last subscriber of a stream unsubs,
-	// realtime releases its WS handle but retains the in-memory data model
-	// (currentValue, _lastSeq, _lastVersion, _cursor) for this long. A
-	// resub within the window rides the retained seq into the subscribe
-	// envelope and the server gap-fills from its replay buffer (or via
-	// delta.fromSeq for older gaps) instead of cold-rehydrating.
-	//
-	// Default is 60s. /demos/from-seq's replay buffer is 200 events at 1Hz
-	// (~200s of coverage); we extend grace to 10 min so a user can pause
-	// past the buffer boundary and still observe the `fromSeq` tier
-	// surface on resume, instead of falling off the cliff into a cold
-	// rehydrate.
-	configure({ resumeGraceMs: 600_000 })
+	// The app-wide options (resume grace, protocol version) and their
+	// rationale live in $lib/configure-app.js.
+	configureApp()
 
 	let { children, data } = $props()
 	const identity = $derived(data.identity)
@@ -66,6 +57,9 @@
 	)
 	const statusOpacity = $derived($status === 'suspended' ? 'opacity-50' : '')
 	const statusTooltip = $derived(
+		// DRAIN (new in 0.6): the server is doing a graceful rolling update
+		// and dispersed this connection's reconnect over a jittered window.
+		$failure?.class === 'DRAIN' ? 'server updating, reconnecting shortly' :
 		$status === 'failed' && $failure?.reason ? `${$status}: ${$failure.reason}` :
 		$status === 'suspended' ? 'paused (tab in background)' :
 		$status === 'disconnected' ? 'reconnecting' :
@@ -133,7 +127,18 @@
 		</div>
 	</div>
 
-	{#if $health === 'degraded'}
+	{#if $health === 'outdated'}
+		<!-- Sticky for the session: this tab's bundle predates the server's
+		     protocol version. The app decides what to do - we prompt, never
+		     auto-reload. -->
+		<div class="alert alert-info rounded-none border-x-0 border-t-0 py-2" data-testid="outdated-banner">
+			<AlertTriangle size={16} />
+			<span class="text-sm">A new version of this app is available.</span>
+			<button class="btn btn-xs btn-primary" onclick={() => location.reload()} data-testid="outdated-reload">
+				Reload
+			</button>
+		</div>
+	{:else if $health === 'degraded'}
 		<div class="alert alert-warning rounded-none border-x-0 border-t-0 py-2">
 			<AlertTriangle size={16} />
 			<span class="text-sm">Real-time updates paused, reconnecting...</span>

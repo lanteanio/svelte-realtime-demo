@@ -11,10 +11,13 @@
 import v8 from 'node:v8'
 import path from 'node:path'
 import os from 'node:os'
-import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
+import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived, realtime, configureAlarm, configureForget, configureWebhooks } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
+import { createForgetStore } from 'svelte-adapter-uws-extensions/forget-store'
 import {
 	activateRedisInfrastructure,
+	destroyRedisCoordinators,
+	redisCoordinators,
 	bus,
 	limiter,
 	presence,
@@ -24,8 +27,10 @@ import {
 	leader,
 	redis
 } from '$lib/server/redis'
+import { env } from '$env/dynamic/private'
 import { metrics } from '$lib/server/metrics'
-import { activateTaskInfrastructure, destroyTaskInfrastructure } from '$lib/server/tasks'
+import { PROTOCOL_VERSION } from '$lib/protocol-version'
+import { activateTaskInfrastructure, destroyTaskInfrastructure, idempotencyStore } from '$lib/server/tasks'
 import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
@@ -111,6 +116,42 @@ live.admission({
 		critical: ['MEMORY']
 	}
 })
+
+/**
+ * Framework-level 0.6 configuration. realtime() is used as the one-call
+ * config seam only - its module-level setters install the tenant resolver,
+ * protocol-version signal, and admin handler - while the hand-rolled hooks
+ * below stay in charge of the actual open/close/message lifecycle (they
+ * carry the presence/cursor/registry/denial wiring realtime()'s generic
+ * hook set does not know about). bus/leader are deliberately NOT passed
+ * here: init() below wires configureCron({ leader, bus }) itself, and a
+ * second leader-only call would drop the bus.
+ *
+ * - tenant: opt-in per-connection isolation. The resolver reads the
+ *   session's optional `tenant` field (set only by /demos/tenants);
+ *   everyone else resolves null = unscoped, zero-cost. While a tenant is
+ *   active, EVERY topic the connection touches is server-side scoped to
+ *   `@t/<id>/...` - the demo page says so out loud.
+ * - admin: fail-closed observability plane at /__realtime/* (introspect,
+ *   DLQ inspect + replay, lifeline metrics). Only admitted with a
+ *   matching bearer ADMIN_TOKEN; unset token = nothing is ever admitted.
+ * - protocolVersion: stale-bundle signal; pairs with configure({
+ *   protocolVersion }) in the root layout.
+ */
+const realtimeConfig = realtime({
+	tenant: (user) => user?.tenant ?? null,
+	admin: {
+		requires: (request) =>
+			Boolean(env.ADMIN_TOKEN) && request.headers.get('authorization') === `Bearer ${env.ADMIN_TOKEN}`
+	},
+	protocolVersion: PROTOCOL_VERSION
+})
+
+/**
+ * Admin request handler (Web Request -> Response). The adapter auto-mounts
+ * it on /__realtime/* ahead of the SSR catch-all when hooks.ws exports it.
+ */
+export const admin = realtimeConfig.admin
 
 /**
  * Configure server-initiated push (`live.push({ userId }, ...)`).
@@ -214,7 +255,44 @@ export async function init({ platform }) {
 	// roster is HGETALL-aggregated across replicas via a shared HASH
 	// (`__live-presence:{topic}`).
 	platform.redis = redis.redis
+	// 0.6 cluster coordinators. Attached before bus.activate so every
+	// bus.wrap-ed seam forwards them from the first wrapped publish:
+	// - crdt: live.doc/map/array convergence + single-writer snapshots
+	// - smooth: single-owner tick authority for live.smooth topics
+	// - topicBroadcast: cluster-wide live.push/notify({ topic }) fan-out
+	const { crdt, smooth, topicBroadcast, alarmStore, webhookControls } = redisCoordinators()
+	platform.crdt = crdt
+	platform.smooth = smooth
+	platform.topicBroadcast = topicBroadcast
 	await awaitBestEffort('Redis bus activation', () => bus.activate(platform))
+	// Durable one-shot timers (live.alarm): the Redis store survives worker
+	// restarts; delete() is the atomic single-fire claim shared by the
+	// owning worker's precise timer and the leader's recovery poll.
+	configureAlarm({ store: alarmStore, leader: () => leader.isLeader() })
+	// Right to erasure (live.forget): compose every wired store that can
+	// purge per-user rows. Entries without purgeUser (e.g. idempotency
+	// before Postgres activation) are skipped by the composer; the DLQ
+	// stamps data.userId at capture via its forgetUserId extractor.
+	configureForget({
+		store: createForgetStore({
+			registry,
+			presence,
+			cursor,
+			rateLimit: limiter,
+			replay,
+			idempotency: idempotencyStore(),
+			deadLetter: webhookControls.deadLetter
+		}),
+		platform
+	})
+	// Outbound-webhook plane: fleet-shared retry budget + endpoint breaker
+	// + the durable DLQ the admin plane (and /demos/outbound-webhooks)
+	// inspects and replays.
+	configureWebhooks({
+		budget: webhookControls.budget,
+		breaker: webhookControls.breaker,
+		deadLetter: webhookControls.deadLetter
+	})
 	// Capture a complete cluster wrapper before the reactive layer replaces
 	// platform.publish. The reactive surrogate cannot reconstruct production
 	// adapter methods that are non-enumerable; the pressure topic has no
@@ -283,6 +361,7 @@ export async function shutdown() {
 		leader.stop(),
 		presence.destroy(),
 		registry.destroy(),
+		destroyRedisCoordinators(),
 		stopLocalHealthServer()
 	])
 }

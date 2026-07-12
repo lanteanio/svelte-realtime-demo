@@ -90,6 +90,14 @@
 					<span class="badge {snap ? reasonClass(snap.reason) : 'badge-ghost'}" data-testid="reason">
 						{snap?.reason ?? '...'}
 					</span>
+					<!-- 0.6: the composite 0..1 pressure scalar behind the reason enum -->
+					<progress
+						class="progress progress-warning w-24"
+						value={snap?.value ?? 0}
+						max="1"
+						data-testid="pressure-value"
+						title="composite pressure scalar (0..1)"
+					></progress>
 					<span class="text-xs opacity-60">
 						WS: <span class="font-mono">{$status}</span>
 					</span>
@@ -115,6 +123,30 @@
 						<dt class="opacity-60">RSS MB</dt>
 						<dd class="font-bold tabular-nums" data-testid="memory-mb">{(snap?.memoryMB ?? 0).toFixed(0)}</dd>
 					</div>
+					<div>
+						<dt class="opacity-60">backpressured</dt>
+						<dd class="font-bold tabular-nums" data-testid="backpressured-conns" title="connections with a non-empty outbound socket buffer; maxBufferedBytes is the worst one">{snap?.backpressuredConnections ?? 0}</dd>
+					</div>
+					<div>
+						<dt class="opacity-60">max buffered</dt>
+						<dd class="font-bold tabular-nums" data-testid="max-buffered">{((snap?.maxBufferedBytes ?? 0) / 1024).toFixed(0)}KB</dd>
+					</div>
+					<!-- Linux-only kernel signals (cgroup PSI + CFS quota); null
+					     off-Linux and outside quota-limited cgroups, so the prod
+					     deploy shows them while local dev on Windows/macOS hides
+					     them. -->
+					{#if snap?.psi != null}
+						<div>
+							<dt class="opacity-60">PSI cpu-some</dt>
+							<dd class="font-bold tabular-nums" data-testid="psi-cpu" title="pressure-stall: % of the last 10s some task waited on CPU">{(snap.psi.cpuSome10 ?? 0).toFixed(1)}%</dd>
+						</div>
+					{/if}
+					{#if snap?.cpuThrottle != null}
+						<div>
+							<dt class="opacity-60">CFS throttled</dt>
+							<dd class="font-bold tabular-nums" data-testid="cpu-throttle" title="fraction of the sample window the process sat suspended by the scheduler quota">{((snap.cpuThrottle.throttledRatio ?? 0) * 100).toFixed(0)}%</dd>
+						</div>
+					{/if}
 				</dl>
 			</div>
 		</div>
