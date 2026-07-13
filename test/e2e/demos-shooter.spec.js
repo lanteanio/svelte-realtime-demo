@@ -104,6 +104,26 @@ test.describe('/demos/shooter', () => {
 		expect(errors).toEqual([])
 	})
 
+	test('aimed shots register a server hit (hitTest onHit fires)', async ({ page }) => {
+		// A well-aimed shot should score: the server rewinds the target to the
+		// instant it was rendered and tests the ray. Observed: onHit never fires
+		// even single-instance (24 aimed shots -> 0 hits, 0 score), so this asserts
+		// the hitTest actually resolves. Marked test.fail while the upstream
+		// live.smooth shoot -> hitTest -> onHit path is dead; flips when fixed.
+		test.fail()
+		await openShooter(page)
+		const target = page.locator('[data-testid="sh-target"]').first()
+		for (let i = 0; i < 24; i++) {
+			const cx = Number(await target.getAttribute('cx'))
+			const cy = Number(await target.getAttribute('cy'))
+			if (Number.isFinite(cx) && Number.isFinite(cy)) await clickRangeAt(page, cx, cy)
+			await page.waitForTimeout(200)
+		}
+		await expect
+			.poll(() => readScore(page), { message: 'an aimed shot should register a hit', timeout: 5_000 })
+			.toBeGreaterThanOrEqual(1)
+	})
+
 	test('arrow key moves the predicted own dot', async ({ page }) => {
 		await openShooter(page)
 

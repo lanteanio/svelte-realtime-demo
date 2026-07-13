@@ -20,6 +20,33 @@ test.describe('/demos/arena', () => {
 		await waitForWS(page)
 	}
 
+	test('interest cull settles bounded after panning across the world', async ({ page }) => {
+		// Pan the interest center across the 2400x1600 world in spectate mode,
+		// then let it settle. The received set may spike transiently during rapid
+		// movement (stale entities briefly outrun the TTL sweep), but once panning
+		// stops it must settle back near the radius-420 subset, not stay pinned at
+		// the whole traversed population. Guards the cull's release path (a hard
+		// "never released" leak would leave this near 150).
+		await openArena(page)
+		await expect(page.getByTestId('arena-me')).toBeVisible({ timeout: 15_000 })
+		const receiving = async () => {
+			const t = (await page.getByTestId('arena-hud').textContent()) ?? ''
+			const m = t.match(/receiving\s+(\d+)\s+of\s+(\d+)/)
+			return m ? Number(m[1]) : -1
+		}
+		await page.waitForTimeout(3000)
+		await page.getByTestId('arena-spectate-toggle').click()
+		for (let i = 0; i < 60; i++) {
+			await page.getByTestId('arena-pan-right').click()
+			await page.getByTestId('arena-pan-down').click()
+		}
+		// Poll while the sweep catches up; the received set must fall back well
+		// below the full population once movement stops.
+		await expect
+			.poll(() => receiving(), { message: 'received set should settle after panning', timeout: 12_000 })
+			.toBeLessThan(60)
+	})
+
 	test('own dot renders and the HUD counts culled remote entities', async ({ page }) => {
 		const errors = collectErrors(page)
 		await openArena(page)

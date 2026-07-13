@@ -18,6 +18,7 @@
 
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
+import { waitForWS } from './helpers.js'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
@@ -72,6 +73,103 @@ test.describe('cluster bugs: presence + push', () => {
 			await ctxA1.close()
 			await ctxA2.close()
 			await ctxB1.close()
+		}
+	})
+
+	test('lobbies presence + room count stay consistent across replicas', async ({ browser }) => {
+		// A known-open cross-replica coordination gap in enumerable owner rooms
+		// (contrast the chat test above, a plain live.room, which passes). Two
+		// members join one table from different replicas:
+		//   - the enumerable rooms() registry aggregates the count cluster-wide
+		//     (both replicas read 2/8), but the presence() sub-stream only
+		//     delivers same-replica members (each viewer sees just itself), and
+		//   - when the remote member leaves, the registry count is never
+		//     decremented (stays 2/8), which over repeated join/leave cycles is
+		//     the "member count climbs" leak.
+		// Marked test.fail: it flips to a real failure (alerting us to drop the
+		// annotation) once the upstream presence relay + purge lands.
+		test.fail()
+		const table = String(100000 + Math.floor((Date.now() % 800000)))
+		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
+		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+
+		const rosterCount = (page) => page.getByTestId('lob-presence').locator('li.badge').count()
+		const roomCountNum = async (page) => {
+			const el = page.getByTestId('lob-room-count').first()
+			if (!(await el.count())) return null
+			const m = ((await el.textContent()) ?? '').match(/(\d+)\s*\//)
+			return m ? Number(m[1]) : null
+		}
+
+		try {
+			await a.goto(`${INSTANCE_A}/demos/lobbies`)
+			await b.goto(`${INSTANCE_B}/demos/lobbies`)
+			// Gate on WS-connected so the app is hydrated before we drive the
+			// form; interacting pre-hydration drops the bound input value.
+			await waitForWS(a)
+			await waitForWS(b)
+
+			// Both join the same table (A first so it holds the room open).
+			for (const page of [a, b]) {
+				await page.getByTestId('lob-new-id').fill(table)
+				await page.getByTestId('lob-create').click()
+				await expect(page.getByTestId('lob-table-title')).toHaveText(`Table ${table}`, { timeout: 10_000 })
+			}
+
+			// Cross-replica presence fan-out: A must see both members.
+			await expect
+				.poll(() => rosterCount(a), { message: 'A should see both members', timeout: 15_000 })
+				.toBe(2)
+
+			// Cross-replica leave purge: when B leaves, A's room count decrements.
+			await b.getByTestId('lob-leave').click()
+			await expect
+				.poll(() => roomCountNum(a), { message: 'A room count should decrement when B leaves', timeout: 15_000 })
+				.toBe(1)
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
+	test('per-board presence decrements cross-replica when a member navigates away', async ({ browser }) => {
+		// A member on a board (joinBoard -> board:{id} presence) navigates AWAY,
+		// firing leaveBoard -> presence.leave with the WS still open. A viewer on
+		// another replica must see the board's presence count drop, not linger
+		// until the 90s client maxAge. On 2 instances this decrements in ~65ms;
+		// this guards that cross-replica leave-diff relay (the reported prod "stuck
+		// N here" needs the 4-replica SO_REUSEPORT topology to manifest as a leak).
+		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
+		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		const title = `prestest-${Date.now()}`
+		// Board presence avatar count from the board page's PresenceBar.
+		const boardCount = (page) => page.locator('.avatar-group .avatar').count()
+		try {
+			// A creates a board and lands on it (joinBoard -> board:{id} presence).
+			await a.goto(`${INSTANCE_A}/`)
+			await waitForWS(a)
+			await a.getByPlaceholder('New board name...').fill(title)
+			await a.getByRole('button', { name: 'Create' }).click()
+			await a.waitForURL(/\/board\//, { timeout: 15_000 })
+			const boardPath = new URL(a.url()).pathname
+
+			// B joins the SAME board on the other replica; A sees both (fan-out ok).
+			await b.goto(`${INSTANCE_B}${boardPath}`)
+			await waitForWS(b)
+			await expect.poll(() => boardCount(a), { message: 'A should see both members', timeout: 15_000 }).toBe(2)
+
+			// B navigates away (leaveBoard fires; WS stays open) - A must decrement.
+			await b.goto(`${INSTANCE_B}/`)
+			await expect
+				.poll(() => boardCount(a), { message: 'A count should decrement when B navigates away', timeout: 10_000 })
+				.toBe(1)
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
 		}
 	})
 

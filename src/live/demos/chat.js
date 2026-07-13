@@ -34,6 +34,13 @@ import { metrics } from '$lib/server/metrics'
 
 const MAX_MESSAGES_PER_ROOM = 100
 
+// Backstop TTL on each room LIST, refreshed on every push. The demo-purge cron
+// (src/live/_purge.js) is the primary reaper; this is defense in depth so an
+// abandoned room self-expires within a couple of hours even if that cron ever
+// regresses again - a room LIST otherwise has no expiry (LTRIM caps size, not
+// age), which is exactly how weeks-old chat accumulated in prod.
+const CHAT_ROOM_TTL_SEC = 2 * 60 * 60
+
 const roomKey = (roomId) => `demos:chat:room:${roomId}`
 
 /**
@@ -70,6 +77,10 @@ async function pushMessage(roomId, msg, ctx) {
 	pipeline.rpush(key, raw)
 	pipeline.lrange(key, 0, -(MAX_MESSAGES_PER_ROOM + 1))
 	pipeline.ltrim(key, -MAX_MESSAGES_PER_ROOM, -1)
+	// Refresh the backstop TTL on every push (index 3; the evicted-message read
+	// below stays at index 1). An active room keeps resetting its expiry; an
+	// abandoned one falls off on its own.
+	pipeline.expire(key, CHAT_ROOM_TTL_SEC)
 	const results = await pipeline.exec()
 	const evicted = /** @type {string[]} */ (results?.[1]?.[1] ?? [])
 	for (const evictedRaw of evicted) {

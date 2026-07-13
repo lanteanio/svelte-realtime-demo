@@ -71,4 +71,42 @@ test.describe('/demos/multiplayer', () => {
 		await expect(page.getByTestId('mp-reaction').first()).toBeAttached({ timeout: 5_000 })
 		await expect(page.getByTestId('mp-error')).toHaveCount(0)
 	})
+
+	// A second reaction must NOT disturb emotes already floating. The failure
+	// this guards: rendering the reaction ring keyed by object identity re-keys
+	// every entry on each push, so Svelte tears down and rebuilds all reaction
+	// nodes, restarting the float animation (existing emotes snap back to spawn,
+	// faded ones revive). We assert the first emote's animation keeps advancing
+	// across a second, different reaction instead of rewinding toward zero.
+	test('a second reaction does not restart earlier reactions animations', async ({ page }) => {
+		await page.goto('/demos/multiplayer')
+		await waitForWS(page)
+
+		// Progress of the heart emote's float animation, or null if its node is
+		// missing. currentTime rewinding toward zero means the node was recreated.
+		const heartProgress = () => page.evaluate(() => {
+			const nodes = [...document.querySelectorAll('[data-testid="mp-reaction"]')]
+			const heart = nodes.find((n) => n.textContent.includes('❤'))
+			const anim = heart && heart.getAnimations ? heart.getAnimations()[0] : null
+			return anim ? Number(anim.currentTime) : null
+		})
+
+		await page.getByTestId('mp-react-heart').click()
+		await expect(page.getByTestId('mp-reaction')).toHaveCount(1, { timeout: 5_000 })
+		await page.waitForTimeout(800)
+
+		const before = await heartProgress()
+		expect(before, 'heart emote should be animating before the second tap').not.toBeNull()
+		expect(before).toBeGreaterThan(300)
+
+		// Tap a DIFFERENT reaction; it must append, not re-seed the whole set.
+		await page.getByTestId('mp-react-fire').click()
+		await expect(page.getByTestId('mp-reaction')).toHaveCount(2, { timeout: 5_000 })
+
+		const after = await heartProgress()
+		expect(after, 'heart emote should still be present after the second tap').not.toBeNull()
+		// The heart animation must have kept running, never rewound to spawn.
+		expect(after).toBeGreaterThanOrEqual(before)
+		await expect(page.getByTestId('mp-error')).toHaveCount(0)
+	})
 })

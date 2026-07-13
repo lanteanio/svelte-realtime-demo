@@ -20,8 +20,8 @@
  * replica reaches subscribers everywhere via the cluster pub/sub
  * fan-out of the 'created' event.
  *
- * The purge cron (src/lib/server/demo-purge.js) registers demo purges
- * centrally; this module just exports its purge(ctx).
+ * The purge cron (src/live/_purge.js) registers demo purges centrally;
+ * this module just exports its purge(ctx).
  */
 
 import { live, LiveError } from 'svelte-realtime/server'

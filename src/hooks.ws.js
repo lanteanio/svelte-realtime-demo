@@ -35,9 +35,10 @@ import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
-// Side-effect import: eagerly loads every demo with a purge surface and
-// registers the orchestrator cron at boot. See src/lib/server/demo-purge.js.
-import '$lib/server/demo-purge'
+// Side-effect import: eagerly loads every demo with a purge surface at boot.
+// The purge crons themselves register via the codegen because the module
+// lives under src/live/. See src/live/_purge.js.
+import '$live/_purge'
 
 // SIGUSR2 heap-snapshot trigger. `kill -SIGUSR2 <pid>` on the host writes
 // a `heap-<timestamp>.heapsnapshot` file under HEAP_SNAPSHOT_DIR (default

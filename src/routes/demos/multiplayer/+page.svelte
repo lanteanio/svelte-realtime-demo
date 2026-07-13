@@ -24,6 +24,7 @@
 -->
 <script>
 	import { lounge } from '$live/demos/multiplayer'
+	import { untrack } from 'svelte'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -142,6 +143,50 @@
 			actionError = errText(err)
 		}
 	}
+
+	// Reactions arrive on the server's bounded ring (room.reactions) as frames
+	// with no stable id. Rendering that ring directly and keying the {#each} by
+	// object identity re-keys every entry on each push, so Svelte tears down and
+	// rebuilds ALL reaction nodes and restarts the float animation: existing
+	// emotes snap back to their spawn point and already-faded ones revive.
+	// Reconcile the ring into a locally-keyed list instead - each genuinely-new
+	// frame gets a stable id and is dropped once its animation has run, so the
+	// emotes already floating keep floating and faded ones leave the DOM.
+	const REACTION_TTL = 2500 // matches the mp-float animation duration
+	let liveReactions = $state([])
+	let reactionSeq = 0
+	const seenReactions = new Set()
+	const reactionTimers = new Set()
+
+	$effect(() => {
+		const ring = room.reactions
+		untrack(() => {
+			const present = new Set()
+			for (const r of ring) {
+				const cid = `${r.key}|${r.token}|${r.x}|${r.y}`
+				present.add(cid)
+				if (seenReactions.has(cid)) continue
+				seenReactions.add(cid)
+				const id = ++reactionSeq
+				liveReactions.push({ id, token: r.token, x: r.x, y: r.y })
+				const timer = setTimeout(() => {
+					reactionTimers.delete(timer)
+					const i = liveReactions.findIndex((e) => e.id === id)
+					if (i !== -1) liveReactions.splice(i, 1)
+				}, REACTION_TTL)
+				reactionTimers.add(timer)
+			}
+			// Forget composites that fell off the server ring so an identical emote
+			// on the same spot later still counts as new (and seen stays bounded).
+			for (const cid of seenReactions) if (!present.has(cid)) seenReactions.delete(cid)
+		})
+	})
+
+	// Clear pending expiry timers when the page unmounts.
+	$effect(() => () => {
+		for (const timer of reactionTimers) clearTimeout(timer)
+		reactionTimers.clear()
+	})
 </script>
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
@@ -207,7 +252,7 @@
 						</div>
 					</div>
 				{/each}
-				{#each room.reactions as r (r)}
+				{#each liveReactions as r (r.id)}
 					<div
 						class="absolute text-2xl pointer-events-none mp-reaction"
 						style="left: {(r.x ?? 0.5) * 100}%; top: {(r.y ?? 0.5) * 100}%;"
