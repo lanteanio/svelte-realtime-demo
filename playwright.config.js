@@ -43,6 +43,7 @@ const projects = [
 		retries: 0,
 		testIgnore: [
 			'**/_*.spec.js',
+			'**/*.cluster.spec.js',
 			'**/cluster-probe.spec.js',
 			'**/cluster-bugs-probe.spec.js',
 			'**/demos-cluster-cron.spec.js',
@@ -83,6 +84,7 @@ if (optionalProject === 'resilience') {
 		workers: 1,
 		retries: 0,
 		testMatch: [
+			'**/*.cluster.spec.js',
 			'**/cluster-probe.spec.js',
 			'**/cluster-bugs-probe.spec.js',
 			'**/demos-cluster-cron.spec.js'

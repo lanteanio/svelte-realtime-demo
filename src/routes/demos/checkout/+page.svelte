@@ -68,30 +68,30 @@
 	<div class="card bg-base-200 shadow">
 		<div class="card-body items-center text-center py-10">
 			<div class="text-sm opacity-60">Total orders placed</div>
-			<div class="text-7xl font-bold tabular-nums">{$count ?? 0}</div>
+			<div class="text-7xl font-bold tabular-nums" data-testid="checkout-count" data-hydrated={$count !== undefined}>{$count ?? 0}</div>
 		</div>
 	</div>
 
 	<div class="flex flex-wrap gap-3 justify-center">
-		<button class="btn btn-primary" onclick={fireOne} disabled={busy}>
+		<button class="btn btn-primary" onclick={fireOne} disabled={busy} data-testid="checkout-place">
 			Place Order
 		</button>
-		<button class="btn btn-warning" onclick={fireFive} disabled={busy}>
+		<button class="btn btn-warning" onclick={fireFive} disabled={busy} data-testid="checkout-retry">
 			Retry x5 (same key)
 		</button>
-		<button class="btn btn-ghost" onclick={handleReset}>Reset</button>
+		<button class="btn btn-ghost" onclick={handleReset} data-testid="checkout-reset">Reset</button>
 	</div>
 
 	{#if history.length > 0}
 		<div class="card bg-base-100 border border-base-300">
 			<div class="card-body py-4">
 				<h2 class="card-title text-sm">RPC history (newest first)</h2>
-				<ul class="text-xs space-y-1 font-mono">
+				<ul class="text-xs space-y-1 font-mono" data-testid="checkout-history">
 					{#each history as entry, i (i + entry.key + entry.label)}
-						<li class="flex justify-between gap-3">
+						<li class="flex justify-between gap-3" data-testid="checkout-history-row">
 							<span class="opacity-60 truncate max-w-[18ch]" title={entry.key}>{entry.key.slice(0, 8)}...</span>
-							<span class="opacity-60">{entry.label}</span>
-							<span class="font-bold">count = {entry.count}</span>
+							<span class="opacity-60" data-testid="checkout-history-label">{entry.label}</span>
+							<span class="font-bold" data-testid="checkout-history-count">count = {entry.count}</span>
 						</li>
 					{/each}
 				</ul>
