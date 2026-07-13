@@ -63,9 +63,21 @@
 	const byKind = $derived(snap?.handlers?.byKind ?? null)
 	const modifiers = $derived(snap?.handlers?.modifiers ?? null)
 	const dlqTopics = $derived(Object.entries(dlq?.byTopic ?? {}))
+	// Which worker answered this snapshot. introspect() is per-process, so on
+	// the SO_REUSEPORT cluster each reconnect can land on a different replica
+	// and the counts jump; the id makes that self-explanatory. null in
+	// single-instance dev before the leader facade is active.
+	const replica = $derived(snap?.replica ?? null)
 
 	function fmtTs(ts) {
 		return ts ? new Date(ts).toLocaleTimeString() : '-'
+	}
+
+	// Match the cluster-cron page: the instanceId is a 16-hex string; show
+	// the first 8 so the same worker reads the same in both demos.
+	function shortId(id) {
+		if (!id) return null
+		return id.length <= 10 ? id : id.slice(0, 8) + '...'
 	}
 </script>
 
@@ -93,11 +105,21 @@
 	<!-- Headline counters -->
 	<section class="card bg-base-200" data-testid="ops-headline-card">
 		<div class="card-body py-3">
-			<div class="flex items-center justify-between">
+			<div class="flex items-center justify-between gap-2">
 				<h2 class="card-title text-sm">Dispatch state</h2>
-				<span class="text-xs opacity-50" data-testid="ops-refreshed-at">
-					{refreshedAt ? `refreshed ${fmtTs(refreshedAt)}` : 'loading...'}
-				</span>
+				<div class="flex items-center gap-2 text-xs opacity-50">
+					{#if replica}
+						<span
+							data-testid="ops-replica"
+							title="This introspect() read the local state of worker {replica}. On the multi-replica cluster each reconnect (F5) can land on a different worker, so the counts jump."
+						>
+							reading replica <span class="font-mono" data-instance-id={replica}>{shortId(replica)}</span>
+						</span>
+					{/if}
+					<span data-testid="ops-refreshed-at">
+						{refreshedAt ? `refreshed ${fmtTs(refreshedAt)}` : 'loading...'}
+					</span>
+				</div>
 			</div>
 			<dl class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mt-1">
 				<div>
@@ -117,6 +139,15 @@
 					<dd class="font-bold tabular-nums text-lg" data-testid="ops-topics-subscribers">{snap?.topics?.subscribers ?? 0}</dd>
 				</div>
 			</dl>
+			{#if replica}
+				<p class="text-xs opacity-50" data-testid="ops-replica-note">
+					These are one worker's local counts. On a multi-replica
+					deploy each reconnect can land on a different replica, so the
+					numbers jump between refreshes - only the leader runs the
+					crons, and connections/RSS are per-process. The replica id
+					above tells you which worker answered.
+				</p>
+			{/if}
 			{#if snap && !snap.transport}
 				<p class="text-xs opacity-50" data-testid="ops-transport-missing">
 					Transport snapshot unavailable (older adapter or before

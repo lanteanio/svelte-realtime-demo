@@ -35,6 +35,18 @@ test.describe('/demos/ops', () => {
 		).toBeGreaterThan(0)
 		await expect(page.getByTestId('ops-handlers-kinds')).toBeVisible()
 
+		// The snapshot stamps which worker answered (leader.instanceId), so the
+		// per-process counts that swing on a multi-replica deploy stay
+		// self-explanatory. The leader facade is active once Redis infra
+		// initialised (the id is generated locally, independent of Redis
+		// connectivity), so a single-instance run still shows one stable id.
+		const replica = page.getByTestId('ops-replica')
+		await expect(replica).toContainText('reading replica', { timeout: 15_000 })
+		await expect(replica.locator('[data-instance-id]')).toHaveAttribute(
+			'data-instance-id',
+			/^[0-9a-f]{6,}$/
+		)
+
 		expect(errors).toHaveLength(0)
 	})
 

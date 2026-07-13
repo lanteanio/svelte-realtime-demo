@@ -41,14 +41,26 @@
  */
 
 import { live, introspect, getDeadLetter } from 'svelte-realtime/server'
+import { leader } from '$lib/server/redis'
 
 /**
  * Counts-only dispatch snapshot. Pure read over in-memory registry
  * sizes - cheap enough to poll. `transport` is composed in by the
  * adapter platform (null before init or on an adapter without
  * `platform.introspect`).
+ *
+ * `replica` stamps WHICH worker answered. introspect() is per-process by
+ * design (registry sizes, connection count, cron-running are all local to
+ * one worker), so on the SO_REUSEPORT cluster each reconnect can land on a
+ * different replica and the counts swing. Surfacing the answering worker's
+ * id - the same `leader.instanceId` the cluster-cron demo shows - turns
+ * that swing from "is this broken?" into "you are reading replica X". It
+ * is null only before init / during build analysis (fail-closed facade).
  */
-export const snapshot = live(async () => introspect())
+export const snapshot = live(async () => {
+	const snap = await introspect()
+	return { ...snap, replica: leader.instanceId }
+})
 
 /**
  * Counts-only DLQ summary. The Redis-backed store's methods are async

@@ -25,6 +25,7 @@
 	import { pendingMutations, uploading, offlineCheckpoint } from 'svelte-realtime/client'
 	import { configureApp } from '$lib/configure-app'
 	import { entriesStream, addEntry } from '$live/demos/offline'
+	import { browser } from '$app/environment'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -82,6 +83,91 @@
 	function timeOf(ts) {
 		return new Date(ts).toLocaleTimeString()
 	}
+
+	// -- In-page "simulate offline" so the demo tells its own story without
+	// DevTools. There is no public client API to pause the socket, so this
+	// leans on two mechanisms the adapter client already supports:
+	//
+	//  1. The client drops its live socket on the browser `offline` event and
+	//     reconnects on `online` (that drop is exactly what arms the realtime
+	//     offline queue). We dispatch those events by hand.
+	//  2. To STAY offline until Reconnect (the queue drains on any successful
+	//     reconnect), we temporarily swap `window.WebSocket` for a stub that
+	//     never opens, so the client's reconnect attempts keep failing. The
+	//     client's `maxReconnectAttempts` default is Infinity, so a blocked
+	//     reconnect loop can never wedge into a terminal failed state; the
+	//     backoff just grows until we restore the real socket and dispatch
+	//     `online`, which resets the backoff and reconnects immediately.
+	//
+	// This is a demo affordance to make the queue story visible in-page. A
+	// first-class client-side "simulate offline" primitive would be the proper
+	// home for it; until then this stays scoped to this demo page.
+	let simulatedOffline = $state(false)
+	let realWebSocket = null
+
+	function installOfflineBlock() {
+		if (!browser || realWebSocket) return
+		const Real = window.WebSocket
+		realWebSocket = Real
+		window.WebSocket = class OfflineSocket {
+			static CONNECTING = Real.CONNECTING
+			static OPEN = Real.OPEN
+			static CLOSING = Real.CLOSING
+			static CLOSED = Real.CLOSED
+			constructor() {
+				this.readyState = Real.CONNECTING
+				this.binaryType = 'arraybuffer'
+				this.onopen = null
+				this.onclose = null
+				this.onmessage = null
+				this.onerror = null
+				// Never reach OPEN. Fail on the next tick so the client sees a
+				// normal transient (1006) drop, classifies it RETRY, and keeps
+				// the offline queue armed while it schedules the next attempt.
+				setTimeout(() => {
+					this.readyState = Real.CLOSED
+					this.onclose?.({ code: 1006, reason: 'simulated offline', wasClean: false })
+				}, 0)
+			}
+			send() {}
+			close() { this.readyState = Real.CLOSED }
+			addEventListener() {}
+			removeEventListener() {}
+		}
+	}
+
+	function removeOfflineBlock() {
+		if (!browser || !realWebSocket) return
+		window.WebSocket = realWebSocket
+		realWebSocket = null
+	}
+
+	function goOffline() {
+		if (!browser) return
+		simulatedOffline = true
+		installOfflineBlock()
+		window.dispatchEvent(new Event('offline'))
+	}
+
+	function goOnline() {
+		if (!browser) return
+		simulatedOffline = false
+		removeOfflineBlock()
+		window.dispatchEvent(new Event('online'))
+	}
+
+	function toggleOffline() {
+		if (simulatedOffline) goOnline()
+		else goOffline()
+	}
+
+	// Never leave the socket blocked if the viewer navigates away mid-simulation.
+	$effect(() => () => {
+		if (realWebSocket) {
+			removeOfflineBlock()
+			if (browser) window.dispatchEvent(new Event('online'))
+		}
+	})
 </script>
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
@@ -95,6 +181,12 @@
 			a full tab reload, and replays exactly once on reconnect - the
 			queue synthesizes an idempotency key per mutation and the
 			server's <code>live.idempotent</code> wrapper dedups the replay.
+		</p>
+		<p class="text-sm opacity-70 mt-2">
+			Try it right here: hit <strong>Go offline</strong>, sign the
+			guestbook a few times (each post queues instead of sending), then
+			<strong>Reconnect</strong> and watch the queue replay every entry
+			exactly once. No DevTools needed.
 		</p>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
@@ -128,6 +220,33 @@
 					<span class="badge badge-warning badge-sm" data-testid="off-gap-badge">upload gap detected</span>
 				{/if}
 			</div>
+		</div>
+	</section>
+
+	<!-- Simulate offline / reconnect in-page, so the queue -> replay story is
+	     visible without opening DevTools. -->
+	<section
+		class="card {simulatedOffline ? 'bg-warning/10 border border-warning' : 'bg-base-200'}"
+		data-testid="off-sim-card"
+	>
+		<div class="card-body py-3 flex-row flex-wrap items-center justify-between gap-3">
+			<div class="text-sm">
+				{#if simulatedOffline}
+					<span class="badge badge-warning badge-sm mr-2" data-testid="off-sim-badge">simulated offline</span>
+					Socket dropped. New posts queue locally - hit Reconnect to replay them exactly once.
+				{:else}
+					<span class="badge badge-success badge-sm mr-2">online</span>
+					Connected. Go offline to watch posts queue and replay on reconnect.
+				{/if}
+			</div>
+			<button
+				type="button"
+				class="btn btn-sm {simulatedOffline ? 'btn-warning' : 'btn-outline'}"
+				onclick={toggleOffline}
+				data-testid="off-sim-toggle"
+			>
+				{simulatedOffline ? 'Reconnect' : 'Go offline'}
+			</button>
 		</div>
 	</section>
 

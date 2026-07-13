@@ -51,6 +51,14 @@
  * drop(topic) primitive.
  */
 
+// realtime-allow-public -- this module exports only live.cron() schedules.
+// The codegen registers those server-side via __registerCron (the scheduler)
+// and emits NO client stub and NO RPC-dispatch entry for them, so there is no
+// client-invocable surface here at all - a purge can only be triggered by the
+// leader's cron tick, never by a WS. The codegen's blanket "no _guard" nudge
+// counts cron export names all the same, so this annotation silences a warning
+// whose "every authenticated WS can invoke any handler" wording does not apply
+// to a cron-only module. There are no RPCs to guard.
 import { live } from 'svelte-realtime/server'
 import { env } from '$env/dynamic/private'
 import { TOPICS } from '$lib/server/topics'

@@ -11,16 +11,24 @@
  * not see it.
  */
 import { readdir, readFile } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1')
 const SRC = join(ROOT, 'src')
-const LIVE = join(ROOT, 'src', 'live')
+// Trailing separator so the prefix test matches only files INSIDE the live
+// dir, never a sibling like src/live.js or src/live-foo/ that shares the
+// stem but is just as invisible to the codegen as src/lib/server/ was.
+const LIVE = join(ROOT, 'src', 'live') + sep
 const SKIP = new Set(['.git', '.svelte-kit', 'build', 'node_modules', 'playwright-report', 'test-results'])
+// Deliberately broad: matches ANY live.cron( call, not just the codegen's
+// `export const X = live.cron(` shape. The original offender used a ternary
+// (`export const x = COND ? live.cron(...) : ...`) that the codegen would not
+// register but also would not match a strict export pattern - the guard has
+// to catch that too, so it errs toward flagging.
 const CRON_RE = /\blive\s*\.\s*cron\s*\(/
 
 const offenders = []
-let liveCronCount = 0
+let liveFiles = 0
 
 await walk(SRC)
 
@@ -31,7 +39,7 @@ if (offenders.length > 0) {
 	process.exit(1)
 }
 
-console.log(`cron registration: ${liveCronCount} live.cron() export(s), all under src/live/`)
+console.log(`cron registration: ${liveFiles} file(s) with live.cron(), all under src/live/`)
 
 async function walk(dir) {
 	for (const entry of await readdir(dir, { withFileTypes: true })) {
@@ -41,7 +49,7 @@ async function walk(dir) {
 			const full = join(dir, entry.name)
 			const text = await readFile(full, 'utf8')
 			if (!CRON_RE.test(text)) continue
-			if (full.startsWith(LIVE)) liveCronCount++
+			if (full.startsWith(LIVE)) liveFiles++
 			else offenders.push(relative(ROOT, full))
 		}
 	}
