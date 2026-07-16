@@ -11,7 +11,7 @@
  * UI reactively renders the longer list.
  *
  * Live updates compose: a new entry appended via `appendLogEntry`
- * publishes 'created' on the same topic, lands at the top of the
+ * publishes 'created' on the same topic, lands at the bottom of the
  * list regardless of which page boundaries the user has paged
  * through. The framework picks the right behaviour from
  * `merge: 'crud'` plus the per-event publish kind.

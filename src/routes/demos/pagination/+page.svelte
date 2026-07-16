@@ -143,8 +143,8 @@
 			{:else}
 				<ul class="space-y-1 text-xs font-mono" data-testid="entries-list">
 					{#each entries as e (e.id)}
-						<li class="flex items-center gap-2" data-testid="entry-row">
-							<span class="opacity-50 w-20">{timeOf(e.ts)}</span>
+						<li class="flex items-center gap-2" data-testid="entry-row" data-seq={e.seq}>
+							<span class="opacity-50 w-20" data-testid="entry-time">{timeOf(e.ts)}</span>
 							<span class="opacity-50 w-12 text-right">#{e.seq}</span>
 							<span class="badge badge-xs {severityClass(e.severity)}" data-testid="entry-severity">{e.severity}</span>
 							<span class="flex-1 truncate" data-testid="entry-message">{e.message}</span>
