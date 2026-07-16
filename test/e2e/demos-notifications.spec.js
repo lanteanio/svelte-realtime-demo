@@ -1,14 +1,37 @@
 import { test, expect } from '@playwright/test'
+import { waitForWS } from './helpers.js'
+
+// Exhaustive human-like coverage for /demos/notifications - live.push
+// request/reply, a global scheduled queue drained by a 6-field live.cron,
+// and a capped activity log. Drives every interactive element (recipient
+// select, schedule slider, text input, send, the two inbox ack buttons,
+// scheduled cancel) and asserts REAL outcomes: the SEND AWAITS the
+// recipient's reply (in-flight "Sending..." with no premature outcome),
+// the exact outcome per reply (delivered / dismissed), the 8s push
+// timeout branch, the scheduled-queue stream fanning out to both tabs
+// with a live countdown, the cron draining it into the recipient's inbox,
+// cancel before fire, and the activity log recording each kind. The
+// "alone" state (recipient select disabled) lives in the isolated
+// project. Cross-replica behaviour (registry-routed push + cluster
+// -singleton cron) lives in the .cluster.spec.js sibling.
+//
+// The scheduled queue and activity log are GLOBAL shared Redis state, so
+// every test tags its message with a unique RUN token and filters by it
+// (workers=1 serial; per-tier FLUSHDB gives a clean start).
 
 const RUN = `e2e-${Date.now()}`
 
+async function open(page) {
+	await page.goto('/demos/notifications')
+	await waitForWS(page)
+}
+
 /**
- * Read the page's `data-testid="my-id"` element and return the full user id
- * from its `data-user-id` attribute. The page only renders the first 8 chars
- * visually; the full id is required so A can selectOption(bId) deterministically
- * against the recipient dropdown - relying on the pre-selected first option
- * is flaky when parallel test workers contribute other identities to global
- * presence.
+ * Read the page's `data-testid="my-id"` element and return the full user
+ * id from its `data-user-id` attribute. The page renders only the first 8
+ * chars visually; the full id is needed to selectOption(bId) deterministically
+ * against the recipient dropdown - relying on the pre-selected first option is
+ * flaky when other identities (parallel contexts) also sit in global presence.
  */
 async function getMyId(page) {
 	return await page.getByTestId('my-id').getAttribute('data-user-id')
@@ -28,32 +51,80 @@ async function selectRecipient(a, bId) {
 test.describe('/demos/notifications', () => {
 	test('alone on the page: recipient dropdown shows the no-users state and Send is disabled', async ({ page, baseURL }) => {
 		// "Alone" requires zero entries in the global presence channel.
-		// Achievable against a freshly-started localhost dev server with
-		// no other tabs open; not achievable against the public demo,
-		// where real users and continuous background traffic keep
-		// presence populated. Skip when BASE_URL points at a public host.
+		// Achievable against a freshly-started localhost dev server with no
+		// other tabs open; not achievable against the public demo, where real
+		// users and continuous background traffic keep presence populated.
 		test.skip(
 			!/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(baseURL ?? ''),
 			'alone semantics require localhost dev server (no real-user presence)'
 		)
-		await page.goto('/demos/notifications')
+		await open(page)
 		// Single context = no other users in global presence.
 		await expect(page.getByTestId('inbox-empty')).toBeVisible({ timeout: 5_000 })
-		// Recipient select is disabled when nobody else is online.
+		// Recipient select is disabled and shows the no-users placeholder.
 		await expect(page.getByTestId('recipient-select')).toBeDisabled()
-		// Send button is disabled until there's a recipient + text.
+		await expect(page.getByTestId('recipient-select')).toContainText('No other users online')
+		// Send is disabled: no recipient and no text.
 		await expect(page.getByTestId('send-button')).toBeDisabled()
+		// The queue starts empty.
+		await expect(page.getByTestId('scheduled-empty')).toBeVisible()
 	})
 
-	test('happy path: A pushes to B, B clicks Got it, A sees delivered', async ({ browser }) => {
+	test('send controls gate on recipient presence, message text, and the schedule slider', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
 		try {
-			await a.goto('/demos/notifications')
-			await b.goto('/demos/notifications')
+			await open(a)
+			await open(b)
+			const aId = await getMyId(a)
+			const bId = await getMyId(b)
+			await selectRecipient(a, bId)
 
+			// You are never your own recipient (the list filters out self).
+			await expect(a.getByTestId(`recipient-option-${aId}`)).toHaveCount(0)
+
+			// A recipient exists but there is no text yet -> Send stays disabled.
+			await expect(a.getByTestId('text-input')).toHaveValue('')
+			await expect(a.getByTestId('send-button')).toBeDisabled()
+
+			// Real text enables it; at schedule 0 the button reads "Send".
+			await a.getByTestId('text-input').fill(`gate-${RUN}`)
+			await expect(a.getByTestId('send-button')).toBeEnabled()
+			await expect(a.getByTestId('send-button')).toHaveText('Send')
+
+			// Whitespace-only text re-disables it (the client pre-empts the
+			// server's `text required` VALIDATION).
+			await a.getByTestId('text-input').fill('   ')
+			await expect(a.getByTestId('send-button')).toBeDisabled()
+
+			// Back to real text, then the slider flips the button into schedule
+			// mode and back - the label tracks the slider value live.
+			await a.getByTestId('text-input').fill(`gate-${RUN}`)
+			await expect(a.getByTestId('send-button')).toBeEnabled()
+			await a.getByTestId('schedule-input').fill('5')
+			await expect(a.getByTestId('send-button')).toHaveText('Schedule (5s)')
+			await a.getByTestId('schedule-input').fill('0')
+			await expect(a.getByTestId('send-button')).toHaveText('Send')
+
+			// Clearing the text disables Send again even with a valid recipient.
+			await a.getByTestId('text-input').fill('')
+			await expect(a.getByTestId('send-button')).toBeDisabled()
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
+	test('happy path: the send awaits B\'s reply; Got it -> delivered, card clears, activity logs it', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await open(a)
+			await open(b)
 			const bId = await getMyId(b)
 			await selectRecipient(a, bId)
 
@@ -61,33 +132,44 @@ test.describe('/demos/notifications', () => {
 			await a.getByTestId('text-input').fill(text)
 			await a.getByTestId('send-button').click()
 
-			// Card lands in B's inbox with the right text.
+			// The card lands in B's inbox with the exact text...
 			const inboxCard = b.getByTestId('inbox-card').filter({ hasText: text })
 			await expect(inboxCard).toBeVisible({ timeout: 8_000 })
+			await expect(inboxCard.getByTestId('inbox-card-text')).toHaveText(text)
 
-			// B acks with Got it.
+			// ...and the send is genuinely AWAITING B's reply: A's button is
+			// stuck on "Sending..." and no outcome banner has appeared yet.
+			// (Not optimistic - the outcome is the server-returned reply value.)
+			await expect(a.getByTestId('send-button')).toHaveText('Sending...')
+			await expect(a.getByTestId('outcome')).toHaveCount(0)
+
+			// B clicks Got it; the reply value travels back as A's outcome.
 			await inboxCard.getByTestId('inbox-ack-ok').click()
-
-			// A's outcome banner reports delivered.
 			await expect(a.getByTestId('outcome-kind')).toHaveText('delivered', { timeout: 8_000 })
 
-			// Card cleared from B's inbox.
+			// Card cleared from B's inbox; the text input was reset on success.
 			await expect(inboxCard).toHaveCount(0)
+			await expect(a.getByTestId('text-input')).toHaveValue('')
+
+			// Both tabs' activity logs record a delivered entry for this text.
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first())
+				.toContainText('delivered', { timeout: 8_000 })
+			await expect(b.getByTestId('activity-item').filter({ hasText: text }).first())
+				.toContainText('delivered', { timeout: 8_000 })
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
 		}
 	})
 
-	test('dismiss path: B clicks Dismiss, A sees dismissed', async ({ browser }) => {
+	test('dismiss path: Dismiss -> A sees dismissed and the activity log agrees', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
 		try {
-			await a.goto('/demos/notifications')
-			await b.goto('/demos/notifications')
-
+			await open(a)
+			await open(b)
 			const bId = await getMyId(b)
 			await selectRecipient(a, bId)
 
@@ -100,46 +182,90 @@ test.describe('/demos/notifications', () => {
 			await inboxCard.getByTestId('inbox-ack-dismiss').click()
 
 			await expect(a.getByTestId('outcome-kind')).toHaveText('dismissed', { timeout: 8_000 })
+			await expect(inboxCard).toHaveCount(0)
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first())
+				.toContainText('dismissed', { timeout: 8_000 })
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
 		}
 	})
 
-	test('schedule + fire: cron tick drains the queue, B sees the card', async ({ browser }) => {
+	test('timeout: B gets the card but never replies; A resolves timed out after the 8s window', async ({ browser }) => {
+		test.setTimeout(30_000)
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
 		try {
-			await a.goto('/demos/notifications')
-			await b.goto('/demos/notifications')
-
+			await open(a)
+			await open(b)
 			const bId = await getMyId(b)
 			await selectRecipient(a, bId)
 
-			// Schedule 2 seconds out - short enough to keep the test fast,
-			// long enough to assert the entry sits in the queue first.
-			const text = `sched-${RUN}-fire`
+			const text = `to-${RUN}`
 			await a.getByTestId('text-input').fill(text)
-			await a.getByTestId('schedule-input').fill('2')
 			await a.getByTestId('send-button').click()
 
-			// Outcome banner reports scheduled.
-			await expect(a.getByTestId('outcome-kind')).toHaveText('scheduled', { timeout: 5_000 })
-
-			// Both tabs see the entry in the scheduled list.
-			const scheduledItem = a.getByTestId('scheduled-item').filter({ hasText: text })
-			await expect(scheduledItem).toBeVisible({ timeout: 5_000 })
-
-			// Within ~5s the cron tick fires and B's inbox shows the card.
+			// B receives the card but deliberately does NOT ack it.
 			const inboxCard = b.getByTestId('inbox-card').filter({ hasText: text })
 			await expect(inboxCard).toBeVisible({ timeout: 8_000 })
 
-			// And the scheduled list has dropped the entry.
-			await expect(scheduledItem).toHaveCount(0)
+			// After the 8s push timeout the send resolves as timed out - this
+			// is the real server-side PUSH_TIMEOUT_MS branch, not a client guess.
+			await expect(a.getByTestId('outcome-kind')).toHaveText('timed out', { timeout: 15_000 })
+			// The un-acked card is still sitting in B's inbox (the recipient's
+			// promise never resolved; only the sender's await timed out).
+			await expect(inboxCard).toBeVisible()
+			// Activity records the timeout for this text.
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first())
+				.toContainText('timed out', { timeout: 8_000 })
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
 
-			// Clean up B's inbox so the next test starts clean.
+	test('schedule + fire: both tabs see the queued entry with a countdown; the cron drains it into B\'s inbox', async ({ browser }) => {
+		test.setTimeout(30_000)
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await open(a)
+			await open(b)
+			const bId = await getMyId(b)
+			await selectRecipient(a, bId)
+
+			// Schedule 5s out: a comfortable window to observe the entry on
+			// both tabs before the cron drains it, still fast overall.
+			const text = `sched-${RUN}-fire`
+			await a.getByTestId('text-input').fill(text)
+			await a.getByTestId('schedule-input').fill('5')
+			await expect(a.getByTestId('send-button')).toHaveText('Schedule (5s)')
+			await a.getByTestId('send-button').click()
+
+			// The outcome banner reports scheduled (not delivered).
+			await expect(a.getByTestId('outcome-kind')).toHaveText('scheduled', { timeout: 5_000 })
+
+			// The queue stream fans out to BOTH tabs, with a live "in Ns" badge.
+			const aItem = a.getByTestId('scheduled-item').filter({ hasText: text })
+			const bItem = b.getByTestId('scheduled-item').filter({ hasText: text })
+			await expect(aItem).toBeVisible({ timeout: 5_000 })
+			await expect(bItem).toBeVisible({ timeout: 5_000 })
+			await expect(aItem).toContainText(/in \d+s/)
+
+			// The 1Hz cron tick drains the due entry: B's inbox gets the card,
+			// the queue drops it on both tabs, and activity logs a 'fired' event.
+			const inboxCard = b.getByTestId('inbox-card').filter({ hasText: text })
+			await expect(inboxCard).toBeVisible({ timeout: 10_000 })
+			await expect(aItem).toHaveCount(0, { timeout: 5_000 })
+			await expect(bItem).toHaveCount(0)
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first())
+				.toContainText('fired', { timeout: 8_000 })
+
+			// Cleanup: B acks so the fired push resolves rather than timing out.
 			await inboxCard.getByTestId('inbox-ack-ok').click()
 		} finally {
 			await ctxA.close()
@@ -147,38 +273,42 @@ test.describe('/demos/notifications', () => {
 		}
 	})
 
-	test('schedule + cancel: cancel removes the entry before fire, activity log shows cancelled', async ({ browser }) => {
+	test('schedule + cancel: cancel before fire removes the entry on both tabs; activity shows cancelled, no card fires', async ({ browser }) => {
+		test.setTimeout(30_000)
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
 		try {
-			await a.goto('/demos/notifications')
-			await b.goto('/demos/notifications')
-
+			await open(a)
+			await open(b)
 			const bId = await getMyId(b)
 			await selectRecipient(a, bId)
 
-			// Long-enough schedule that we have time to cancel.
+			// Schedule far enough out that we have time to cancel it.
 			const text = `sched-${RUN}-cancel`
 			await a.getByTestId('text-input').fill(text)
 			await a.getByTestId('schedule-input').fill('30')
 			await a.getByTestId('send-button').click()
+			await expect(a.getByTestId('outcome-kind')).toHaveText('scheduled', { timeout: 5_000 })
 
-			const scheduledItem = a.getByTestId('scheduled-item').filter({ hasText: text })
-			await expect(scheduledItem).toBeVisible({ timeout: 5_000 })
+			const aItem = a.getByTestId('scheduled-item').filter({ hasText: text })
+			const bItem = b.getByTestId('scheduled-item').filter({ hasText: text })
+			await expect(aItem).toBeVisible({ timeout: 5_000 })
+			await expect(bItem).toBeVisible({ timeout: 5_000 })
 
-			// Cancel via the inline button.
-			await scheduledItem.getByRole('button', { name: 'Cancel' }).click()
+			// Cancel from A; the deletion fans out to B too.
+			await aItem.getByRole('button', { name: 'Cancel' }).click()
+			await expect(aItem).toHaveCount(0, { timeout: 5_000 })
+			await expect(bItem).toHaveCount(0, { timeout: 5_000 })
 
-			// Item gone from the list.
-			await expect(scheduledItem).toHaveCount(0, { timeout: 5_000 })
+			// Activity records a cancelled entry for this text.
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first())
+				.toContainText('cancelled', { timeout: 5_000 })
 
-			// Activity log shows a cancelled entry for our text.
-			const activityCancelled = a.getByTestId('activity-item').filter({ hasText: text })
-			await expect(activityCancelled.first()).toContainText('cancelled', { timeout: 5_000 })
-
-			// And B's inbox never received a card for this text (no fire happened).
+			// No card ever fires: wait past a couple of cron ticks and confirm
+			// B's inbox stayed empty for this text.
+			await a.waitForTimeout(2_500)
 			await expect(b.getByTestId('inbox-card').filter({ hasText: text })).toHaveCount(0)
 		} finally {
 			await ctxA.close()
