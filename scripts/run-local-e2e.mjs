@@ -120,7 +120,12 @@ function commonEnvironment() {
 		TEST_POSTGRES_CONTAINER: postgresName,
 		TEST_REDIS_CONTAINER: redisName,
 		METRICS_SCRAPE_TOKEN: 'local-e2e-token',
-		DEMO_NEWS_WEBHOOK_SECRET: 'local-e2e-webhook-secret'
+		DEMO_NEWS_WEBHOOK_SECRET: 'local-e2e-webhook-secret',
+		// The demo purge crons trim user-appended content on a wall-clock
+		// schedule; a tick landing mid-tier would delete rows a running spec
+		// just created. No spec exercises the cron itself, so disable both.
+		DEMO_PURGE_INTERVAL_MIN: '0',
+		DEMO_UPLOAD_PURGE_INTERVAL_MIN: '0'
 	}
 }
 
