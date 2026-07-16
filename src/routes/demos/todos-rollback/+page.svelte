@@ -26,8 +26,9 @@
 	import { todosStream, addTodo, toggleTodo, removeTodo, clearAll } from '$live/demos/todos-rollback'
 
 	let todos = $state([])
+	let hydrated = $state(false)
 	$effect(() => {
-		const off = todosStream.subscribe((v) => { todos = v ?? [] })
+		const off = todosStream.subscribe((v) => { todos = v ?? []; hydrated = true })
 		return () => off()
 	})
 
@@ -161,7 +162,7 @@
 					</button>
 				{/if}
 			</div>
-			<ul class="space-y-1 text-sm" data-testid="todos">
+			<ul class="space-y-1 text-sm" data-testid="todos" data-hydrated={hydrated}>
 				{#each todos as todo (todo.id)}
 					<li class="flex items-center gap-2">
 						<input
