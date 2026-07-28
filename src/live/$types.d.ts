@@ -212,6 +212,7 @@ declare module '$live/demos/from-seq' {
 
   export const myFromSeqState: (...args: any[]) => Promise<any>;
   export const eventStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const eventStreamFast: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const empty: Readable<undefined>;
 }
 

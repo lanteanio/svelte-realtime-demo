@@ -24,6 +24,7 @@
 -->
 <script>
 	import { todosStream, addTodo, toggleTodo, removeTodo, clearAll } from '$live/demos/todos-rollback'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let todos = $state([])
 	let hydrated = $state(false)
@@ -99,6 +100,7 @@
 	}
 
 	async function handleClear() {
+		if (!confirmDestructive('Clear the shared todo list?')) return
 		await tryMutate('Clear all', () => clearAll())
 	}
 </script>
@@ -124,7 +126,9 @@
 					bind:checked={forceFail}
 					data-testid="force-fail-toggle"
 				/>
-				<span class="label-text">
+				<!-- daisyUI 5 .label sets white-space: nowrap; without the
+				     override this caption clips mid-word below 640px. -->
+				<span class="label-text whitespace-normal">
 					<strong>Force fail</strong> - when on, every mutate
 					rejects with <code>LiveError('FORCED')</code>.
 				</span>
@@ -157,7 +161,7 @@
 			<div class="flex justify-between items-center">
 				<h2 class="card-title text-sm">Todos ({todos.length})</h2>
 				{#if todos.length > 0}
-					<button class="btn btn-ghost btn-xs" onclick={handleClear} data-testid="clear-button">
+					<button class="btn btn-outline btn-error btn-xs" onclick={handleClear} data-testid="clear-button">
 						Clear all
 					</button>
 				{/if}

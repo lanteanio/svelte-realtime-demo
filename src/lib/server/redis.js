@@ -173,8 +173,8 @@ export const cursor = createCursor(redis, {
  * replay_storage_fallbacks_total{topic} counter tracks fallback
  * frequency for ops visibility.
  *
- * Captured topics are gated in hooks.ws.js by topic-name regex; this
- * factory has no per-topic knowledge - it just provides the buffer.
+ * Capture is opted into per stream via `live.stream({ replay: true })`;
+ * this factory has no per-topic knowledge - it just provides the buffer.
  */
 export const replay = createReplay(redis, {
 	size: 200,

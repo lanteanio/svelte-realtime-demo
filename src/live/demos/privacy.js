@@ -51,6 +51,21 @@ const roundSetKey = (minute) => `demos:privacy:contributors:${minute}`
 const currentMinute = () => Math.floor(Date.now() / 60_000)
 
 /**
+ * Has THIS process's protected aggregate ever actually published?
+ *
+ * Deliberately per-process, and deliberately not in Redis. The value this
+ * gates - the aggregate's last wire state - is itself per-process in-memory
+ * state that resets to an un-noised zero seed on every start. A cluster-wide
+ * durable flag would outlive the value it describes: after any replica
+ * restart within the flag's lifetime, a visitor routed to the restarted
+ * replica would be told "published" while being shown the zero seed, which is
+ * exactly the reading the gate exists to prevent. The RPC and the aggregate
+ * subscription share one socket, so a client always reads this flag from the
+ * same process that serves it the value.
+ */
+let everPublishedHere = false
+
+/**
  * Submit a mood score (1..5). Publishes into the source topic both
  * aggregates watch; the event carries the contributor identity for the
  * k-anonymity cohort. Clients never subscribe to the source topic -
@@ -64,9 +79,19 @@ export const submitMood = live(async (ctx, score) => {
 	}
 	// Round-scoped distinct-contributor hint for the page. Server-side
 	// only; the set self-expires two rounds later.
+	// Round-scoped distinct-contributor hint for the page, plus the post-add
+	// cardinality from the same atomic turn - SADD/EXPIRE/SCARD in one MULTI
+	// saves a round trip and cannot observe a torn count.
 	const key = roundSetKey(currentMinute())
-	await redis.redis.multi().sadd(key, ctx.user.id).expire(key, 180).exec()
+	const results = await redis.redis.multi().sadd(key, ctx.user.id).expire(key, 180).scard(key).exec()
+	const distinct = Number(results?.[2]?.[1] ?? 0)
 	ctx.publish(TOPICS.demoPrivacyMoods, 'submitted', { userId: ctx.user.id, score: s })
+	// The protected aggregate publishes once a round reaches k, but the wire
+	// cannot tell a fresh subscriber "never published" apart from "held" (the
+	// initial serve is a zero seed). Record the k-crossing so the page can
+	// render the held-empty state honestly. Set after the publish that causes
+	// it, so the flag never claims a publish that has not been issued.
+	if (distinct >= K) everPublishedHere = true
 	return { ok: true }
 })
 
@@ -80,6 +105,7 @@ export const roundInfo = live(async () => {
 	return {
 		distinct,
 		k: K,
+		everPublished: everPublishedHere,
 		resetInSeconds: 60 - Math.floor((Date.now() / 1000) % 60)
 	}
 })

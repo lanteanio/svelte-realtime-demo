@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test'
 
 const RUN = `e2e-${Date.now()}`
 
+test.describe.configure({ mode: 'serial' })
+
 /**
  * Wait for every page to signal `push-ready` (WS open + onPush handler
  * registered). The server's `live.push` to a bidder fans out via the
@@ -18,7 +20,37 @@ async function waitForPushReady(...pages) {
 }
 
 test.describe('/demos/auctions', () => {
-	test('alone on the page: list form is visible but no other bidders, no inbox cards', async ({ page, baseURL }) => {
+	test('form exposes exact caps and prevents empty or reserve-below-start listings', async ({ page }) => {
+		await page.goto('/demos/auctions')
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Auctions: deadline-bounded bid race')
+		await expect(page.getByTestId('inbox-empty')).toBeVisible()
+		await expect(page.getByTestId('active-section')).toBeVisible()
+		await expect(page.getByTestId('recent-section')).toBeVisible()
+
+		const item = page.getByTestId('list-item-input')
+		const start = page.getByTestId('list-start-input')
+		const reserve = page.getByTestId('list-reserve-input')
+		const duration = page.getByTestId('list-duration-input')
+		const submit = page.getByTestId('list-submit')
+		await expect(item).toHaveAttribute('maxlength', '60')
+		await expect(start).toHaveAttribute('min', '0')
+		await expect(start).toHaveAttribute('max', '1000000')
+		await expect(duration).toHaveAttribute('min', '3')
+		await expect(duration).toHaveAttribute('max', '30')
+		await expect(duration).toHaveAttribute('step', '1')
+		await expect(submit).toBeDisabled()
+		await item.fill('Constraint check')
+		await expect(submit).toBeEnabled()
+		await start.fill('30')
+		await expect(reserve).toHaveAttribute('min', '30')
+		await expect(submit).toBeDisabled()
+		await reserve.fill('30')
+		await expect(submit).toBeEnabled()
+		await item.fill('   ')
+		await expect(submit).toBeDisabled()
+	})
+
+	test('alone listing closes immediately as no-bidders and enters the recent feed', async ({ page, baseURL }) => {
 		// "Alone" requires zero entries in the global presence channel.
 		// Achievable against a freshly-started localhost dev server with
 		// no other tabs open; not achievable against the public demo,
@@ -34,6 +66,14 @@ test.describe('/demos/auctions', () => {
 		await expect(page.getByTestId('inbox-empty')).toBeVisible()
 		await expect(page.getByTestId('active-empty')).toBeVisible()
 		await expect(page.getByTestId('list-submit')).toContainText('0 bidders')
+		const item = `lot-${RUN}-alone`
+		await page.getByTestId('list-item-input').fill(item)
+		await page.getByTestId('list-duration-input').fill('3')
+		await page.getByTestId('list-submit').click()
+		await expect(page.getByTestId('list-result-text')).toHaveText('no-bidders (nobody else online)')
+		const recentRow = page.getByTestId('recent-item').filter({ hasText: item })
+		await expect(recentRow.getByTestId('recent-status')).toHaveText('no-bidders')
+		await expect(recentRow).toContainText('0 bids')
 	})
 
 	test('happy path: A lists, B bids, A sees sold to B at the bid price', async ({ browser }) => {
@@ -63,9 +103,12 @@ test.describe('/demos/auctions', () => {
 
 			const bCard = b.getByTestId('inbox-card').filter({ hasText: item })
 			await expect(bCard).toBeVisible({ timeout: 8_000 })
-
+			await expect(bCard.getByTestId('inbox-card-amount')).toHaveAttribute('min', '10')
+			await bCard.getByTestId('inbox-card-amount').fill('9')
+			await expect(bCard.getByTestId('inbox-card-bid')).toBeDisabled()
 			await bCard.getByTestId('inbox-card-amount').fill('42')
 			await bCard.getByTestId('inbox-card-bid').click()
+			await expect(bCard.getByTestId('inbox-card-submitted')).toContainText('You bid $42')
 
 			const result = a.getByTestId('list-result-text')
 			await expect(result).toContainText('sold', { timeout: 12_000 })
@@ -79,6 +122,8 @@ test.describe('/demos/auctions', () => {
 			const bOutcome = bCard.getByTestId('inbox-card-outcome')
 			await expect(bOutcome).toContainText('won')
 			await expect(bOutcome).toContainText('$42')
+			await bCard.getByTestId('inbox-card-dismiss').click()
+			await expect(b.getByTestId('inbox-empty')).toBeVisible()
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
@@ -152,6 +197,11 @@ test.describe('/demos/auctions', () => {
 
 			const recentRow = a.getByTestId('recent-item').filter({ hasText: item })
 			await expect(recentRow.getByTestId('recent-price')).toHaveText('$60')
+			for (const card of [bCard, cCard, dCard]) {
+				await expect(card.getByTestId('inbox-card-outcome')).toBeVisible()
+			}
+			await expect(cCard.getByTestId('inbox-card-outcome')).toContainText('You won')
+			await expect(bCard.getByTestId('inbox-card-outcome')).toContainText('Sold to')
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
@@ -195,9 +245,43 @@ test.describe('/demos/auctions', () => {
 
 			const recentRow = a.getByTestId('recent-item').filter({ hasText: item })
 			await expect(recentRow.getByTestId('recent-status')).toHaveText('no-sale')
+			await expect(bCard.getByTestId('inbox-card-outcome')).toHaveText('No-sale (reserve not met).')
+			await bCard.getByTestId('inbox-card-dismiss').click()
+			await expect(b.getByTestId('inbox-empty')).toBeVisible()
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
+		}
+	})
+
+	test('pass resolves the push without a bid, settles no-sale, and can be dismissed', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([a.goto('/demos/auctions'), b.goto('/demos/auctions')])
+			await expect.poll(
+				async () => (await a.getByTestId('list-submit').textContent()) ?? '',
+				{ timeout: 8_000 }
+			).toMatch(/[1-9]\d* bidder/)
+			await waitForPushReady(a, b)
+			const item = `lot-${RUN}-pass`
+			await a.getByTestId('list-item-input').fill(item)
+			await a.getByTestId('list-start-input').fill('10')
+			await a.getByTestId('list-reserve-input').fill('15')
+			await a.getByTestId('list-duration-input').fill('3')
+			await a.getByTestId('list-submit').click()
+			const card = b.getByTestId('inbox-card').filter({ hasText: item })
+			await expect(card).toBeVisible({ timeout: 8_000 })
+			await card.getByTestId('inbox-card-pass').click()
+			await expect(card).toContainText('Passed. Watching the race')
+			await expect(a.getByTestId('list-result-text')).toContainText('no-sale', { timeout: 10_000 })
+			await expect(card.getByTestId('inbox-card-outcome')).toHaveText('No-sale (reserve not met).')
+			await card.getByTestId('inbox-card-dismiss').click()
+			await expect(b.getByTestId('inbox-empty')).toBeVisible()
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
 	})
 

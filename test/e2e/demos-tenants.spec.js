@@ -1,98 +1,148 @@
 import { test, expect } from '@playwright/test'
 
-/**
- * /demos/tenants - strict per-connection tenant isolation.
- *
- * Each Playwright test gets a fresh browser context, so every test
- * starts with a brand-new identity session and no tenant. Switching
- * happens through the page's own buttons (POST /api/demos/set-tenant
- * followed by location.reload(), because the tenant resolver runs at
- * WebSocket upgrade).
- */
+test.describe.configure({ mode: 'serial' })
 
-/**
- * Wait until the page's whoami RPC has round-tripped over the live
- * connection. Gates note-posting so the RPC never races the WS open,
- * and proves the badge shows the server-trusted tenant.
- */
 async function waitForWsConfirmed(page) {
 	await expect(page.getByTestId('tn-ws-pending')).toHaveCount(0, { timeout: 15_000 })
+	await expect(page.getByTestId('tn-whoami-error')).toHaveCount(0)
+}
+
+async function open(page) {
+	await page.goto('/demos/tenants')
+	await waitForWsConfirmed(page)
+}
+
+async function switchTo(page, tenant) {
+	const id = tenant === 'acme' ? 'tn-set-acme' : tenant === 'globex' ? 'tn-set-globex' : 'tn-clear'
+	await page.getByTestId(id).click()
+	await expect(page.getByTestId('tn-active-tenant')).toHaveText(tenant ?? 'none', { timeout: 15_000 })
+	await waitForWsConfirmed(page)
+	await expect(page.getByTestId('tn-wire-topic')).toHaveText(
+		tenant ? `@t/${tenant}/demos:tenants:pad` : 'demos:tenants:pad'
+	)
 }
 
 async function postNote(page, text) {
 	await page.getByTestId('tn-note-input').fill(text)
 	await page.getByTestId('tn-note-submit').click()
-	await expect(page.getByTestId('tn-notes-list')).toContainText(text, { timeout: 10_000 })
+	const row = page.getByTestId('tn-note-row').filter({ hasText: text.trim() }).first()
+	await expect(row).toBeVisible({ timeout: 10_000 })
+	await expect(page.getByTestId('tn-note-input')).toHaveValue('')
+	return row
 }
 
 test.describe('/demos/tenants', () => {
-	test('fresh visitor is unscoped and posts to the public pad', async ({ page }) => {
-		await page.goto('/demos/tenants')
-		await expect(page.getByTestId('tn-active-tenant')).toHaveText('none', { timeout: 10_000 })
-		await waitForWsConfirmed(page)
-
-		const text = `e2e-public-${Date.now()}`
-		await postNote(page, text)
+	test('fresh visitor renders the exact public controls, constraints, warning, and pressed active choice', async ({ page }) => {
+		await open(page)
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Multi-tenancy: strict per-connection isolation')
+		await expect(page.getByTestId('tn-active-tenant')).toHaveText('none')
+		await expect(page.getByTestId('tn-wire-topic')).toHaveText('demos:tenants:pad')
+		await expect(page.getByLabel('Effective wire topic')).toBeVisible()
+		await expect(page.getByRole('heading', { level: 2 })).toContainText('Public scratchpad')
+		await expect(page.getByTestId('tn-set-acme')).toBeEnabled()
+		await expect(page.getByTestId('tn-set-globex')).toBeEnabled()
+		await expect(page.getByTestId('tn-clear')).toBeEnabled()
+		await expect(page.getByTestId('tn-clear')).toHaveAttribute('aria-pressed', 'true')
+		await expect(page.getByTestId('tn-clear')).toHaveClass(/btn-primary/)
+		await expect(page.getByTestId('tn-set-acme')).toHaveAttribute('aria-pressed', 'false')
+		await expect(page.getByTestId('tn-scope-warning')).toContainText('EVERY demo page')
+		const input = page.getByTestId('tn-note-input')
+		await expect(input).toHaveAttribute('maxlength', '200')
+		await expect(input).toHaveAttribute('placeholder', 'Leave a note for everyone in this scope...')
+		await expect(page.getByTestId('tn-note-submit')).toBeDisabled()
+		await input.fill('   ')
+		await expect(page.getByTestId('tn-note-submit')).toBeDisabled()
+		await expect(page.getByTestId('tn-switch-error')).toHaveCount(0)
+		await expect(page.getByTestId('tn-post-error')).toHaveCount(0)
 	})
 
-	test('tenant switch isolates the pad end-to-end', async ({ page }) => {
-		// Step 1: no tenant - post to the public pad.
-		await page.goto('/demos/tenants')
-		await expect(page.getByTestId('tn-active-tenant')).toHaveText('none', { timeout: 10_000 })
-		await waitForWsConfirmed(page)
+	test('public posts trim whitespace, clear the input, and prepend newest-first', async ({ page }) => {
+		await open(page)
+		const first = `public-first-${Date.now()}`
+		const second = `public-second-${Date.now()}`
+		const firstRow = await postNote(page, `   ${first}   `)
+		await expect(firstRow.locator('span').last()).toHaveText(first)
+		await postNote(page, second)
+		await expect(page.getByTestId('tn-note-row').nth(0).locator('span').last()).toHaveText(second)
+		await expect(page.getByTestId('tn-note-row').nth(1).locator('span').last()).toHaveText(first)
+	})
 
-		const publicText = `e2e-shared-${Date.now()}`
+	test('Public, Acme, and Globex reload into disjoint pads and every switch button reflects the trusted scope', async ({ page }) => {
+		await open(page)
+		const run = Date.now()
+		const publicText = `scope-public-${run}`
+		const acmeText = `scope-acme-${run}`
+		const globexText = `scope-globex-${run}`
 		await postNote(page, publicText)
 
-		// Step 2: switch to Acme via the page button. The button POSTs
-		// /api/demos/set-tenant and reloads; the reloaded connection is
-		// scoped to @t/acme/.
-		await page.getByTestId('tn-set-acme').click()
-		await expect(page.getByTestId('tn-active-tenant')).toHaveText('acme', { timeout: 15_000 })
-		await waitForWsConfirmed(page)
-
-		// Post an Acme note; it appears, and the public note does NOT -
-		// the Acme-scoped stream loader reads a different Redis key and
-		// the connection cannot subscribe to the unscoped topic.
-		const acmeText = `e2e-acme-${Date.now()}`
-		await postNote(page, acmeText)
+		await switchTo(page, 'acme')
+		await expect(page.getByTestId('tn-set-acme')).toBeEnabled()
+		await expect(page.getByTestId('tn-set-acme')).toHaveAttribute('aria-pressed', 'true')
+		await expect(page.getByTestId('tn-set-acme')).toHaveClass(/btn-primary/)
+		await expect(page.getByTestId('tn-clear')).toBeEnabled()
+		await expect(page.getByRole('heading', { level: 2 })).toContainText('acme scratchpad')
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(publicText)
+		await postNote(page, acmeText)
 
-		// Step 3: clear the tenant. The original public list returns and
-		// the Acme note is gone.
-		await page.getByTestId('tn-clear').click()
-		await expect(page.getByTestId('tn-active-tenant')).toHaveText('none', { timeout: 15_000 })
-		await waitForWsConfirmed(page)
-
-		await expect(page.getByTestId('tn-notes-list')).toContainText(publicText, { timeout: 10_000 })
+		await switchTo(page, 'globex')
+		await expect(page.getByTestId('tn-set-globex')).toBeEnabled()
+		await expect(page.getByTestId('tn-set-globex')).toHaveAttribute('aria-pressed', 'true')
+		await expect(page.getByRole('heading', { level: 2 })).toContainText('globex scratchpad')
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(acmeText)
+		await expect(page.getByTestId('tn-notes-list')).not.toContainText(publicText)
+		await postNote(page, globexText)
+
+		await switchTo(page, null)
+		await expect(page.getByTestId('tn-clear')).toBeEnabled()
+		await expect(page.getByTestId('tn-clear')).toHaveAttribute('aria-pressed', 'true')
+		await expect(page.getByTestId('tn-notes-list')).toContainText(publicText)
+		await expect(page.getByTestId('tn-notes-list')).not.toContainText(acmeText)
+		await expect(page.getByTestId('tn-notes-list')).not.toContainText(globexText)
+		await switchTo(page, 'acme')
+		await expect(page.getByTestId('tn-notes-list')).toContainText(acmeText)
+		await expect(page.getByTestId('tn-notes-list')).not.toContainText(globexText)
 	})
 
-	test('set-tenant endpoint rejects unknown tenants and malformed bodies', async ({ page }) => {
-		await page.goto('/demos/tenants')
-		await waitForWsConfirmed(page)
+	test('same-tenant tabs receive live notes while a different tenant receives nothing', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const ctxG = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		const g = await ctxG.newPage()
+		try {
+			await Promise.all([open(a), open(b), open(g)])
+			await Promise.all([switchTo(a, 'acme'), switchTo(b, 'acme'), switchTo(g, 'globex')])
+			const acme = `live-acme-${Date.now()}`
+			await postNote(a, acme)
+			await expect(b.getByTestId('tn-notes-list')).toContainText(acme, { timeout: 10_000 })
+			await expect(g.getByTestId('tn-notes-list')).not.toContainText(acme)
+			const globex = `live-globex-${Date.now()}`
+			await postNote(g, globex)
+			await expect(a.getByTestId('tn-notes-list')).not.toContainText(globex)
+			await expect(b.getByTestId('tn-notes-list')).not.toContainText(globex)
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close(), ctxG.close()])
+		}
+	})
 
+	test('set-tenant endpoint rejects unknown tenants and malformed bodies without changing scope', async ({ page }) => {
+		await open(page)
 		const statuses = await page.evaluate(async () => {
-			const post = async (body) => {
-				const r = await fetch('/api/demos/set-tenant', {
-					method: 'POST',
-					headers: { 'content-type': 'application/json' },
-					body
-				})
-				return r.status
-			}
+			const post = async (body) => (await fetch('/api/demos/set-tenant', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body
+			})).status
 			return {
 				unknown: await post(JSON.stringify({ tenant: 'initech' })),
 				missingKey: await post(JSON.stringify({})),
 				garbage: await post('not json')
 			}
 		})
-		expect(statuses.unknown).toBe(400)
-		expect(statuses.missingKey).toBe(400)
-		expect(statuses.garbage).toBe(400)
-
-		// The failed attempts must not have scoped the session.
+		expect(statuses).toEqual({ unknown: 400, missingKey: 400, garbage: 400 })
 		await page.reload()
 		await expect(page.getByTestId('tn-active-tenant')).toHaveText('none', { timeout: 10_000 })
+		await waitForWsConfirmed(page)
 	})
 })

@@ -1,82 +1,140 @@
 import { test, expect } from '@playwright/test'
 
+test.describe.configure({ mode: 'serial' })
+
+async function readCount(page, testid) {
+	const text = (await page.getByTestId(testid).textContent()) ?? ''
+	return Number(text.match(/(\d+)/)?.[1] ?? 0)
+}
+
+async function sequences(page) {
+	return page.getByTestId('event-row').evaluateAll((rows) => rows.map((row) => {
+		const match = row.textContent?.match(/#(\d+)/)
+		return match ? Number(match[1]) : NaN
+	}))
+}
+
+async function expectIntegrity(page) {
+	const entries = await page.getByTestId('event-row').evaluateAll((rows) => rows.map((row) => ({
+		seq: Number(row.textContent?.match(/#(\d+)/)?.[1] ?? NaN),
+		message: row.querySelector('[data-testid="event-message"]')?.textContent?.trim() ?? '',
+		tier: row.querySelector('[data-testid^="event-tier-"]')?.textContent?.trim() ?? ''
+	})))
+	expect(entries.length).toBeGreaterThan(0)
+	expect(entries.every((entry) => Number.isFinite(entry.seq))).toBe(true)
+	expect(new Set(entries.map((entry) => entry.seq)).size).toBe(entries.length)
+	for (let i = 1; i < entries.length; i++) expect(entries[i - 1].seq).toBeGreaterThan(entries[i].seq)
+	for (const entry of entries.slice(0, 5)) {
+		expect(entry.message).toContain(`#${entry.seq}`)
+		expect(entry.tier).toMatch(/^(live|rehydrate|fromSeq)$/)
+	}
+}
+
+async function open(page) {
+	await page.goto('/demos/from-seq')
+	await expect.poll(() => page.getByTestId('event-row').count(), { timeout: 8_000 }).toBeGreaterThanOrEqual(2)
+}
+
 test.describe('/demos/from-seq', () => {
-	test('initial render: events appear within 5s; tier counts populate (rehydrate or live)', async ({ page }) => {
-		await page.goto('/demos/from-seq')
-		// The cron fires once per second; within 5s we expect at least
-		// a couple of events. The exact count varies by timing.
-		await expect.poll(
-			async () => (await page.getByTestId('event-row').count()),
-			{ timeout: 8_000 }
-		).toBeGreaterThanOrEqual(1)
-		// At least one tier counter is non-zero.
-		const liveText = await page.getByTestId('tier-live').textContent()
-		const rehText = await page.getByTestId('tier-rehydrate').textContent()
-		const total = parseInt((liveText?.match(/(\d+)/) ?? ['0', '0'])[1], 10) +
-			parseInt((rehText?.match(/(\d+)/) ?? ['0', '0'])[1], 10)
-		expect(total).toBeGreaterThan(0)
+	test('renders the complete subscribed state with conserved tier counters and valid event rows', async ({ page }) => {
+		await open(page)
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Reconnect: three-tier gap fill via delta.fromSeq')
+		await expect(page.getByTestId('controls-section')).toBeVisible()
+		await expect(page.getByTestId('events-section')).toBeVisible()
+		await expect(page.getByTestId('toggle-subscribe')).toHaveText('Pause subscription')
+		await expect(page.getByTestId('status')).toContainText('status: subscribed')
+		await expect(page.getByTestId('tier-live')).toHaveText(/live: \d+/)
+		await expect(page.getByTestId('tier-rehydrate')).toHaveText(/rehydrate: \d+/)
+		await expect(page.getByTestId('tier-fromseq')).toHaveText(/fromSeq: \d+/)
+		await expect(page.getByText(/Replay buffer covers up to 200 events/)).toBeVisible()
+
+		await expect.poll(async () => {
+			const [live, rehydrate, fromSeq, rows] = await Promise.all([
+				readCount(page, 'tier-live'),
+				readCount(page, 'tier-rehydrate'),
+				readCount(page, 'tier-fromseq'),
+				page.getByTestId('event-row').count()
+			])
+			return Math.abs(live + rehydrate + fromSeq - rows)
+		}).toBeLessThanOrEqual(1)
+		await expectIntegrity(page)
 	})
 
-	test('pause + resume: replay buffer fills the gap (no cold rehydrate)', async ({ page }) => {
-		// Guards against the regression where unsubscribe wipes `_lastSeq`
-		// (so resume sends no seq, the server treats it as a fresh subscribe,
-		// the loader runs, and the recent window arrives tagged `rehydrate`
-		// instead of the replay buffer delivering the gap tagged `live`).
-		// The fix is realtime's resume-grace window (configured globally in
-		// the root layout); this test asserts the gap-fill path actually
-		// fires, not just that "some row exists after resume".
-		await page.goto('/demos/from-seq')
+	test('Pause freezes rows, shows an advancing countdown/hint, and Resume accounts for every replay badge', async ({ page }) => {
+		await open(page)
+		await expect.poll(() => readCount(page, 'tier-live'), { timeout: 8_000 }).toBeGreaterThan(0)
+		const beforeRehydrate = await readCount(page, 'tier-rehydrate')
+		const beforeFromSeq = await readCount(page, 'tier-fromseq')
 
-		const readCount = async (/** @type {string} */ testid) => {
-			const txt = (await page.getByTestId(testid).textContent()) ?? ''
-			const m = txt.match(/(\d+)/)
-			return m ? parseInt(m[1], 10) : 0
+		await page.getByTestId('toggle-subscribe').click()
+		await expect(page.getByTestId('toggle-subscribe')).toHaveText('Resume subscription')
+		await expect(page.getByTestId('status')).toContainText('status: paused')
+		const beforeSeqs = await sequences(page)
+		await expect(page.getByTestId('fromseq-hint')).toContainText('200s total')
+		await page.waitForTimeout(3_200)
+		await expect(page.getByTestId('status')).toContainText(/\([23]s\)/)
+		expect(await sequences(page)).toEqual(beforeSeqs)
+
+		await page.getByTestId('toggle-subscribe').click()
+		await expect(page.getByTestId('toggle-subscribe')).toHaveText('Pause subscription')
+		await expect(page.getByTestId('status')).toContainText('status: subscribed')
+		await expect(page.getByTestId('replay-banner')).toBeVisible({ timeout: 4_000 })
+		await expect.poll(() => readCount(page, 'tier-replay'), { timeout: 4_000 }).toBeGreaterThanOrEqual(2)
+		const replayCount = await readCount(page, 'tier-replay')
+		await expect(page.locator('[data-testid^="event-replay-"]')).toHaveCount(replayCount)
+		expect(await readCount(page, 'tier-rehydrate')).toBe(beforeRehydrate)
+		expect(await readCount(page, 'tier-fromseq')).toBe(beforeFromSeq)
+		await expect.poll(() => page.getByTestId('event-row').count()).toBeGreaterThan(beforeSeqs.length)
+		await expectIntegrity(page)
+	})
+
+	test('demo-scoped fast path reaches the real fromSeq tier after a two-second pause', async ({ page }) => {
+		await open(page)
+		const before = await readCount(page, 'tier-fromseq')
+		await page.getByTestId('fromseq-fast-path').click()
+		await expect(page.getByTestId('fromseq-fast-path')).toHaveAttribute('aria-pressed', 'true')
+		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('Fast path ready', { timeout: 5_000 })
+		await expect(page.getByTestId('toggle-subscribe')).toBeEnabled()
+
+		await page.getByTestId('toggle-subscribe').click()
+		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('Fast path paused')
+		await page.waitForTimeout(2_200)
+		await page.getByTestId('toggle-subscribe').click()
+		await expect.poll(() => readCount(page, 'tier-fromseq'), { timeout: 8_000 }).toBeGreaterThan(before)
+		await expect(page.locator('[data-testid^="event-tier-"]').filter({ hasText: 'fromSeq' }).first()).toBeVisible()
+		await expectIntegrity(page)
+	})
+
+	test('a second tab observes the same sequence while the paused tab catches up without duplicates', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([open(a), open(b)])
+			const beforeA = await sequences(a)
+			await a.getByTestId('toggle-subscribe').click()
+			await expect(a.getByTestId('status')).toContainText('paused')
+			await expect.poll(async () => Math.max(...await sequences(b)), { timeout: 6_000 }).toBeGreaterThan(beforeA[0] + 1)
+			expect(await sequences(a)).toEqual(beforeA)
+			const target = Math.max(...await sequences(b))
+			await a.getByTestId('toggle-subscribe').click()
+			await expect(a.getByTestId('replay-banner')).toBeVisible({ timeout: 4_000 })
+			await expect.poll(async () => Math.max(...await sequences(a)), { timeout: 4_000 }).toBeGreaterThanOrEqual(target)
+			await expectIntegrity(a)
+			await expectIntegrity(b)
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
-
-		// Wait for the initial loader to land and at least one cron tick to
-		// hit the live store - we need a non-null _lastSeq before pausing.
-		await expect.poll(() => readCount('tier-rehydrate'), { timeout: 8_000 }).toBeGreaterThan(0)
-		await expect.poll(() => readCount('tier-live'), { timeout: 8_000 }).toBeGreaterThan(0)
-
-		const rehydrateBefore = await readCount('tier-rehydrate')
-
-		// Pause and let the cron publish a few ticks into the replay buffer.
-		await page.getByTestId('toggle-subscribe').click()
-		await expect(page.getByTestId('status')).toContainText('paused', { timeout: 3_000 })
-		await page.waitForTimeout(4_000)
-
-		// Resume - the SDK should ride the retained _lastSeq into the
-		// subscribe envelope and the server should gap-fill from the
-		// replay buffer.
-		await page.getByTestId('toggle-subscribe').click()
-		await expect(page.getByTestId('status')).toContainText('subscribed', { timeout: 3_000 })
-
-		// The page detects gap-fill events (tier=live, seq>pausedAtSeq,
-		// ts<resumedAt) and shows the banner for 5s. Its presence is the
-		// positive signal that the replay-buffer tier delivered.
-		await expect(page.getByTestId('replay-banner')).toBeVisible({ timeout: 3_000 })
-
-		// Cold rehydrate would grow the rehydrate counter by the loader's
-		// recent-window size (~20). The gap-fill path leaves it untouched.
-		const rehydrateAfter = await readCount('tier-rehydrate')
-		expect(rehydrateAfter).toBe(rehydrateBefore)
-
-		// At least two events arrived via the replay tier - more than the
-		// race-condition single event seen even under the cold-rehydrate
-		// bug, so this distinguishes "gap-fill worked" from "one stray
-		// event landed in the same flush as the loader response".
-		await expect.poll(() => readCount('tier-replay'), { timeout: 3_000 }).toBeGreaterThan(1)
 	})
 
-	test('event rows have a tier badge populated to one of live / rehydrate / fromSeq', async ({ page }) => {
-		await page.goto('/demos/from-seq')
-		await expect.poll(
-			async () => (await page.getByTestId('event-row').count()),
-			{ timeout: 8_000 }
-		).toBeGreaterThanOrEqual(1)
-		const firstRow = page.getByTestId('event-row').first()
-		const tierBadge = firstRow.locator('[data-testid^="event-tier-"]')
-		const tierText = await tierBadge.textContent()
-		expect(['live', 'rehydrate', 'fromSeq']).toContain((tierText ?? '').trim())
+	test('a fresh tab rehydrates a bounded recent window and then receives monotonic live ticks', async ({ page }) => {
+		await open(page)
+		await expect.poll(() => readCount(page, 'tier-rehydrate'), { timeout: 8_000 }).toBeGreaterThan(0)
+		expect(await readCount(page, 'tier-rehydrate')).toBeLessThanOrEqual(20)
+		const before = Math.max(...await sequences(page))
+		await expect.poll(async () => Math.max(...await sequences(page)), { timeout: 4_000 }).toBeGreaterThan(before)
+		await expect.poll(() => readCount(page, 'tier-live'), { timeout: 4_000 }).toBeGreaterThan(0)
+		await expectIntegrity(page)
 	})
 })

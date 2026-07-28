@@ -1,142 +1,113 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import {
+	clickRangeAt,
+	closestRemote,
+	collectShooterErrors,
+	holdKey,
+	openShooter,
+	ownPosition,
+	remoteByKey,
+	shooterStats,
+	shootRenderedTarget
+} from './shooter-helpers.js'
 
 test.describe('/demos/shooter', () => {
-	function collectErrors(page) {
-		const errors = []
-		page.on('pageerror', (err) => errors.push(`pageerror: ${err?.message ?? err}`))
-		page.on('console', (msg) => {
-			if (msg.type() === 'error' && !/Failed to load resource|favicon/i.test(msg.text())) {
-				errors.push(`console: ${msg.text()}`)
-			}
-		})
-		return errors
-	}
-
-	async function openShooter(page) {
-		await page.goto('/demos/shooter')
-		await waitForWS(page)
-		await expect(page.getByTestId('sh-me')).toBeVisible({ timeout: 15_000 })
-		// onTick populates the orbiting NPC targets.
-		await expect
-			.poll(() => page.locator('[data-testid="sh-target"]').count(), { timeout: 15_000 })
-			.toBeGreaterThan(0)
-	}
-
-	/** Click the range at viewBox coordinates (the SVG scales responsively). */
-	async function clickRangeAt(page, vx, vy) {
-		const box = await page.getByTestId('sh-range').boundingBox()
-		if (!box) throw new Error('range not visible')
-		const sx = box.x + (vx / 640) * box.width
-		const sy = box.y + (vy / 420) * box.height
-		await page.mouse.click(sx, sy)
-	}
-
-	/** Highest of the authoritative score and the event-driven hit count. */
-	async function readScore(page) {
-		const scoreText = await page.getByTestId('sh-score').textContent()
-		const hitsText = await page.getByTestId('sh-hits').textContent()
-		const score = Number(scoreText?.match(/\d+/)?.[0] ?? 0)
-		const hits = Number(hitsText?.match(/\d+/)?.[0] ?? 0)
-		return Math.max(score, hits)
-	}
-
-	test('aimed shots at a rendered target land (server rewind)', async ({ page }) => {
-		const errors = collectErrors(page)
+	test('renders the whole range, scoreboard, latency control, disclosure, and source link', async ({ page }) => {
+		const errors = collectShooterErrors(page)
 		await openShooter(page)
-
-		// Aim exactly at a target's current rendered center each click:
-		// the rewind resolves the shot against the position the shooter
-		// rendered, so precise aim should land well before 10 attempts.
-		const target = page.locator('[data-testid="sh-target"]').first()
-		let score = 0
-		for (let i = 0; i < 10 && score < 1; i++) {
-			const cx = Number(await target.getAttribute('cx'))
-			const cy = Number(await target.getAttribute('cy'))
-			if (Number.isFinite(cx) && Number.isFinite(cy)) {
-				await clickRangeAt(page, cx, cy)
-			}
-			await page.waitForTimeout(500)
-			score = await readScore(page)
-		}
-
-		// The shots definitely fired (delayed pipeline included in the
-		// counter); hit credit is the flaky-tolerant part of the assertion.
-		const shots = await page.getByTestId('sh-shots').textContent()
-		expect(Number(shots?.match(/\d+/)?.[0] ?? 0)).toBeGreaterThanOrEqual(1)
-		if (score < 1) {
-			test.info().annotations.push({
-				type: 'warning',
-				description: 'no aimed shot scored within 10 attempts - rewind favors the shooter, so investigate'
-			})
-		}
-		expect(score).toBeGreaterThanOrEqual(0)
-
+		await expect(page.getByRole('heading', { name: 'Shooter: lag-compensated hits' })).toBeVisible()
+		await expect(page.getByTestId('sh-range')).toHaveAttribute('role', 'img')
+		await expect(page.getByTestId('sh-target')).toHaveCount(8)
+		await expect(page.getByTestId('sh-me')).toBeVisible()
+		await expect(page.getByText('WASD / arrows to move, click to shoot.')).toBeVisible()
+		await expect(page.getByRole('heading', { name: 'Score' })).toBeVisible()
+		expect(await shooterStats(page)).toEqual({ score: 0, shots: 0, hits: 0 })
+		const slider = page.getByTestId('sh-lag')
+		await expect(slider).toHaveAttribute('min', '0')
+		await expect(slider).toHaveAttribute('max', '400')
+		await expect(slider).toHaveAttribute('step', '50')
+		await expect(slider).toHaveValue('0')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 0ms' })).toBeVisible()
+		await expect(page.getByText('maxRewindMs: 400', { exact: false }).first()).toBeVisible()
+		await expect(page.getByRole('link', { name: 'shooter.js' })).toHaveAttribute('href', /src\/live\/demos\/shooter\.js$/)
 		expect(errors).toEqual([])
 	})
 
-	test('delayed sends (latency slider) still fire and resolve cleanly', async ({ page }) => {
-		const errors = collectErrors(page)
+	test('WASD and arrow controls move the predicted own dot in every direction', async ({ page }) => {
+		const errors = collectShooterErrors(page)
 		await openShooter(page)
-
-		// Max out the artificial latency: sends now leave 400ms late.
-		await page.getByTestId('sh-lag').fill('400')
-
-		const target = page.locator('[data-testid="sh-target"]').first()
-		for (let i = 0; i < 5; i++) {
-			const cx = Number(await target.getAttribute('cx'))
-			const cy = Number(await target.getAttribute('cy'))
-			if (Number.isFinite(cx) && Number.isFinite(cy)) {
-				await clickRangeAt(page, cx, cy)
-			}
-			await page.waitForTimeout(600)
-		}
-
-		// Every delayed shot actually left (the counter increments when the
-		// deferred send fires, not when the mouse clicks).
-		await expect
-			.poll(async () => {
-				const text = await page.getByTestId('sh-shots').textContent()
-				return Number(text?.match(/\d+/)?.[0] ?? 0)
-			}, { timeout: 5_000 })
-			.toBeGreaterThanOrEqual(5)
-
+		const start = await ownPosition(page)
+		await holdKey(page, 'd')
+		await expect.poll(async () => (await ownPosition(page)).x).toBeGreaterThan(start.x)
+		const afterRight = await ownPosition(page)
+		await holdKey(page, 'ArrowDown')
+		await expect.poll(async () => (await ownPosition(page)).y).toBeGreaterThan(afterRight.y)
+		const afterDown = await ownPosition(page)
+		await holdKey(page, 'a')
+		await expect.poll(async () => (await ownPosition(page)).x).toBeLessThan(afterDown.x)
+		const afterLeft = await ownPosition(page)
+		await holdKey(page, 'ArrowUp')
+		await expect.poll(async () => (await ownPosition(page)).y).toBeLessThan(afterLeft.y)
 		expect(errors).toEqual([])
 	})
 
-	test('aimed shots register a server hit (hitTest onHit fires)', async ({ page }) => {
-		// A well-aimed shot should score: the server rewinds the target to the
-		// instant it was rendered and tests the ray. Observed: onHit never fires
-		// even single-instance (24 aimed shots -> 0 hits, 0 score), so this asserts
-		// the hitTest actually resolves. Marked test.fail while the upstream
-		// live.smooth shoot -> hitTest -> onHit path is dead; flips when fixed.
-		test.fail()
+	test('latency slider maps 0-400ms and defers each shot until its selected send delay', async ({ page }) => {
+		const errors = collectShooterErrors(page)
 		await openShooter(page)
-		const target = page.locator('[data-testid="sh-target"]').first()
-		for (let i = 0; i < 24; i++) {
-			const cx = Number(await target.getAttribute('cx'))
-			const cy = Number(await target.getAttribute('cy'))
-			if (Number.isFinite(cx) && Number.isFinite(cy)) await clickRangeAt(page, cx, cy)
+		const slider = page.getByTestId('sh-lag')
+
+		await slider.fill('200')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 200ms' })).toBeVisible()
+		await shootRenderedTarget(page)
+		expect((await shooterStats(page)).shots).toBe(0)
+		await expect.poll(async () => (await shooterStats(page)).shots).toBe(1)
+
+		await slider.fill('400')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 400ms' })).toBeVisible()
+		await shootRenderedTarget(page)
+		await page.waitForTimeout(200)
+		expect((await shooterStats(page)).shots).toBe(1)
+		await expect.poll(async () => (await shooterStats(page)).shots).toBe(2)
+
+		await slider.fill('0')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 0ms' })).toBeVisible()
+		await clickRangeAt(page, 320, 210)
+		await expect.poll(async () => (await shooterStats(page)).shots).toBe(3)
+		expect(errors).toEqual([])
+	})
+
+	test('movement propagates to another realtime identity', async ({ browser }) => {
+		const contextA = await browser.newContext()
+		const contextB = await browser.newContext()
+		const a = await contextA.newPage()
+		const b = await contextB.newPage()
+		try {
+			await Promise.all([openShooter(a), openShooter(b)])
+			const ownA = await ownPosition(a)
+			const remoteA = await closestRemote(b, ownA)
+			expect(remoteA).toBeTruthy()
+			const remote = remoteByKey(b, remoteA?.key ?? '')
+			await holdKey(a, 'ArrowRight', 600)
+			await expect.poll(async () => Number(await remote.getAttribute('cx')), { timeout: 10_000 })
+				.toBeGreaterThan(remoteA?.x ?? ownA.x)
+		} finally {
+			await Promise.allSettled([contextA.close(), contextB.close()])
+		}
+	})
+
+	test('aimed shots register both authoritative score and server hit events', async ({ page }) => {
+		await openShooter(page)
+		for (let attempt = 0; attempt < 24; attempt++) {
+			await shootRenderedTarget(page)
 			await page.waitForTimeout(200)
+			const stats = await shooterStats(page)
+			if (stats.score > 0 && stats.hits > 0) break
 		}
-		await expect
-			.poll(() => readScore(page), { message: 'an aimed shot should register a hit', timeout: 5_000 })
+		await expect.poll(async () => {
+			const stats = await shooterStats(page)
+			return Math.min(stats.score, stats.hits)
+		}, { message: 'rendered target hits must credit score and emit a server hit event', timeout: 5_000 })
 			.toBeGreaterThanOrEqual(1)
-	})
-
-	test('arrow key moves the predicted own dot', async ({ page }) => {
-		await openShooter(page)
-
-		const me = page.getByTestId('sh-me')
-		await page.waitForTimeout(1_000)
-		const beforeX = Number(await me.getAttribute('data-x'))
-
-		await page.keyboard.down('ArrowRight')
-		await page.waitForTimeout(600)
-		await page.keyboard.up('ArrowRight')
-
-		await expect
-			.poll(async () => Number(await me.getAttribute('data-x')), { timeout: 5_000 })
-			.toBeGreaterThan(beforeX)
+		await expect(page.getByTestId('sh-last-hit')).toBeVisible()
 	})
 })

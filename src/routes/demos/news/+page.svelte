@@ -177,7 +177,9 @@
 		</div>
 	</div>
 
-	<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+	<!-- xl, not lg: the demos rail reappears at 1024, so a three-up row that
+	     switches at lg gets ~59px for the story name in the 1024-1279 band. -->
+	<div class="grid grid-cols-1 xl:grid-cols-3 gap-4" data-testid="news-trending-grid">
 		{#each TRENDING_PANELS as panel (panel.key)}
 			{@const data = panel.key === 'last30s' ? last30s : panel.key === 'thisMinute' ? thisMinute : lifetime}
 			<div class="card bg-base-100 border border-base-300" data-testid={panel.testid}>
@@ -194,7 +196,7 @@
 							{#each data.top as entry, idx (entry.storyId)}
 								<li class="flex items-center gap-2 text-xs" data-testid="{panel.testid}-row">
 									<span class="opacity-50 font-mono w-4">{idx + 1}</span>
-									<span class="flex-1 truncate" data-testid="{panel.testid}-name">{nameById(entry.storyId)}</span>
+									<span class="flex-1 min-w-0 truncate" data-testid="{panel.testid}-name">{nameById(entry.storyId)}</span>
 									<span class="font-mono opacity-60 w-10 text-right" data-testid="{panel.testid}-count">{entry.count}</span>
 									<div class="w-12 h-2 bg-base-200 rounded overflow-hidden">
 										<div class="h-full bg-primary" style:width="{leaderCount > 0 ? (entry.count / leaderCount) * 100 : 0}%"></div>

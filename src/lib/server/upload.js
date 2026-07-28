@@ -15,7 +15,12 @@
  * per-file entries (~64 bytes each), measured in KB.
  *
  * Files are kept under MAX_FILE_BYTES total or MAX_FILES count, whichever
- * is smaller. FIFO eviction drops the oldest file when over capacity.
+ * is smaller. Eviction drops the least-recently-uploaded file when over
+ * capacity. Because ids are content-addressed, re-uploading a file is an
+ * upsert that moves it back to the newest position rather than adding a
+ * second entry - a re-upload is a fresh user action, so it should not be
+ * the next thing evicted. The trade-off is that a re-upload can evict a
+ * file that was uploaded after it.
  */
 
 import { createIdempotencyStore } from 'svelte-adapter-uws-extensions/redis/idempotency'
@@ -30,8 +35,89 @@ export const MAX_CHUNK_BYTES = 1024 * 1024
 export const MAX_FILENAME_LEN = 200
 
 const FILES_KEY = 'demos:upload:files'         // HASH: id -> JSON record
-const ORDER_KEY = 'demos:upload:order'         // LIST: ids in insertion order (oldest first)
+const ORDER_KEY = 'demos:upload:order'         // LIST: ids by last upload, oldest first
 const BYTES_KEY = 'demos:upload:bytes-total'   // counter: sum of totalBytes across surviving files
+
+// Content-addressed file ids make a repeated upload an UPSERT, not a
+// second logical file. Keep the hash record, one order entry, and the
+// byte counter consistent in one Redis turn so concurrent replicas
+// cannot both count the same id as new.
+const UPSERT_FILE_SCRIPT = `
+	local previous = redis.call('HGET', KEYS[1], ARGV[1])
+	local oldBytes = 0
+	if previous then
+		local ok, decoded = pcall(cjson.decode, previous)
+		if ok and type(decoded) == 'table' and type(decoded.totalBytes) == 'number' then
+			oldBytes = decoded.totalBytes
+		end
+	end
+	redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+	redis.call('LREM', KEYS[2], 0, ARGV[1])
+	redis.call('RPUSH', KEYS[2], ARGV[1])
+	local newBytes = tonumber(ARGV[3]) or 0
+	local delta = newBytes - oldBytes
+	if delta ~= 0 then
+		redis.call('INCRBY', KEYS[3], delta)
+	elseif redis.call('EXISTS', KEYS[3]) == 0 then
+		redis.call('SET', KEYS[3], 0)
+	end
+	return previous and 1 or 0
+`
+
+// One eviction step: inspect the head, drop it from both the hash and the
+// order list, and subtract its bytes in a single Redis turn. Reading the
+// record and decrementing the counter as separate commands let two replicas
+// both subtract the same file's bytes. Returns the evicted id, an empty
+// string when the head is the caller's own just-appended record, or nil when
+// the list is empty.
+const EVICT_OLDEST_SCRIPT = `
+	local oldest = redis.call('LINDEX', KEYS[2], 0)
+	if not oldest then return nil end
+	if oldest == ARGV[1] then return '' end
+	redis.call('LPOP', KEYS[2])
+	local raw = redis.call('HGET', KEYS[1], oldest)
+	if raw then
+		redis.call('HDEL', KEYS[1], oldest)
+		local ok, decoded = pcall(cjson.decode, raw)
+		if ok and type(decoded) == 'table' and type(decoded.totalBytes) == 'number' then
+			redis.call('DECRBY', KEYS[3], decoded.totalBytes)
+		end
+	end
+	if redis.call('HLEN', KEYS[1]) == 0 then
+		redis.call('SET', KEYS[3], 0)
+	else
+		local total = tonumber(redis.call('GET', KEYS[3]) or '0')
+		if total < 0 then redis.call('SET', KEYS[3], 0) end
+	end
+	return oldest
+`
+
+// Removal mirrors the upsert atomically. LREM count=0 also repairs order
+// lists written by the old duplicate-append behavior; resetting an empty
+// index to zero repairs its historical byte-counter drift.
+const REMOVE_FILE_SCRIPT = `
+	local raw = redis.call('HGET', KEYS[1], ARGV[1])
+	if not raw then
+		redis.call('LREM', KEYS[2], 0, ARGV[1])
+		if redis.call('HLEN', KEYS[1]) == 0 then redis.call('SET', KEYS[3], 0) end
+		return 0
+	end
+	local bytes = 0
+	local ok, decoded = pcall(cjson.decode, raw)
+	if ok and type(decoded) == 'table' and type(decoded.totalBytes) == 'number' then
+		bytes = decoded.totalBytes
+	end
+	redis.call('HDEL', KEYS[1], ARGV[1])
+	redis.call('LREM', KEYS[2], 0, ARGV[1])
+	if bytes ~= 0 then redis.call('DECRBY', KEYS[3], bytes) end
+	if redis.call('HLEN', KEYS[1]) == 0 then
+		redis.call('SET', KEYS[3], 0)
+	else
+		local total = tonumber(redis.call('GET', KEYS[3]) or '0')
+		if total < 0 then redis.call('SET', KEYS[3], 0) end
+	end
+	return 1
+`
 
 /**
  * Redis-backed idempotency cache for chunk storage. A retry on the
@@ -90,17 +176,26 @@ export async function getFile(id) {
  * cap is exceeded. Returns the list of evicted file ids so the caller
  * can publish 'deleted' events.
  *
- * Eviction loop is not atomic against concurrent appends from another
- * replica; the worst case is a brief overshoot of the cap before the
- * next append catches up. Acceptable for a demo.
+ * The cap CHECK is a plain read and can race a concurrent append, so the
+ * caps may briefly overshoot before the next append catches up - acceptable
+ * for a demo. Each eviction STEP is atomic, which is not merely tidiness:
+ * as separate commands, a replica that read a record before another replica
+ * removed it would still subtract its bytes, double-decrementing the shared
+ * counter. Once that counter goes negative the byte cap stops being enforced
+ * and the page renders a negative total.
  */
 export async function appendFile(record) {
 	const raw = JSON.stringify(record)
-	const pipeline = redis.redis.multi()
-	pipeline.hset(FILES_KEY, record.id, raw)
-	pipeline.rpush(ORDER_KEY, record.id)
-	pipeline.incrby(BYTES_KEY, record.totalBytes)
-	await pipeline.exec()
+	await redis.redis.eval(
+		UPSERT_FILE_SCRIPT,
+		3,
+		FILES_KEY,
+		ORDER_KEY,
+		BYTES_KEY,
+		record.id,
+		raw,
+		String(record.totalBytes)
+	)
 
 	const evictedIds = []
 	while (true) {
@@ -112,24 +207,19 @@ export async function appendFile(record) {
 		const overCount = orderLen > MAX_FILES
 		const overBytes = bytesTotal > MAX_FILE_BYTES && orderLen > 1
 		if (!overCount && !overBytes) break
-		const oldestId = await redis.redis.lpop(ORDER_KEY)
-		if (!oldestId) break
-		if (oldestId === record.id) {
-			// Refuse to evict the record we just appended; put it back at
-			// the front so the FIFO order survives. Matches the original
-			// in-memory guard.
-			await redis.redis.rpush(ORDER_KEY, oldestId)
-			break
-		}
-		const droppedRaw = await redis.redis.hget(FILES_KEY, oldestId)
-		await redis.redis.hdel(FILES_KEY, oldestId)
-		if (droppedRaw) {
-			try {
-				const dropped = JSON.parse(droppedRaw)
-				await redis.redis.decrby(BYTES_KEY, dropped.totalBytes)
-			} catch { /* corrupt entry: counter may drift slightly */ }
-		}
-		evictedIds.push(oldestId)
+		const evicted = await redis.redis.eval(
+			EVICT_OLDEST_SCRIPT,
+			3,
+			FILES_KEY,
+			ORDER_KEY,
+			BYTES_KEY,
+			record.id
+		)
+		// Empty list, or the head is the record we just appended and must not
+		// evict itself. Inspecting the head without popping it means there is
+		// nothing to put back, so the order list cannot be disturbed either.
+		if (evicted === null || evicted === '') break
+		evictedIds.push(String(evicted))
 	}
 	return evictedIds
 }
@@ -161,18 +251,15 @@ export async function statsSnapshot() {
  * Drop one file from the index. Returns true if the id existed.
  */
 export async function removeFile(id) {
-	const raw = await redis.redis.hget(FILES_KEY, id)
-	if (!raw) return false
-	let record
-	try { record = JSON.parse(raw) } catch { record = null }
-	const pipeline = redis.redis.multi()
-	pipeline.hdel(FILES_KEY, id)
-	pipeline.lrem(ORDER_KEY, 1, id)
-	if (record && typeof record.totalBytes === 'number') {
-		pipeline.decrby(BYTES_KEY, record.totalBytes)
-	}
-	await pipeline.exec()
-	return true
+	const removed = await redis.redis.eval(
+		REMOVE_FILE_SCRIPT,
+		3,
+		FILES_KEY,
+		ORDER_KEY,
+		BYTES_KEY,
+		id
+	)
+	return Number(removed) === 1
 }
 
 export const CHUNK_REDIS_PREFIX = 'demo-upload:chunk:'

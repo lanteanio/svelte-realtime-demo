@@ -14,6 +14,7 @@
 -->
 <script>
 	import { count, placeOrder, reset } from '$live/demos/checkout'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let history = $state([])
 	let busy = $state(false)
@@ -49,6 +50,7 @@
 	}
 
 	async function handleReset() {
+		if (!confirmDestructive('Reset the checkout counter and history?')) return
 		await reset()
 		history = []
 	}
@@ -79,7 +81,7 @@
 		<button class="btn btn-warning" onclick={fireFive} disabled={busy} data-testid="checkout-retry">
 			Retry x5 (same key)
 		</button>
-		<button class="btn btn-ghost" onclick={handleReset} data-testid="checkout-reset">Reset</button>
+		<button class="btn btn-outline btn-error" onclick={handleReset} data-testid="checkout-reset">Reset</button>
 	</div>
 
 	{#if history.length > 0}

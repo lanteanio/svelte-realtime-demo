@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { confirmAndClick, dismissConfirmation, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/checkout - the idempotency demo.
 // Drives Place Order, Retry x5 (same key), Reset, and asserts REAL outcomes:
@@ -67,7 +67,16 @@ test.describe('/demos/checkout idempotency', () => {
 		await page.getByTestId('checkout-place').click()
 		await expect(page.getByTestId('checkout-history-row')).not.toHaveCount(0)
 
-		await page.getByTestId('checkout-reset').click()
+		const beforeCancel = await readCount(page)
+		const historyBeforeCancel = await page.getByTestId('checkout-history-row').count()
+		const warning = await dismissConfirmation(page.getByTestId('checkout-reset'))
+		expect(warning).toContain('Reset the checkout counter and history?')
+		await expect(page.getByTestId('checkout-count')).toHaveText(String(beforeCancel))
+		await expect(page.getByTestId('checkout-history-row')).toHaveCount(historyBeforeCancel)
+		await expect(page.getByTestId('checkout-reset')).toHaveClass(/btn-outline/)
+		await expect(page.getByTestId('checkout-reset')).toHaveClass(/btn-error/)
+
+		await confirmAndClick(page.getByTestId('checkout-reset'))
 		await expect(page.getByTestId('checkout-count')).toHaveText('0', { timeout: 10_000 })
 		// The history list is client-side and is dropped on reset.
 		await expect(page.getByTestId('checkout-history')).toHaveCount(0)
@@ -75,7 +84,7 @@ test.describe('/demos/checkout idempotency', () => {
 
 	test('the counter survives a reload (live stream re-fetches from Redis)', async ({ page }) => {
 		await open(page)
-		await page.getByTestId('checkout-reset').click()
+		await confirmAndClick(page.getByTestId('checkout-reset'))
 		await expect(page.getByTestId('checkout-count')).toHaveText('0', { timeout: 10_000 })
 		await page.getByTestId('checkout-place').click()
 		await expect(page.getByTestId('checkout-count')).toHaveText('1', { timeout: 10_000 })
@@ -94,7 +103,7 @@ test.describe('/demos/checkout idempotency', () => {
 		try {
 			await open(a)
 			await open(b)
-			await a.getByTestId('checkout-reset').click()
+			await confirmAndClick(a.getByTestId('checkout-reset'))
 			await expect(a.getByTestId('checkout-count')).toHaveText('0', { timeout: 10_000 })
 			await expect(b.getByTestId('checkout-count')).toHaveText('0', { timeout: 10_000 })
 

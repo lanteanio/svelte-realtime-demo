@@ -134,8 +134,10 @@
 			</div>
 			<div class="flex gap-px h-10 items-stretch" data-testid="decision-strip">
 				{#each ticks as t (t.id)}
+					<!-- 60 cells + 59 hairline gaps must fit the ~240px card at the
+					     320px rung; 2px is the floor that keeps one unclipped row. -->
 					<div
-						class="flex-1 min-w-[6px]"
+						class="flex-1 min-w-[2px]"
 						class:bg-success={!t.dropped}
 						class:bg-error={t.dropped}
 						class:opacity-50={t.dropped}

@@ -24,6 +24,7 @@
 -->
 <script>
 	import { editorDoc, offsetRoom, crdtRoom } from '$live/demos/collab-editor'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -50,6 +51,7 @@
 	})
 
 	let editError = $state('')
+	let localSelections = $state({ offset: null, crdt: null })
 
 	/**
 	 * Apply a textarea edit to the document as the minimal splice.
@@ -101,10 +103,13 @@
 		try {
 			if (start === end) {
 				room.setSelection(null)
+				localSelections[mode] = null
 			} else if (mode === 'crdt') {
 				room.setSelection({ field: 'body', start, end })
+				localSelections[mode] = { start, end }
 			} else {
 				room.setSelection({ start, end })
+				localSelections[mode] = { start, end }
 			}
 		} catch (err) {
 			editError = err?.message ?? String(err)
@@ -118,10 +123,27 @@
 	 * which is exactly what makes the crdt panel's highlights re-glue
 	 * and the offset panel's highlights visibly drift.
 	 * @param {import('svelte-realtime/multiplayer').MultiplayerRoom} room
+	 * @param {'offset' | 'crdt'} mode
 	 */
-	function selectionRows(room) {
+	function selectionRows(room, mode) {
 		const text = body.value
 		const rows = []
+		const local = localSelections[mode]
+		if (local) {
+			const start = Math.max(0, Math.min(local.start, text.length))
+			const end = Math.max(start, Math.min(local.end, text.length))
+			if (end > start) {
+				rows.push({
+					key: `local:${mode}`,
+					name: me?.name ?? 'You',
+					color: me?.color ?? '#888',
+					start,
+					end,
+					snippet: text.slice(start, end),
+					local: true
+				})
+			}
+		}
 		for (const [key, sel] of Object.entries(room.selections)) {
 			if (!sel || typeof sel.start !== 'number' || typeof sel.end !== 'number') continue
 			if (sel.field && sel.field !== 'body') continue
@@ -136,15 +158,19 @@
 				color: peer?.color ?? '#888',
 				start,
 				end,
-				snippet: text.slice(start, end)
+				snippet: text.slice(start, end),
+				local: false
 			})
 		}
 		return rows
 	}
 
 	function clearDocument() {
+		if (!confirmDestructive('Clear the shared collaborative document?')) return
 		try {
 			if (body.length > 0) body.delete(0, body.length)
+			localSelections.offset = null
+			localSelections.crdt = null
 			editError = ''
 		} catch (err) {
 			editError = err?.message ?? String(err)
@@ -164,10 +190,12 @@
 			<code>selections: 'offset'</code> (raw <code>&#123; start, end &#125;</code>
 			stamped on the presence roster), the right one
 			<code>selections: 'crdt'</code> bound to the document via
-			<code>room.bindDoc(doc)</code>. Try it in two tabs: select a word in
-			tab A, then type text <em>before</em> it in tab B - the offset
-			panel's highlight drifts onto the wrong characters, the CRDT
-			panel's stays glued to the word.
+			<code>room.bindDoc(doc)</code>. Try it in two tabs: in tab A select
+			the same word in <em>both</em> textareas, then type text
+			<em>before</em> it in tab B - the offset panel's highlight drifts
+			onto the wrong characters, the CRDT panel's stays glued to the
+			word. (Each panel is its own room, so a selection only shows up
+			in the matching panel of the other tab.)
 		</p>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
@@ -181,7 +209,7 @@
 	<div class="flex items-center gap-3 text-xs opacity-60">
 		<span data-testid="collab-doc-length">{docLength} chars</span>
 		<span data-testid="collab-doc-synced">{doc.synced ? 'synced' : 'syncing...'}</span>
-		<button class="btn btn-ghost btn-xs" onclick={clearDocument} data-testid="collab-clear">
+		<button class="btn btn-outline btn-error btn-sm" onclick={clearDocument} data-testid="collab-clear">
 			Clear document
 		</button>
 		{#if editError}
@@ -213,10 +241,15 @@
 					{room.others.length === 1 ? 'other person' : 'others'} in this room
 				</div>
 				<div class="space-y-2" data-testid="{testPrefix}-selections">
-					{#each selectionRows(room) as row (row.key)}
-						<div class="text-xs space-y-1" data-testid="{testPrefix}-selection-row">
+					{#each selectionRows(room, mode) as row (row.key)}
+						<div
+							class="text-xs space-y-1 rounded px-2 py-1 {row.local ? 'border border-primary/40 bg-primary/10' : ''}"
+							data-testid="{testPrefix}-selection-row"
+							data-local={row.local ? 'true' : 'false'}
+						>
 							<div class="flex items-baseline gap-2">
 								<span class="font-semibold" style:color={row.color}>{row.name}</span>
+								{#if row.local}<span class="badge badge-primary badge-xs">you</span>{/if}
 								<span class="font-mono opacity-60">[{row.start}, {row.end})</span>
 								<span class="truncate opacity-70">"{row.snippet.slice(0, 40)}{row.snippet.length > 40 ? '...' : ''}"</span>
 							</div>
@@ -229,7 +262,7 @@
 						</div>
 					{:else}
 						<p class="text-xs opacity-40" data-testid="{testPrefix}-selections-empty">
-							No remote selections. Open a second tab and select some text there.
+							No selections yet. Select text above or open a second tab.
 						</p>
 					{/each}
 				</div>

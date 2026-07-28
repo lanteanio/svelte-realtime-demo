@@ -1,112 +1,139 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import {
+	REACTION_TOKENS,
+	animationTime,
+	cursorFor,
+	expectNoMultiplayerErrors,
+	isConnected,
+	moveCursor,
+	openMultiplayer,
+	participantName,
+	tapReaction,
+	waitForPeers,
+	waitForReactionCount
+} from './multiplayer-helpers.js'
 
-// Single-page assertions. The lounge is one shared global room, so the
-// tests avoid exact roster counts (parallel visitors are legal) and
-// assert the local surfaces instead: room.others EXCLUDES self once
-// identified, so the roster check targets the self badge, not a count.
+test.describe.configure({ mode: 'serial' })
+
 test.describe('/demos/multiplayer', () => {
-	test('page loads with canvas, roster, typing indicator, and reaction bar', async ({ page }) => {
-		await page.goto('/demos/multiplayer')
-		await waitForWS(page)
-
+	test('renders every shared surface, control constraint, disclosure, and source link', async ({ page }) => {
+		await openMultiplayer(page)
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Multiplayer lounge: one room, every surface')
 		await expect(page.getByTestId('mp-canvas')).toBeVisible()
-		await expect(page.getByTestId('mp-roster')).toBeVisible()
 		await expect(page.getByTestId('mp-roster')).toContainText('(you)')
-		await expect(page.getByTestId('mp-typing')).toBeVisible()
-		await expect(page.getByTestId('mp-lock-state')).toBeVisible()
-		for (const token of ['heart', 'fire', 'clap', 'star']) {
-			await expect(page.getByTestId(`mp-react-${token}`)).toBeVisible()
-		}
-	})
-
-	test('headline input takes the advisory lock on focus and sets the headline', async ({ page }) => {
-		await page.goto('/demos/multiplayer')
-		await waitForWS(page)
+		await expect(page.getByTestId('mp-typing')).toHaveText('Nobody is typing.')
+		await expect(page.getByTestId('mp-lock-state')).toHaveText('Lock free.')
 
 		const input = page.getByTestId('mp-headline-input')
-		await expect(input).toBeEnabled({ timeout: 10_000 })
-
-		// Focus acquires the 'headline' lock; the stamp round-trips through
-		// the presence roster before the lock-state line flips.
-		await input.focus()
-		await expect(page.getByTestId('mp-lock-state')).toHaveText('You hold the lock.', { timeout: 5_000 })
-
-		const text = `e2e headline ${Date.now()}`
-		await input.fill(text)
-		await page.getByTestId('mp-headline-submit').click()
-		await expect(page.getByTestId('mp-headline-display')).toHaveText(text, { timeout: 5_000 })
-		await expect(page.getByTestId('mp-error')).toHaveCount(0)
-
-		// Blur releases the lock again.
+		await expect(input).toHaveAttribute('maxlength', '80')
+		await expect(input).toHaveAttribute('placeholder', 'Rewrite the headline (max 80 chars)...')
+		await input.fill('   ')
+		await expect(page.getByTestId('mp-headline-submit')).toBeDisabled()
 		await input.blur()
-		await expect(page.getByTestId('mp-lock-state')).toHaveText('Lock free.', { timeout: 5_000 })
-	})
 
-	test('pointer movement over the canvas renders the local cursor', async ({ page }) => {
-		await page.goto('/demos/multiplayer')
-		await waitForWS(page)
-
-		const canvas = page.getByTestId('mp-canvas')
-		const box = await canvas.boundingBox()
-		// A few distinct positions so at least one volatile send lands
-		// after the subscription is live.
-		for (const [fx, fy] of [[0.3, 0.3], [0.5, 0.5], [0.7, 0.6]]) {
-			await page.mouse.move(box.x + box.width * fx, box.y + box.height * fy, { steps: 5 })
-			await page.waitForTimeout(150)
+		for (const token of REACTION_TOKENS) {
+			await expect(page.getByTestId(`mp-react-${token}`)).toBeVisible()
+			await expect(page.getByTestId(`mp-react-${token}`)).toHaveAttribute('aria-label', `React with ${token}`)
 		}
-
-		// room.cursors keeps self, so the local dot must appear once the
-		// move round-trips through the cursor stream.
-		await expect(page.getByTestId('mp-cursor').first()).toBeVisible({ timeout: 5_000 })
+		await expect(page.getByRole('link', { name: 'multiplayer.js' })).toHaveAttribute(
+			'href',
+			'https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/multiplayer.js'
+		)
+		await expectNoMultiplayerErrors(page)
 	})
 
-	test('reaction tap emits a floating emote without throwing', async ({ page }) => {
-		await page.goto('/demos/multiplayer')
-		await waitForWS(page)
+	test('two visitors share presence, typing, advisory locks, and button/Enter headline edits both ways', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([openMultiplayer(a), openMultiplayer(b)])
+			const { nameA, nameB } = await waitForPeers(a, b)
+			const inputA = a.getByTestId('mp-headline-input')
+			const inputB = b.getByTestId('mp-headline-input')
 
-		await page.getByTestId('mp-react-heart').click()
+			await inputA.focus()
+			await expect(a.getByTestId('mp-lock-state')).toHaveText('You hold the lock.', { timeout: 10_000 })
+			await expect(b.getByTestId('mp-lock-state')).toContainText(`Locked by ${nameA}.`, { timeout: 10_000 })
+			await expect(inputB).toBeDisabled()
+			await expect(inputB).toHaveAttribute('placeholder', `Locked by ${nameA}`)
+			const fromA = `button-${Date.now()}`
+			await inputA.fill(fromA)
+			await expect(b.getByTestId('mp-typing')).toContainText(`${nameA} is typing...`, { timeout: 10_000 })
+			await a.getByTestId('mp-headline-submit').click()
+			await Promise.all([
+				expect(a.getByTestId('mp-headline-display')).toHaveText(fromA),
+				expect(b.getByTestId('mp-headline-display')).toHaveText(fromA)
+			])
+			await inputA.blur()
+			await expect(b.getByTestId('mp-lock-state')).toHaveText('Lock free.', { timeout: 10_000 })
+			await expect(inputB).toBeEnabled()
+			await expect(b.getByTestId('mp-typing')).toHaveText('Nobody is typing.', { timeout: 10_000 })
 
-		// The emote rides the reactions stream back onto the canvas.
-		await expect(page.getByTestId('mp-reaction').first()).toBeAttached({ timeout: 5_000 })
-		await expect(page.getByTestId('mp-error')).toHaveCount(0)
+			await inputB.focus()
+			await expect(a.getByTestId('mp-lock-state')).toContainText(`Locked by ${nameB}.`, { timeout: 10_000 })
+			const fromB = `enter-${Date.now()}`
+			await inputB.fill(fromB)
+			await expect(a.getByTestId('mp-typing')).toContainText(`${nameB} is typing...`, { timeout: 10_000 })
+			await inputB.press('Enter')
+			await Promise.all([
+				expect(a.getByTestId('mp-headline-display')).toHaveText(fromB),
+				expect(b.getByTestId('mp-headline-display')).toHaveText(fromB)
+			])
+			await inputB.blur()
+			await expect(a.getByTestId('mp-lock-state')).toHaveText('Lock free.', { timeout: 10_000 })
+			await expectNoMultiplayerErrors(a, b)
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
 	})
 
-	// A second reaction must NOT disturb emotes already floating. The failure
-	// this guards: rendering the reaction ring keyed by object identity re-keys
-	// every entry on each push, so Svelte tears down and rebuilds all reaction
-	// nodes, restarting the float animation (existing emotes snap back to spawn,
-	// faded ones revive). We assert the first emote's animation keeps advancing
-	// across a second, different reaction instead of rewinding toward zero.
-	test('a second reaction does not restart earlier reactions animations', async ({ page }) => {
-		await page.goto('/demos/multiplayer')
-		await waitForWS(page)
+	test('normalized cursors propagate bidirectionally and a departing visitor is removed', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([openMultiplayer(a), openMultiplayer(b)])
+			const { nameA, nameB } = await waitForPeers(a, b)
+			await moveCursor(a, 0.25, 0.35)
+			const cursorAOnB = cursorFor(b, nameA)
+			await expect(cursorAOnB).toBeVisible({ timeout: 10_000 })
+			await expect(cursorAOnB).toHaveAttribute('style', /left: 25%; top: 35%/)
 
-		// Progress of the heart emote's float animation, or null if its node is
-		// missing. currentTime rewinding toward zero means the node was recreated.
-		const heartProgress = () => page.evaluate(() => {
-			const nodes = [...document.querySelectorAll('[data-testid="mp-reaction"]')]
-			const heart = nodes.find((n) => n.textContent.includes('❤'))
-			const anim = heart && heart.getAnimations ? heart.getAnimations()[0] : null
-			return anim ? Number(anim.currentTime) : null
-		})
+			await moveCursor(b, 0.7, 0.65)
+			const cursorBOnA = cursorFor(a, nameB)
+			await expect(cursorBOnA).toBeVisible({ timeout: 10_000 })
+			await expect(cursorBOnA).toHaveAttribute('style', /left: 70%; top: 65%/)
+			await ctxB.close()
+			await expect(a.getByTestId('mp-roster-other').filter({ hasText: nameB })).toHaveCount(0, { timeout: 15_000 })
+			await expect(cursorFor(a, nameB)).toHaveCount(0, { timeout: 15_000 })
+			await expectNoMultiplayerErrors(a)
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
 
-		await page.getByTestId('mp-react-heart').click()
-		await expect(page.getByTestId('mp-reaction')).toHaveCount(1, { timeout: 5_000 })
-		await page.waitForTimeout(800)
+	test('each emoji appends once while earlier nodes keep animating and expire independently (RT-347)', async ({ page }) => {
+		await openMultiplayer(page)
+		await waitForReactionCount(page, 0)
 
-		const before = await heartProgress()
-		expect(before, 'heart emote should be animating before the second tap').not.toBeNull()
-		expect(before).toBeGreaterThan(300)
+		const heart = await tapReaction(page, 'heart', 1)
+		await page.waitForTimeout(700)
+		const heartBefore = await animationTime(heart)
+		expect(heartBefore).toBeGreaterThan(300)
 
-		// Tap a DIFFERENT reaction; it must append, not re-seed the whole set.
-		await page.getByTestId('mp-react-fire').click()
-		await expect(page.getByTestId('mp-reaction')).toHaveCount(2, { timeout: 5_000 })
+		const fire = await tapReaction(page, 'fire', 2)
+		expect(await isConnected(heart), 'the first reaction node must survive an append').toBe(true)
+		expect(await animationTime(heart), 'the first animation must not rewind to its spawn').toBeGreaterThanOrEqual(heartBefore)
+		const clap = await tapReaction(page, 'clap', 3)
+		const star = await tapReaction(page, 'star', 4)
+		for (const handle of [fire, clap, star]) expect(await isConnected(handle)).toBe(true)
 
-		const after = await heartProgress()
-		expect(after, 'heart emote should still be present after the second tap').not.toBeNull()
-		// The heart animation must have kept running, never rewound to spawn.
-		expect(after).toBeGreaterThanOrEqual(before)
-		await expect(page.getByTestId('mp-error')).toHaveCount(0)
+		await expect.poll(() => isConnected(heart), { timeout: 4_000 }).toBe(false)
+		expect(await isConnected(fire), 'the later reaction must remain while the earlier one is pruned').toBe(true)
+		await waitForReactionCount(page, 0)
+		await expectNoMultiplayerErrors(page)
 	})
 })

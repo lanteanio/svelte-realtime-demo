@@ -77,18 +77,9 @@ test.describe('cluster bugs: presence + push', () => {
 	})
 
 	test('lobbies presence + room count stay consistent across replicas', async ({ browser }) => {
-		// A known-open cross-replica coordination gap in enumerable owner rooms
-		// (contrast the chat test above, a plain live.room, which passes). Two
-		// members join one table from different replicas:
-		//   - the enumerable rooms() registry aggregates the count cluster-wide
-		//     (both replicas read 2/8), but the presence() sub-stream only
-		//     delivers same-replica members (each viewer sees just itself), and
-		//   - when the remote member leaves, the registry count is never
-		//     decremented (stays 2/8), which over repeated join/leave cycles is
-		//     the "member count climbs" leak.
-		// Marked test.fail: it flips to a real failure (alerting us to drop the
-		// annotation) once the upstream presence relay + purge lands.
-		test.fail()
+		// Regression for RT-391/RT-417: enumerable owner-room presence must
+		// converge across replicas, and a live-socket leave must run realtime's
+		// managed-topic drain so the shared room count decrements immediately.
 		const table = String(100000 + Math.floor((Date.now() % 800000)))
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
@@ -134,20 +125,27 @@ test.describe('cluster bugs: presence + push', () => {
 		}
 	})
 
-	test('per-board presence decrements cross-replica when a member navigates away', async ({ browser }) => {
+	test('board-list observers do not inflate presence and member leave decrements cross-replica', async ({ browser }) => {
 		// A member on a board (joinBoard -> board:{id} presence) navigates AWAY,
-		// firing leaveBoard -> presence.leave with the WS still open. A viewer on
-		// another replica must see the board's presence count drop, not linger
-		// until the 90s client maxAge. On 2 instances this decrements in ~65ms;
-		// this guards that cross-replica leave-diff relay (the reported prod "stuck
-		// N here" needs the 4-replica SO_REUSEPORT topology to manifest as a leak).
+		// firing leaveBoard -> presence.leave with the WS still open. A BoardCard
+		// observer on another replica must not become a member during its snapshot
+		// authorization check, and must see the real count drop without waiting for
+		// the 90s client maxAge. The pre-fix public deployment reports three members
+		// for the two board participants plus this observer and sticks at "1 here".
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const ctxC = await browser.newContext({ baseURL: INSTANCE_B })
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
+		const c = await ctxC.newPage()
 		const title = `prestest-${Date.now()}`
 		// Board presence avatar count from the board page's PresenceBar.
 		const boardCount = (page) => page.locator('.avatar-group .avatar').count()
+		const boardCard = (page) => page.locator('a.card', { hasText: title })
+		const globalCount = async (page) => {
+			const text = await page.locator('.navbar-end').getByText(/^\d+ online$/).textContent()
+			return Number(text?.match(/^\d+/)?.[0])
+		}
 		try {
 			// A creates a board and lands on it (joinBoard -> board:{id} presence).
 			await a.goto(`${INSTANCE_A}/`)
@@ -157,19 +155,61 @@ test.describe('cluster bugs: presence + push', () => {
 			await a.waitForURL(/\/board\//, { timeout: 15_000 })
 			const boardPath = new URL(a.url()).pathname
 
-			// B joins the SAME board on the other replica; A sees both (fan-out ok).
+			// C stays on the home page for the whole lifecycle. Its BoardCard
+			// store is mounted BEFORE either leave, exactly matching the reported
+			// stale board-list observer and avoiding a separate late-subscription
+			// snapshot question.
+			await c.goto(`${INSTANCE_B}/`)
+			await waitForWS(c)
+			await expect(boardCard(c)).toBeVisible()
+			// Do not require a late-subscription snapshot here. That is a separate
+			// attach-path question; the next JOIN is the included-side gate for
+			// this leave test and must bring the mounted observer to the full set.
+
+			// B joins the SAME board on the other replica; both the board page and
+			// the already-mounted home card see the two-member fan-out.
 			await b.goto(`${INSTANCE_B}${boardPath}`)
 			await waitForWS(b)
 			await expect.poll(() => boardCount(a), { message: 'A should see both members', timeout: 15_000 }).toBe(2)
+			await expect.poll(async () => boardCard(c).locator('.badge-primary').textContent().catch(() => null), {
+				message: 'mounted board card should see both members before either leave',
+				timeout: 15_000
+			}).toBe('2 here')
+			await expect.poll(() => globalCount(a), { message: 'global presence should include all three test users', timeout: 15_000 })
+				.toBeGreaterThanOrEqual(3)
+			const globalWithAllContexts = await globalCount(a)
 
-			// B navigates away (leaveBoard fires; WS stays open) - A must decrement.
-			await b.goto(`${INSTANCE_B}/`)
+			// B navigates away (leaveBoard fires; WS stays open). A's board-page
+			// roster and C's mounted home-card badge must both decrement, while global
+			// presence correctly still includes B's open socket.
+			await b.locator('a[href="/"]').first().click()
+			await b.waitForURL((url) => url.pathname === '/', { timeout: 10_000 })
 			await expect
 				.poll(() => boardCount(a), { message: 'A count should decrement when B navigates away', timeout: 10_000 })
 				.toBe(1)
-		} finally {
-			await ctxA.close()
+			await expect(boardCard(c).getByText('1 here', { exact: true })).toBeVisible({ timeout: 10_000 })
+			await expect.poll(() => globalCount(a), {
+				message: 'client-side navigation should keep B in global presence',
+				timeout: 10_000
+			}).toBe(globalWithAllContexts)
+
+			// Closing B now exercises the separate WS-close cleanup used by the
+			// global navbar counter. Compare a delta rather than an absolute count
+			// so the same assertion is valid on a live domain with other visitors.
 			await ctxB.close()
+			await expect.poll(() => globalCount(a), {
+				message: 'global online count should decrement when B closes',
+				timeout: 15_000
+			}).toBe(globalWithAllContexts - 1)
+
+			// Finally A leaves the board without closing its socket. The board is
+			// unique to this test, so its home card must lose the final badge
+			// rather than lingering as the reported "1 here".
+			await a.locator('a[href="/"]').first().click()
+			await a.waitForURL((url) => url.pathname === '/', { timeout: 10_000 })
+			await expect(boardCard(c).getByText(/^\d+ here$/)).toHaveCount(0, { timeout: 10_000 })
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close(), ctxC.close()])
 		}
 	})
 

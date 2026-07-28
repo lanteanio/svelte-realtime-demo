@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
-import { waitForWS } from './helpers.js'
+import { confirmAndClick, waitForWS } from './helpers.js'
 
 // Cross-replica coverage for /demos/counter-resume: two tabs forced onto
 // DIFFERENT SO_REUSEPORT replicas (instance A vs instance B) against shared
@@ -97,7 +97,7 @@ test.describe('cluster: /demos/counter-resume cross-replica', () => {
 			await expect.poll(() => counterValue(a), { timeout: 15_000 }).toBeGreaterThan(6)
 			const beforeB = await counterValue(b)
 
-			await a.getByTestId('reset-button').click()
+			await confirmAndClick(a.getByTestId('reset-button'))
 
 			// The reset RPC ran on replica A; its 'set' 0 broadcast must cross the
 			// cluster and drop B's counter (B never touched Reset).

@@ -25,6 +25,10 @@
 	const activeTenant = $derived(
 		wsTenant !== undefined ? wsTenant : (data.identity?.tenant ?? null)
 	)
+	const literalPadTopic = 'demos:tenants:pad'
+	const effectivePadTopic = $derived(
+		activeTenant ? `@t/${activeTenant}/${literalPadTopic}` : literalPadTopic
+	)
 
 	const notes = $derived($pad ?? [])
 	let padError = $state(null)
@@ -115,12 +119,13 @@
 						{/if}
 					</div>
 				</div>
-				<div class="flex gap-2">
+				<div class="flex gap-2" role="group" aria-label="Tenant scope">
 					<button
 						class="btn btn-sm"
 						class:btn-primary={activeTenant === 'acme'}
 						onclick={() => switchTenant('acme')}
-						disabled={switching || activeTenant === 'acme'}
+						disabled={switching}
+						aria-pressed={activeTenant === 'acme'}
 						data-testid="tn-set-acme"
 					>
 						Acme
@@ -129,15 +134,18 @@
 						class="btn btn-sm"
 						class:btn-primary={activeTenant === 'globex'}
 						onclick={() => switchTenant('globex')}
-						disabled={switching || activeTenant === 'globex'}
+						disabled={switching}
+						aria-pressed={activeTenant === 'globex'}
 						data-testid="tn-set-globex"
 					>
 						Globex
 					</button>
 					<button
 						class="btn btn-sm"
+						class:btn-primary={activeTenant === null}
 						onclick={() => switchTenant(null)}
-						disabled={switching || activeTenant === null}
+						disabled={switching}
+						aria-pressed={activeTenant === null}
 						data-testid="tn-clear"
 					>
 						No tenant
@@ -167,10 +175,20 @@
 	<!-- Scratchpad -->
 	<div class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">
-				{activeTenant ? `${activeTenant} scratchpad` : 'Public scratchpad'}
-				<span class="text-xs opacity-50 font-normal">last 20 notes, live</span>
-			</h2>
+			<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+				<h2 class="card-title text-sm">
+					{activeTenant ? `${activeTenant} scratchpad` : 'Public scratchpad'}
+					<span class="text-xs opacity-50 font-normal">last 20 notes, live</span>
+				</h2>
+				<div class="flex min-w-0 max-w-full items-center gap-1 text-xs" aria-label="Effective wire topic">
+					<span class="opacity-60 shrink-0">wire</span>
+					<code
+						class="badge badge-outline badge-sm h-auto max-w-full break-all py-1 font-mono"
+						title={effectivePadTopic}
+						data-testid="tn-wire-topic"
+					>{effectivePadTopic}</code>
+				</div>
+			</div>
 
 			<form onsubmit={(e) => { e.preventDefault(); handlePost() }} class="flex gap-2">
 				<input

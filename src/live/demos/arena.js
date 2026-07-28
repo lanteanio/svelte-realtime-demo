@@ -29,10 +29,12 @@
 
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
+import { redis } from '$lib/server/redis'
 import { apply, drift, spawnFor, hash01 } from './arena.shared.js'
 
 const TICK_MS = 50
 const NPC_COUNT = 150
+const POPULATION_KEY = 'demos:arena:population'
 
 /**
  * NPC starting state: shared spawn plus a hash-derived velocity of
@@ -51,9 +53,29 @@ function npcSpawn(key) {
 }
 
 // Authoritative catalog size, refreshed once per tick on the instance
-// that runs the authority. A module-level cell is enough: the `population`
-// RPC below is a HUD read, not a coordination surface.
+// that runs the authority. Mirror changes to Redis so `population()` can
+// answer from any RPC replica; SO_REUSEPORT does not guarantee that the
+// page's RPC lands on the smooth authority process.
 let lastCatalogSize = 0
+let lastStoredCatalogSize = -1
+let cachedPopulation = null
+let cachedPopulationAt = 0
+
+// The size only moves when a player joins or leaves, so a write per change is
+// enough; `mirrorPopulation` is called from inside a 50ms tick and must never
+// throw into it.
+function mirrorPopulation(size) {
+	if (size === lastStoredCatalogSize) return
+	lastStoredCatalogSize = size
+	try {
+		void redis.redis.set(POPULATION_KEY, String(size)).catch(() => {
+			// Retry on the next tick if Redis was transiently unavailable.
+			lastStoredCatalogSize = -1
+		})
+	} catch {
+		lastStoredCatalogSize = -1
+	}
+}
 
 export const arena = live.smooth({
 	topic: TOPICS.demoArenaMain,
@@ -68,8 +90,12 @@ export const arena = live.smooth({
 			if (world.get(key) === undefined) world.ensure(key, npcSpawn(key))
 		}
 		lastCatalogSize = world.catalog().length
-		// The NPCs never rest and the HUD denominator should stay current
-		// even while every player idles - request the next tick always.
+		// The NPCs never rest and the HUD denominator should stay current even
+		// while every player idles - request the next tick always. The mirror
+		// below is the only statement here that can throw, and onTick's return
+		// value decides whether the arena keeps ticking at all, so nothing may
+		// sit between it and the return.
+		mirrorPopulation(lastCatalogSize)
 		return true
 	},
 	interest: {
@@ -84,8 +110,33 @@ export const arena = live.smooth({
 })
 
 /**
- * Catalog size for the HUD's "receiving X of Y" line. The world object
- * only exists inside the tick, so onTick mirrors its size into the
- * module-level cell this returns.
+ * Catalog size for the HUD's "receiving X of Y" line. The world object only
+ * exists inside the authority tick, so onTick mirrors size changes into Redis
+ * and every replica reads the same denominator.
+ *
+ * The page polls this every 2s per open tab, so the read is cached for one
+ * second per process: without it a busy arena turns one HUD line into O(tabs)
+ * Redis round trips. A read failure falls back to the local cell rather than
+ * rejecting - this RPC could not fail before, and surfacing an infrastructure
+ * error in the demo's error line would be a worse answer than a stale count.
  */
-export const population = live(async () => lastCatalogSize)
+export const population = live(async () => {
+	const now = Date.now()
+	if (cachedPopulation !== null && now - cachedPopulationAt < 1000) return cachedPopulation
+	let shared = null
+	try {
+		const raw = await redis.redis.get(POPULATION_KEY)
+		if (raw !== null) {
+			const parsed = Number(raw)
+			if (Number.isFinite(parsed) && parsed >= 0) shared = parsed
+		}
+	} catch {
+		shared = null
+	}
+	// Before the first mirrored write this replica may hold 0 while another
+	// holds the real size; prefer whichever is actually populated.
+	const value = shared ?? lastCatalogSize
+	cachedPopulation = value
+	cachedPopulationAt = now
+	return value
+})

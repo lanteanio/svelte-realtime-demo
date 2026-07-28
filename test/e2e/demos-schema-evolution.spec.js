@@ -1,94 +1,119 @@
 import { test, expect } from '@playwright/test'
+import { confirmAndClick } from './helpers.js'
 
-const RUN = `e2e-${Date.now()}`
+test.describe.configure({ mode: 'serial' })
+
+const IDS = ['alpha', 'beta', 'gamma']
+const LABELS = ['Alpha counter', 'Beta counter', 'Gamma counter']
+
+async function open(page) {
+	await page.goto('/demos/schema-evolution')
+	await expect(page.getByTestId('v2-card')).toHaveCount(3, { timeout: 8_000 })
+	await expect(page.getByTestId('v1mig-card')).toHaveCount(3, { timeout: 8_000 })
+}
+
+async function expectValues(page, expected) {
+	for (const id of IDS) {
+		await expect(page.getByTestId(`v2-value-${id}`)).toHaveText(String(expected[id]))
+		await expect(page.getByTestId(`v1mig-value-${id}`)).toHaveText(String(expected[id]))
+	}
+}
+
+async function expectV1Provenance(page, expected) {
+	for (const id of IDS) {
+		await expect(page.getByTestId(`v1mig-provenance-${id}`)).toHaveText(expected[id] ?? expected)
+	}
+}
+
+async function reset(page) {
+	await confirmAndClick(page.getByTestId('reset'))
+	await expectValues(page, { alpha: 0, beta: 0, gamma: 0 })
+	await expectV1Provenance(page, 'loader')
+}
+
+async function reloadMigrated(page) {
+	await page.reload()
+	await expect(page.getByTestId('v2-card')).toHaveCount(3, { timeout: 8_000 })
+	await expectV1Provenance(page, 'migrate[1]')
+}
 
 test.describe('/demos/schema-evolution', () => {
-	test('renders both panels with three counters; v2 panel shows loader, v1mig panel shows migrate[1]', async ({ page }) => {
-		await page.goto('/demos/schema-evolution')
-
-		// Three rows in each panel.
-		await expect(page.getByTestId('v2-card')).toHaveCount(3, { timeout: 8_000 })
-		await expect(page.getByTestId('v1mig-card')).toHaveCount(3, { timeout: 8_000 })
-
-		// v2 panel: every row's provenance badge reads `loader`.
-		const v2Badges = page.getByTestId('v2-provenance')
-		await expect(v2Badges).toHaveCount(3)
-		for (let i = 0; i < 3; i++) {
-			await expect(v2Badges.nth(i)).toHaveText('loader')
-		}
-
-		// v1mig panel: every row's provenance badge reads `migrate[1]`.
-		// Server's migrate chain ran on the initial subscribe response.
-		for (const id of ['alpha', 'beta', 'gamma']) {
-			await expect(page.getByTestId(`v1mig-provenance-${id}`)).toHaveText('migrate[1]', { timeout: 8_000 })
-		}
+	test('renders both exact projections, all controls, server version, and migration source', async ({ page }) => {
+		await open(page)
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Schema evolution: subscribe-time migrate hooks')
+		expect(await page.getByTestId('v2-label').allTextContents()).toEqual(LABELS)
+		expect(await page.getByTestId('v1mig-label').allTextContents()).toEqual(LABELS)
+		for (let i = 0; i < 3; i++) await expect(page.getByTestId('v2-provenance').nth(i)).toHaveText('loader')
+		await expectV1Provenance(page, 'migrate[1]')
+		for (const id of IDS) await expect(page.getByTestId(`bump-${id}`)).toHaveText(`Increment ${id}`)
+		await expect(page.getByTestId('reset')).toHaveText('Reset all')
+		await expect(page.getByText('server version: 2', { exact: true })).toBeVisible()
+		const source = page.getByTestId('migrate-source')
+		await expect(source).toContainText('version: 2')
+		await expect(source).toContainText('migrate: { 1: v1ToV2 }')
+		await expect(source).toContainText("merge: 'crud'")
+		await expect(source).toContainText('key: id')
 	})
 
-	test('increment alpha: v2 panel value updates; v1mig panel value updates AND alpha badge flips to `loader`', async ({ page }) => {
-		await page.goto('/demos/schema-evolution')
-
-		// Reset so we don't accumulate across reruns of the spec.
-		await page.getByTestId('reset').click()
-		// After reset, both panels' alpha values are 0; v1mig alpha may
-		// still show migrate[1] if the reset publish hasn't reached it
-		// (the publish IS a raw v2 event, so it should flip to loader).
-		await expect(page.getByTestId('v2-value-alpha')).toHaveText('0', { timeout: 5_000 })
-		await expect(page.getByTestId('v1mig-value-alpha')).toHaveText('0', { timeout: 5_000 })
-
-		// Refresh the page so the v1mig panel re-runs its migrate-chain
-		// initial subscribe (gives us a clean baseline of all `migrate[1]`).
-		await page.reload()
-		for (const id of ['alpha', 'beta', 'gamma']) {
-			await expect(page.getByTestId(`v1mig-provenance-${id}`)).toHaveText('migrate[1]', { timeout: 8_000 })
-		}
-
-		// Increment alpha. The publish is a raw v2 event with provenance:'loader'.
+	test('Reset publishes raw v2 loader rows; reload reruns migrate[1] only for the stale projection', async ({ page }) => {
+		await open(page)
 		await page.getByTestId('bump-alpha').click()
-
-		// v2 panel: alpha value now 1, badge stays `loader`.
-		await expect(page.getByTestId('v2-value-alpha')).toHaveText('1', { timeout: 5_000 })
-
-		// v1mig panel: alpha value now 1, AND alpha's badge flipped to `loader`
-		// (the raw v2 publish replaced the migrated base for that key).
-		await expect(page.getByTestId('v1mig-value-alpha')).toHaveText('1', { timeout: 5_000 })
-		await expect(page.getByTestId('v1mig-provenance-alpha')).toHaveText('loader', { timeout: 5_000 })
-
-		// Untouched rows on the v1mig panel still wear the `migrate[1]` badge.
-		await expect(page.getByTestId('v1mig-provenance-beta')).toHaveText('migrate[1]')
-		await expect(page.getByTestId('v1mig-provenance-gamma')).toHaveText('migrate[1]')
+		await expect(page.getByTestId('v2-value-alpha')).not.toHaveText('0')
+		await reset(page)
+		await reloadMigrated(page)
+		await expectValues(page, { alpha: 0, beta: 0, gamma: 0 })
+		for (let i = 0; i < 3; i++) await expect(page.getByTestId('v2-provenance').nth(i)).toHaveText('loader')
 	})
 
-	test('after a publish, the migrated row is indistinguishable from a fresh-subscriber row', async ({ page }) => {
-		await page.goto('/demos/schema-evolution')
+	test('every increment updates only its key and flips that stale-client row to loader', async ({ page }) => {
+		await open(page)
+		await reset(page)
+		await reloadMigrated(page)
+		const expected = { alpha: 0, beta: 0, gamma: 0 }
+		const provenance = { alpha: 'migrate[1]', beta: 'migrate[1]', gamma: 'migrate[1]' }
+		for (const id of IDS) {
+			await page.getByTestId(`bump-${id}`).click()
+			expected[id] = 1
+			provenance[id] = 'loader'
+			await expectValues(page, expected)
+			await expectV1Provenance(page, provenance)
+		}
+	})
 
-		await page.getByTestId('reset').click()
-		await page.reload()
-
-		// Gate on the v2 stream being live (the reset baseline delivered)
-		// before publishing: the bumps otherwise race ahead of the re-subscribe
-		// and their RPCs are lost, leaving beta at 0.
-		await expect(page.getByTestId('v2-value-beta')).toHaveText('0', { timeout: 8_000 })
-
-		// bump() debounces on an in-flight `busy` flag, so a click landing
-		// before the previous increment resolves is dropped. Serialize the
-		// three bumps, waiting for each to reflect before the next.
-		await page.getByTestId('bump-beta').click()
-		await expect(page.getByTestId('v2-value-beta')).toHaveText('1', { timeout: 5_000 })
-		await page.getByTestId('bump-beta').click()
-		await expect(page.getByTestId('v2-value-beta')).toHaveText('2', { timeout: 5_000 })
-		await page.getByTestId('bump-beta').click()
-
-		// Both panels converge on value=3 for beta with provenance=loader.
-		await expect(page.getByTestId('v2-value-beta')).toHaveText('3', { timeout: 8_000 })
-		await expect(page.getByTestId('v1mig-value-beta')).toHaveText('3', { timeout: 8_000 })
+	test('three serialized beta clicks converge on value 3 in both projections', async ({ page }) => {
+		await open(page)
+		await reset(page)
+		await reloadMigrated(page)
+		for (let value = 1; value <= 3; value++) {
+			await page.getByTestId('bump-beta').click()
+			await expect(page.getByTestId('v2-value-beta')).toHaveText(String(value))
+			await expect(page.getByTestId('v1mig-value-beta')).toHaveText(String(value))
+		}
 		await expect(page.getByTestId('v1mig-provenance-beta')).toHaveText('loader')
 	})
 
-	test('migrate config snippet is rendered on the page', async ({ page }) => {
-		await page.goto('/demos/schema-evolution')
-		const src = page.getByTestId('migrate-source')
-		await expect(src).toContainText('version: 2', { timeout: 5_000 })
-		await expect(src).toContainText('migrate: { 1: v1ToV2 }')
-		await expect(src).toContainText("merge: 'crud'")
+	test('two tabs increment the same Redis field concurrently without losing a count, then share Reset', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([open(a), open(b)])
+			await reset(a)
+			await Promise.all([reloadMigrated(a), reloadMigrated(b)])
+			await Promise.all([
+				a.getByTestId('bump-gamma').click(),
+				b.getByTestId('bump-gamma').click()
+			])
+			for (const page of [a, b]) {
+				await expect(page.getByTestId('v2-value-gamma')).toHaveText('2')
+				await expect(page.getByTestId('v1mig-value-gamma')).toHaveText('2')
+				await expect(page.getByTestId('v1mig-provenance-gamma')).toHaveText('loader')
+			}
+			await reset(b)
+			await expectValues(a, { alpha: 0, beta: 0, gamma: 0 })
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
 	})
 })

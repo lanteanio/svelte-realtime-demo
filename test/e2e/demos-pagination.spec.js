@@ -4,7 +4,7 @@ import { waitForWS } from './helpers.js'
 // Exhaustive human-like coverage for /demos/pagination - a 200-entry log feed
 // served in cursor-based pages of 25 (loader returns { data, hasMore, cursor },
 // merge:'crud' keyed by id) plus an append form publishing 'created' on the
-// same topic. Drives every interactive element (Load older, severity select,
+// same topic. Drives every interactive element (Load more, severity select,
 // message input, Append) and asserts REAL outcomes: exact seq contiguity per
 // page (proving the cursor advanced to the NEXT chronological slice, not a
 // repeat), the in-flight loading state (via delayed WS frames), live 'created'
@@ -55,10 +55,10 @@ test.describe('/demos/pagination', () => {
 		await expect(page.getByTestId('entries-count')).toHaveText(String(PAGE_SIZE))
 		await expect(page.getByTestId('has-more-state')).toContainText('hasMore: true')
 		await expect(page.getByTestId('load-more')).toBeEnabled()
-		await expect(page.getByTestId('load-more')).toHaveText(`Load older (${PAGE_SIZE} more)`)
+		await expect(page.getByTestId('load-more')).toHaveText(`Load more (next ${PAGE_SIZE})`)
 	})
 
-	test('Load older advances the cursor to the NEXT chronological slice', async ({ page }) => {
+	test('Load more advances the cursor to the NEXT chronological slice', async ({ page }) => {
 		test.setTimeout(25_000)
 		await open(page)
 
@@ -75,10 +75,10 @@ test.describe('/demos/pagination', () => {
 		await expect(page.getByTestId('has-more-state')).toContainText('hasMore: true')
 	})
 
-	test('Load older shows a real in-flight state (button disabled, Loading label)', async ({ page }) => {
+	test('Load more shows a real in-flight state (button disabled, Loading label)', async ({ page }) => {
 		test.setTimeout(45_000)
 		// Delay every server->client frame. The pending UI (disabled button with
-		// a 'Loading...' label) must appear the instant Load older is clicked and
+		// a 'Loading...' label) must appear the instant Load more is clicked and
 		// persist until the delayed page-2 frame lands - if the button state were
 		// only flipped by data arrival this assertion window would catch it.
 		const SERVER_DELAY = 1_500
@@ -104,7 +104,7 @@ test.describe('/demos/pagination', () => {
 		// Once the delayed frame lands: page 2 merged, pending state cleared.
 		await expect(page.getByTestId('entry-row')).toHaveCount(2 * PAGE_SIZE, { timeout: 3 * SERVER_DELAY })
 		await expect(page.getByTestId('load-more')).toBeEnabled()
-		await expect(page.getByTestId('load-more')).toHaveText(`Load older (${PAGE_SIZE} more)`)
+		await expect(page.getByTestId('load-more')).toHaveText(`Load more (next ${PAGE_SIZE})`)
 	})
 
 	test('Append drives the form and the new entry lands at the BOTTOM with a seq jump', async ({ page }) => {
@@ -125,6 +125,9 @@ test.describe('/demos/pagination', () => {
 		const lastRow = page.getByTestId('entry-row').last()
 		await expect(lastRow.getByTestId('entry-message')).toHaveText(tag)
 		await expect(lastRow.getByTestId('entry-severity')).toHaveText('error')
+		await expect(page.getByTestId('append-confirmation')).toContainText(tag)
+		await expect(lastRow).toBeInViewport()
+		await expect(lastRow).toHaveClass(/append-highlight/)
 		const seqs = await seqsOf(page)
 		expect(seqs[seqs.length - 1]).toBeGreaterThan(SEEDED_TOTAL)
 		expect(seqs[seqs.length - 2]).toBe(PAGE_SIZE)

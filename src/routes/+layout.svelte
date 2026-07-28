@@ -69,18 +69,27 @@
 
 <div class="min-h-screen bg-base-100">
 	<div class="navbar bg-base-100 border-b border-base-300 px-2 sm:px-4 min-h-0 h-12">
-		<div class="navbar-start gap-2">
-			<a href="/" class="flex items-center gap-1.5 sm:gap-2 font-bold text-base sm:text-lg">
+		<!-- Between 640 and 1023 the end cluster outgrows its navbar half
+		     and paints over the wordmark; the count and color picker wait
+		     for lg, and the wordmark truncates instead of being covered.
+		     daisyUI gives both halves a fixed width:50%, which is what let
+		     the end cluster spill. The start half absorbs the slack and the
+		     end half sizes to its content, so `ms-auto` is load-bearing:
+		     w-auto alone would leave the cluster stranded mid-navbar
+		     (width:auto beats daisyUI's layered 50%, and .navbar sets no
+		     justify-content of its own). -->
+		<div class="navbar-start gap-2 min-w-0">
+			<a href="/" class="flex items-center gap-1.5 sm:gap-2 font-bold text-base sm:text-lg min-w-0">
 				<img src="/svelte_orange_logo_only.png" alt="Svelte" width="32" height="32" />
-				<span class="hidden sm:inline">Svelte Realtime Demo</span>
+				<span class="hidden sm:inline truncate">Svelte Realtime Demo</span>
 				<span class="sm:hidden">Demo</span>
 			</a>
 		</div>
 
-		<div class="navbar-end flex items-center gap-1.5 sm:gap-3">
-			<!-- Global online count (desktop only) -->
+		<div class="navbar-end flex items-center gap-1.5 sm:gap-3 shrink-0 w-auto grow-0 ms-auto">
+			<!-- Global online count (wide desktop only) -->
 			{#if globalUsers.length > 0}
-				<div class="hidden sm:flex items-center gap-1 text-xs opacity-50">
+				<div class="hidden lg:flex items-center gap-1 text-xs opacity-50">
 					<Globe size={13} />
 					<span>{globalUsers.length} online</span>
 				</div>
@@ -98,11 +107,11 @@
 					<span class="font-medium truncate max-w-20 sm:max-w-none">{identity.name}</span>
 				</div>
 
-				<!-- Note color picker (desktop only) -->
-				<div class="hidden sm:flex items-center gap-1">
+				<!-- Note color picker (wide desktop only) -->
+				<div class="hidden lg:flex items-center gap-1">
 					{#each NOTE_COLORS as color}
 						<button
-							class="w-4 h-4 rounded-full border-2 transition-transform hover:scale-125"
+							class="w-6 h-6 shrink-0 rounded-full border-2 transition-transform hover:scale-110"
 							class:border-primary={noteColor === color}
 							class:border-base-300={noteColor !== color}
 							style:background={color}

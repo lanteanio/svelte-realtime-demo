@@ -1,88 +1,224 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { confirmAndClick, waitForWS } from './helpers.js'
 
-const PRODUCT_IDS = ['phone', 'watch', 'speaker']
+const PRODUCTS = [
+	{ id: 'phone', name: 'Wireless earbuds', original: 99, sale: 29, stock: 5 },
+	{ id: 'watch', name: 'Smart watch', original: 299, sale: 119, stock: 3 },
+	{ id: 'speaker', name: 'Bluetooth speaker', original: 149, sale: 59, stock: 8 }
+]
 
-async function reset(page) {
+async function openSale(page) {
 	await page.goto('/demos/flash-sales')
 	await waitForWS(page)
-	// Clear any state left over from a prior test run before asserting.
-	await page.getByTestId('reset').click()
-	for (const id of PRODUCT_IDS) {
-		await expect(page.getByTestId(`product-stock-${id}`)).toContainText('left', { timeout: 5_000 })
+	await expect(page.getByTestId('product-card-phone')).toBeVisible()
+}
+
+async function reset(page) {
+	await openSale(page)
+	await confirmAndClick(page.getByTestId('reset'))
+	for (const product of PRODUCTS) {
+		await expect(page.getByTestId(`product-stock-${product.id}`)).toHaveText(`${product.stock} / ${product.stock} left`)
+		await expect(page.getByTestId(`product-sold-${product.id}`)).toHaveText('sold: 0')
 	}
+	await expect(page.getByTestId('sales-row')).toHaveCount(0)
+	await expect(page.getByTestId('coupon-pool')).toHaveText('50')
+}
+
+function stockBadge(page, product) {
+	return page.getByTestId(`product-stock-${product}`)
+}
+
+function soldCount(page, product) {
+	return page.getByTestId(`product-sold-${product}`)
+}
+
+function tallyNumber(page, testId) {
+	return page.getByTestId(testId).textContent().then((text) => Number(text?.match(/^\d+/)?.[0] ?? NaN))
+}
+
+async function setStress(page, product, count) {
+	await page.getByTestId('stress-target').selectOption(product)
+	await page.getByTestId('stress-count').fill(String(count))
+	await expect(page.getByText(`Count (${count})`, { exact: true })).toBeVisible()
+	await expect(page.getByTestId('stress-go')).toHaveText(`Spam ${count} buys`)
+}
+
+async function runStress(page) {
+	await page.getByTestId('stress-go').click()
+	await expect(page.getByTestId('stress-result')).toBeVisible({ timeout: 20_000 })
 }
 
 test.describe('/demos/flash-sales', () => {
-	test('renders three products with full initial stock', async ({ page }) => {
+	test('renders the complete catalog, prices, stock, stress controls, coupon, and identity', async ({ page }) => {
 		await reset(page)
-		await expect(page.getByTestId('product-card-phone')).toBeVisible()
-		await expect(page.getByTestId('product-card-watch')).toBeVisible()
-		await expect(page.getByTestId('product-card-speaker')).toBeVisible()
-		// Stock badges show "N / N left" at full state.
-		await expect(page.getByTestId('product-stock-phone')).toHaveText('5 / 5 left')
-		await expect(page.getByTestId('product-stock-watch')).toHaveText('3 / 3 left')
-		await expect(page.getByTestId('product-stock-speaker')).toHaveText('8 / 8 left')
+		await expect(page.getByRole('heading', { name: 'Flash sales: atomic inventory under contention' })).toBeVisible()
+		await expect(page.locator('header strong')).not.toHaveText('')
+		await expect(page.getByTestId('coupon-section')).toContainText('Coupon: SAVE20 (one per user)')
+		await expect(page.getByTestId('coupon-claim')).toHaveText('Claim coupon')
+
+		for (const product of PRODUCTS) {
+			const card = page.getByTestId(`product-card-${product.id}`)
+			await expect(card.getByTestId('product-name')).toHaveText(product.name)
+			await expect(card.getByTestId('product-saleprice')).toHaveText(`$${product.sale}`)
+			await expect(card.getByText(`$${product.original}`, { exact: true })).toBeVisible()
+			await expect(card.getByTestId(`product-buy-${product.id}`)).toHaveText(`Buy $${product.sale}`)
+			await expect(card.locator('progress')).toHaveAttribute('value', '1')
+		}
+
+		const stressOptions = await page.getByTestId('stress-target').locator('option').evaluateAll((nodes) => (
+			nodes.map((node) => ({ value: node.value, text: node.textContent?.trim() }))
+		))
+		expect(stressOptions).toEqual(PRODUCTS.map((product) => ({ value: product.id, text: product.name })))
+		await expect(page.getByTestId('stress-count')).toHaveAttribute('min', '1')
+		await expect(page.getByTestId('stress-count')).toHaveAttribute('max', '50')
+		await expect(page.getByTestId('stress-count')).toHaveAttribute('step', '1')
 	})
 
-	test('single buy: stock decrements by 1; sales feed shows the entry', async ({ page }) => {
+	test('stock badges never shrink, wrap, or clip across the reported viewports', async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 568 })
 		await reset(page)
-		await page.getByTestId('product-buy-phone').click()
-		await expect(page.getByTestId('product-stock-phone')).toHaveText('4 / 5 left', { timeout: 5_000 })
-		await expect(page.getByTestId('product-sold-phone')).toHaveText('sold: 1')
-		await expect(page.getByTestId('buy-outcome-kind')).toHaveText('sold')
-		// Sales feed populated.
+		for (const width of [320, 640, 768, 844, 1024]) {
+			await page.setViewportSize({ width, height: 900 })
+			for (const product of PRODUCTS) {
+				const badge = stockBadge(page, product.id)
+				const geometry = await badge.evaluate((element) => {
+					const style = getComputedStyle(element)
+					const box = element.getBoundingClientRect()
+					const cardBox = element.closest('.card').getBoundingClientRect()
+					return {
+						whiteSpace: style.whiteSpace,
+						flexShrink: style.flexShrink,
+						clipped: element.scrollWidth > element.clientWidth || element.scrollHeight > element.clientHeight,
+						insideCard: box.left >= cardBox.left && box.right <= cardBox.right
+					}
+				})
+				expect(geometry, `${product.id} stock badge at ${width}px`).toEqual({
+					whiteSpace: 'nowrap',
+					flexShrink: '0',
+					clipped: false,
+					insideCard: true
+				})
+			}
+		}
+	})
+
+	test('one buy of every product updates exact stock/sold math, outcome, and newest-first sales', async ({ page }) => {
+		await reset(page)
+		const buyer = (await page.locator('header strong').textContent())?.trim() ?? ''
+		for (const [index, product] of PRODUCTS.entries()) {
+			await page.getByTestId(`product-buy-${product.id}`).click()
+			await expect(stockBadge(page, product.id)).toHaveText(`${product.stock - 1} / ${product.stock} left`)
+			await expect(soldCount(page, product.id)).toHaveText('sold: 1')
+			await expect(page.getByTestId('buy-outcome-kind')).toHaveText('sold')
+			await expect(page.getByTestId('buy-outcome')).toContainText(`${product.name} for $${product.sale}`)
+			await expect(page.getByTestId('sales-row')).toHaveCount(index + 1)
+			await expect(page.getByTestId('sales-row').first()).toContainText(`${buyer} bought ${product.name}`)
+			await expect(page.getByTestId('sales-row').first()).toContainText(`$${product.sale}`)
+		}
+	})
+
+	test('an accidental double-click spends one unit, not two', async ({ page }) => {
+		await reset(page)
+		await page.getByTestId('product-buy-phone').dblclick()
+		await expect(stockBadge(page, 'phone')).toHaveText('4 / 5 left')
+		await expect(soldCount(page, 'phone')).toHaveText('sold: 1')
+		await expect(page.getByTestId('sales-row')).toHaveCount(1)
+		await page.waitForTimeout(300)
 		await expect(page.getByTestId('sales-row')).toHaveCount(1)
 	})
 
-	test('sold-out: buy until stock hits 0; button disables and SOLD OUT badge appears', async ({ page }) => {
+	test('selling out disables the card, then reset restores every product and clears outcomes/feed', async ({ page }) => {
 		await reset(page)
-		// Watch has only 3 units. Click 3 times. The buyButton disables
-		// during in-flight calls so we await each before clicking again.
 		const buy = page.getByTestId('product-buy-watch')
-		for (let i = 0; i < 3; i++) {
+		for (let count = 1; count <= 3; count++) {
 			await buy.click()
-			await expect(page.getByTestId(`product-stock-watch`).or(page.getByTestId('product-soldout-watch'))).toBeVisible({ timeout: 5_000 })
+			await expect(soldCount(page, 'watch')).toHaveText(`sold: ${count}`)
 		}
-		await expect(page.getByTestId('product-soldout-watch')).toBeVisible({ timeout: 5_000 })
+		await expect(page.getByTestId('product-soldout-watch')).toHaveText('SOLD OUT')
 		await expect(buy).toBeDisabled()
-		// One more attempt would be blocked by the disabled button; we
-		// also assert the server's SOLD_OUT path via the stress test below.
+		await expect(page.getByTestId('product-card-watch').locator('progress')).toHaveAttribute('value', '0')
+		await expect(page.getByTestId('sales-row')).toHaveCount(3)
+
+		await confirmAndClick(page.getByTestId('reset'))
+		await expect(stockBadge(page, 'watch')).toHaveText('3 / 3 left')
+		await expect(soldCount(page, 'watch')).toHaveText('sold: 0')
+		await expect(buy).toBeEnabled()
+		await expect(page.getByTestId('buy-outcome')).toHaveCount(0)
+		await expect(page.getByTestId('sales-empty')).toBeVisible()
 	})
 
-	test('stress 25 buys at one product: ok+sold-out totals match initial stock; counters reflect it', async ({ page }) => {
+	test('stress tally conserves all 25 calls, surfaces lock timeouts, and never oversells', async ({ page }) => {
+		test.setTimeout(35_000)
 		await reset(page)
-		// Drive 25 concurrent buys at a 5-unit product. Outcomes: 5 ok,
-		// the rest split across SOLD_OUT and (under heavy contention)
-		// LOCK_TIMEOUT. The lock guarantees stock never goes negative.
-		await page.getByTestId('stress-target').selectOption('phone')
-		await page.getByTestId('stress-count').fill('25')
-		await page.getByTestId('stress-go').click()
-		await expect(page.getByTestId('stress-result')).toBeVisible({ timeout: 15_000 })
-		// Phone is sold out and shows the SOLD OUT badge.
+		await setStress(page, 'phone', 25)
+		await runStress(page)
+
+		const [ok, soldOut, lockTimeout, other] = await Promise.all([
+			tallyNumber(page, 'stress-ok'),
+			tallyNumber(page, 'stress-soldout'),
+			tallyNumber(page, 'stress-locktimeout'),
+			page.getByTestId('stress-other').count().then(async (count) => count ? tallyNumber(page, 'stress-other') : 0)
+		])
+		expect(ok).toBe(5)
+		expect(soldOut).toBeGreaterThan(0)
+		expect(lockTimeout).toBeGreaterThan(0)
+		expect(other).toBe(0)
+		expect(ok + soldOut + lockTimeout + other).toBe(25)
 		await expect(page.getByTestId('product-soldout-phone')).toBeVisible()
-		// Exactly 5 successful buys (matches initial stock); the rest are
-		// rejected as SOLD_OUT or LOCK_TIMEOUT (no oversold, no negative
-		// stock). Read the badge tally back.
-		const okText = await page.getByTestId('stress-ok').textContent()
-		expect(okText).toContain('5 ok')
-		// Phone's sold counter shows exactly 5.
-		await expect(page.getByTestId('product-sold-phone')).toHaveText('sold: 5')
+		await expect(soldCount(page, 'phone')).toHaveText('sold: 5')
+		await expect(page.getByTestId('sales-row')).toHaveCount(5)
 	})
 
-	test('coupon: first claim ok; second claim returns the cached first response', async ({ page }) => {
+	test('coupon decrements once per user across re-check and reload; reset permits a fresh claim', async ({ page }) => {
 		await reset(page)
 		await page.getByTestId('coupon-claim').click()
-		await expect(page.getByTestId('coupon-result')).toContainText('Claimed', { timeout: 5_000 })
-		await expect(page.getByTestId('coupon-result')).toContainText('SAVE20')
-		// Pool decremented from 50 to 49.
+		await expect(page.getByTestId('coupon-result')).toHaveText(/Claimed:.*SAVE20/)
 		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
-		// Click again. Idempotent returns the cached response; the page's
-		// `alreadyClaimed` flag flipped to true on first success, so the
-		// second click renders as `Already claimed`.
+		await expect(page.getByTestId('coupon-claim')).toHaveText('Re-check coupon')
+
 		await page.getByTestId('coupon-claim').click()
-		await expect(page.getByTestId('coupon-result')).toContainText('Already claimed', { timeout: 5_000 })
-		// Pool still at 49 (no second decrement).
+		await expect(page.getByTestId('coupon-result')).toHaveText(/Already claimed:.*SAVE20/)
 		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
+		await page.reload()
+		await waitForWS(page)
+		await expect(page.getByTestId('coupon-claim')).toHaveText('Re-check coupon')
+		await page.getByTestId('coupon-claim').click()
+		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
+
+		await confirmAndClick(page.getByTestId('reset'))
+		await expect(page.getByTestId('coupon-pool')).toHaveText('50')
+		await expect(page.getByTestId('coupon-claim')).toHaveText('Claim coupon')
+		await page.getByTestId('coupon-claim').click()
+		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
+	})
+
+	test('two tabs converge on concurrent stock changes and a cluster-wide reset', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await reset(a)
+			await openSale(b)
+			await expect(stockBadge(b, 'phone')).toHaveText('5 / 5 left')
+
+			await Promise.all([
+				a.getByTestId('product-buy-phone').click(),
+				b.getByTestId('product-buy-phone').click()
+			])
+			for (const page of [a, b]) {
+				await expect(stockBadge(page, 'phone')).toHaveText('3 / 5 left')
+				await expect(soldCount(page, 'phone')).toHaveText('sold: 2')
+				await expect(page.getByTestId('sales-row')).toHaveCount(2)
+			}
+
+			await confirmAndClick(b.getByTestId('reset'))
+			for (const page of [a, b]) {
+				await expect(stockBadge(page, 'phone')).toHaveText('5 / 5 left')
+				await expect(page.getByTestId('sales-row')).toHaveCount(0)
+			}
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
 	})
 })

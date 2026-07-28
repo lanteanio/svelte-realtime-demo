@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
-import { waitForWS } from './helpers.js'
+import { confirmAndClick, waitForWS } from './helpers.js'
 
 // Cross-replica coverage for /demos/checkout: the order counter is a single
 // cluster-shared Redis key published over the bus, so an order placed on
@@ -31,7 +31,7 @@ test.describe('cluster: /demos/checkout cross-replica', () => {
 			await openAt(b, INSTANCE_B)
 
 			// Reset from A and confirm B sees zero (shared key + fan-out).
-			await a.getByTestId('checkout-reset').click()
+			await confirmAndClick(a.getByTestId('checkout-reset'))
 			await expect(a.getByTestId('checkout-count')).toHaveText('0', { timeout: 10_000 })
 			await expect(b.getByTestId('checkout-count')).toHaveText('0', { timeout: 15_000 })
 

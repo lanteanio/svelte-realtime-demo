@@ -17,6 +17,7 @@
 	import { onMount } from 'svelte'
 	import { pressureSnapshot, shedEvents, generateLoad, simulateShed, clearShedLog } from '$live/demos/pressure'
 	import { status } from 'svelte-adapter-uws/client'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	const SPARK_WINDOW = 60
 
@@ -56,7 +57,10 @@
 		}
 	}
 	async function handleSimulate() { await simulateShed() }
-	async function handleClear() { await clearShedLog() }
+	async function handleClear() {
+		if (!confirmDestructive('Clear the shared shed log?')) return
+		await clearShedLog()
+	}
 
 	function fmtTs(ts) { return new Date(ts).toLocaleTimeString() }
 	function reasonClass(r) {
@@ -102,7 +106,10 @@
 						WS: <span class="font-mono">{$status}</span>
 					</span>
 				</div>
-				<dl class="grid grid-cols-4 gap-2 text-xs mt-2">
+				<!-- Four fixed columns fuse their labels once the md: two-card
+				     row lands this card in ~230px at 768; two columns until the
+				     xl band keeps every label separated. -->
+				<dl class="grid grid-cols-2 xl:grid-cols-4 gap-2 text-xs mt-2">
 					<div>
 						<dt class="opacity-60">subs/conn</dt>
 						<dd class="font-bold tabular-nums" data-testid="subscriber-ratio">{(snap?.subscriberRatio ?? 0).toFixed(2)}</dd>
@@ -191,7 +198,7 @@
 				<button class="btn btn-sm btn-warning" onclick={handleSimulate} data-testid="simulate-shed">
 					Simulate shed
 				</button>
-				<button class="btn btn-sm btn-ghost ml-auto" onclick={handleClear} data-testid="clear-shed">
+				<button class="btn btn-sm btn-outline btn-error ml-auto" onclick={handleClear} data-testid="clear-shed">
 					Clear shed log
 				</button>
 			</div>
@@ -224,7 +231,10 @@
 	<div class="card bg-base-100 border border-base-300 min-h-[12rem]">
 		<div class="card-body py-3">
 			<h2 class="card-title text-sm">Shed log ({shedRows.length})</h2>
-			<ul class="text-xs font-mono space-y-1" data-testid="shed-log">
+			<!-- Rows are a fixed 39rem grid; without a scroll container the
+			     reason column - the payload the intro promises - clips off
+			     phone viewports with no cue that it exists. -->
+			<ul class="text-xs font-mono space-y-1 overflow-x-auto" data-testid="shed-log">
 				{#if shedRows.length > 0}
 					<li class="grid grid-cols-[6rem_10rem_8rem_10rem_5rem] gap-3 items-center text-[10px] uppercase tracking-wide opacity-40">
 						<span>time</span>

@@ -1,5 +1,5 @@
 <!--
-	/demos/upload - cross-device file uploads with content-addressed
+	/demos/upload - streaming file uploads with content-addressed
 	chunk dedup, on top of `live.upload`.
 
 	Pick a file. The page hands it to `uploadFile(file, args)` and
@@ -7,19 +7,20 @@
 	chunks. The handler hashes each chunk (SHA-256), routes through
 	the redis idempotency cache, and stores fresh bytes once. Re-
 	uploading the same file stores zero new bytes. On stream end the
-	server fires `live.notify({ userId }, ...)` and every other tab
-	the same user has open shows a "new file" banner.
+	server fires `live.notify({ userId }, ...)` and the most recently
+	connected tab for that user shows a "new file" banner.
 
 	Three primitives wired here: live.upload (the streaming primitive
 	that supersedes the manual live.binary chunked-RPC pattern this
 	demo originally shipped with), SHA-256 content addressing,
 	redis/idempotency for cluster-wide dedup, and live.notify for
-	the fire-and-forget cross-device push.
+	most-recent-device fire-and-forget delivery.
 -->
 <script>
 	import { onMount, onDestroy } from 'svelte'
 	import { onPush } from 'svelte-realtime/client'
 	import { configureApp } from '$lib/configure-app'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 	import { status as wsStatus } from 'svelte-adapter-uws/client'
 	import {
 		uploadedFiles,
@@ -59,6 +60,7 @@
 	let activeHandle = $state(null)
 
 	let incoming = $state([])
+	let incomingSeq = 0
 	let pushReady = $state(false)
 	let pushHandlerInstalled = $state(false)
 	let unregisterPush = null
@@ -77,8 +79,13 @@
 		// The handler doesn't depend on the discovered limits; the limits
 		// only gate the upload form.
 		unregisterPush = onPush('demos:upload:incoming', (data) => {
+			// fileId is content-addressed, so re-uploading the same file - the
+			// demo's headline dedup flow - notifies twice with an identical id.
+			// The list key must be unique per NOTIFICATION, not per file, or the
+			// second one throws a duplicate-key error and blanks the banner. A
+			// timestamp is not enough; two can land in the same millisecond.
 			incoming = [
-				{ ...data, receivedAt: Date.now() },
+				{ ...data, receivedAt: Date.now(), notifySeq: ++incomingSeq },
 				...incoming
 			].slice(0, 5)
 			return { ack: 'ok' }
@@ -91,7 +98,7 @@
 		idempotencyEnabled = Boolean(s?.idempotencyEnabled)
 	})
 
-	// pushReady gates the cross-device push test: it must mean both
+	// pushReady gates the user-targeted push test: it must mean both
 	// "handler installed in the client-side map" AND "WS open so the
 	// server-side push registry holds this tab's ws". An always-true
 	// gate signalled visibility before the WS connected, so the
@@ -164,6 +171,7 @@
 	}
 
 	async function handleClear() {
+		if (!confirmDestructive('Clear all shared uploaded-file records?')) return
 		try {
 			await clearFiles()
 		} catch (err) {
@@ -195,8 +203,8 @@
 			Pick a file. The page hands it to <code>live.upload</code>; the framework streams it to the
 			server as binary chunks, hashes each chunk SHA-256 server-side, and short-circuits via
 			<code>redis/idempotency</code> when the hash is already cached. Re-uploading the same file
-			stores zero new bytes. On stream end <code>live.notify(&#123; userId &#125;)</code> fires a
-			fire-and-forget push so other tabs you have open get a "new file" banner.
+			stores zero new bytes. On stream end <code>live.notify(&#123; userId &#125;)</code> sends a
+			fire-and-forget push to that user's most recently connected tab, locally or across workers.
 		</p>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1" data-testid="me">
@@ -231,7 +239,7 @@
 		</div>
 	</div>
 
-	<!-- Visibility-only marker for cross-device push tests: becomes visible once
+	<!-- Visibility-only marker for user-targeted push tests: becomes visible once
 		 onPush is registered. Tests wait on this before triggering an upload so
 		 the server-fired notify cannot race past the recipient's handler. -->
 	{#if pushReady}
@@ -251,7 +259,7 @@
 				/>
 				<button
 					type="button"
-					class="btn btn-ghost btn-sm"
+					class="btn btn-outline btn-error btn-sm"
 					onclick={handleClear}
 					disabled={uploading}
 					data-testid="clear-button"
@@ -296,9 +304,9 @@
 	{#if incoming.length > 0}
 		<section class="card bg-info/10 border border-info" data-testid="incoming-banner">
 			<div class="card-body py-3 space-y-1">
-				<h2 class="card-title text-sm">New uploads on your other devices</h2>
+				<h2 class="card-title text-sm">Latest upload notifications</h2>
 				<ul class="space-y-1 text-sm">
-					{#each incoming as evt (evt.fileId)}
+					{#each incoming as evt (evt.notifySeq)}
 						<li class="flex items-center gap-2" data-testid="incoming-item">
 							<span class="badge badge-info badge-sm">push</span>
 							<span class="font-medium" data-testid="incoming-filename">{evt.filename}</span>
@@ -366,10 +374,11 @@
 			of the same file across workers still store every unique chunk exactly once.
 		</p>
 		<p>
-			Cross-device fan-out: <code>live.push(&#123; userId &#125;, ...)</code> targets
-			every connection registered under the same userId. The cluster registry routes
-			cross-instance hops via Redis. Open this page in two tabs sharing your identity
-			cookie - one upload fan-outs to the other tab's banner without a polling tick.
+			User-targeted delivery: <code>live.notify(&#123; userId &#125;, ...)</code> targets
+			the most recently connected socket registered under that userId. The cluster
+			registry applies the same last-write-wins rule across workers. Open this page in
+			two tabs sharing your identity cookie: the newer tab becomes the recipient, and
+			an upload from the older tab appears there without a polling tick.
 		</p>
 	</aside>
 </div>

@@ -131,10 +131,10 @@
 						<ol class="space-y-1" data-testid="{panel.testid}-rows">
 							{#each panel.data.top as entry, idx (entry.itemId)}
 								<li class="flex items-center gap-2 text-sm" data-testid="{panel.testid}-row">
-									<span class="opacity-50 font-mono w-4">{idx + 1}</span>
-									<span class="flex-1 truncate" data-testid="{panel.testid}-name">{nameById(entry.itemId)}</span>
-									<span class="font-mono text-xs opacity-60 w-12 text-right" data-testid="{panel.testid}-count">{entry.count}</span>
-									<div class="w-16 h-2 bg-base-200 rounded overflow-hidden">
+									<span class="opacity-50 font-mono w-4 shrink-0">{idx + 1}</span>
+									<span class="flex-1 min-w-24 truncate" data-testid="{panel.testid}-name">{nameById(entry.itemId)}</span>
+									<span class="font-mono text-xs opacity-60 w-12 shrink-0 text-right" data-testid="{panel.testid}-count">{entry.count}</span>
+									<div class="w-16 min-w-0 shrink h-2 bg-base-200 rounded overflow-hidden" data-testid="{panel.testid}-bar">
 										<div class="h-full bg-primary" style:width="{leaderCount > 0 ? (entry.count / leaderCount) * 100 : 0}%"></div>
 									</div>
 								</li>

@@ -11,7 +11,7 @@
 import v8 from 'node:v8'
 import path from 'node:path'
 import os from 'node:os'
-import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived, realtime, configureAlarm, configureForget, configureWebhooks } from 'svelte-realtime/server'
+import { createMessage, LiveError, setCronPlatform, live, pushHooks, unsubscribe as realtimeUnsubscribe, configureCron, _activateDerived, realtime, configureAlarm, configureForget, configureWebhooks } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
 import { createForgetStore } from 'svelte-adapter-uws-extensions/forget-store'
 import {
@@ -31,6 +31,8 @@ import { env } from '$env/dynamic/private'
 import { metrics } from '$lib/server/metrics'
 import { PROTOCOL_VERSION } from '$lib/protocol-version'
 import { activateTaskInfrastructure, destroyTaskInfrastructure, idempotencyStore } from '$lib/server/tasks'
+import { forgetDraftIdempotency } from '$lib/server/forget-demo'
+import { TOPICS } from '$lib/server/topics'
 import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
@@ -59,6 +61,26 @@ process.on('SIGUSR2', () => {
 
 const _asyncWarningAt = new Map()
 let stopPressureTicker = () => {}
+
+// Teaching accelerant for the from-seq demo. The fast stream still publishes
+// through the real replay extension so a fresh subscription receives a
+// protocol sequence cursor. On resume, this one topic deliberately reports a
+// bounded-buffer miss; realtime treats a falsy `since()` as a miss and
+// continues through its native delta.fromSeq tier. Without it a visitor would
+// have to idle past the 200-event buffer to see that tier at all.
+// The normal from-seq topic keeps the production replay behavior unchanged.
+//
+// The comparison is on the topic SUFFIX because a tenant-scoped connection is
+// served the rewritten `@t/<tenant>/<topic>` form. A visitor who tours
+// /demos/tenants first carries a tenant on the session, and a strict equality
+// check would silently stop matching for exactly those visitors - the page
+// would promise a buffer miss and quietly get the ordinary replay tier.
+const FAST_FROM_SEQ_TOPIC_RE = new RegExp(`(^|/)${TOPICS.demoFromSeqFastEvents.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
+const demoReplay = Object.create(replay)
+demoReplay.since = (topic, sinceSeq) => {
+	if (typeof topic === 'string' && FAST_FROM_SEQ_TOPIC_RE.test(topic) && typeof sinceSeq === 'number') return null
+	return replay.since(topic, sinceSeq)
+}
 
 function reportAsyncFailure(label, error) {
 	const now = Date.now()
@@ -248,7 +270,7 @@ export async function init({ platform }) {
 	// on every wrapped seam. `bus.wrap()` (extensions next.15) forwards
 	// `.replay` via a live getter, so any per-tick / per-message
 	// re-wrap also sees it.
-	platform.replay = replay
+	platform.replay = demoReplay
 	// Stash the raw ioredis client so realtime's `live.room({ presence })`
 	// uses its Redis-backed cluster-shared roster path instead of the
 	// per-process _presenceRef Map. Without this, a room's "Online" list
@@ -282,6 +304,7 @@ export async function init({ platform }) {
 			rateLimit: limiter,
 			replay,
 			idempotency: idempotencyStore(),
+			forgetDraftIdempotency,
 			deadLetter: webhookControls.deadLetter
 		}),
 		platform
@@ -408,6 +431,17 @@ export function open(ws, ctx) {
  */
 const PRIVATE_CHAT_RE = /^demos:chat:private(:presence)?$/
 const AUDIT_TOPIC_RE = /^audit:(acme|globex)$/
+// Board presence has an explicit lifecycle: PresenceBar calls joinBoard on
+// mount and leaveBoard on cleanup. BoardCard is an observer of the same
+// roster, not a member. Redis presence.sync authorizes an observer by calling
+// platform.checkSubscribe with the real topic; delegating that check back to
+// presence.hooks.subscribe would turn every board-list observer into a member
+// and make the badge stick at "1 here" after the real member leaves.
+const BOARD_PRESENCE_TOPIC_RE = /^board:[^:]+$/
+
+function usesExplicitBoardPresenceLifecycle(topic) {
+	return BOARD_PRESENCE_TOPIC_RE.test(topic)
+}
 
 function denialFor(topic, ws) {
 	if (PRIVATE_CHAT_RE.test(topic)) return 'FORBIDDEN'
@@ -433,6 +467,7 @@ function denialFor(topic, ws) {
 export function subscribe(ws, topic, ctx) {
 	const reason = denialFor(topic, ws)
 	if (reason) return reason
+	if (usesExplicitBoardPresenceLifecycle(topic)) return
 	bestEffort('presence subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
 	bestEffort('cursor subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
 }
@@ -458,6 +493,7 @@ export function subscribeBatch(ws, topics, ctx) {
 			(denials ??= {})[topic] = reason
 			continue
 		}
+		if (usesExplicitBoardPresenceLifecycle(topic)) continue
 		bestEffort('presence batch-subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
 		bestEffort('cursor batch-subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
 	}
@@ -471,6 +507,11 @@ export function subscribeBatch(ws, topics, ctx) {
  * for just that topic so departed users disappear immediately.
  */
 export function unsubscribe(ws, topic, ctx) {
+	// The app owns this adapter hook, so it must explicitly chain realtime's
+	// managed-topic drain (room presence, enumeration, and owner succession).
+	// Extension presence cleanup is separate and remains topic-specific below.
+	bestEffort('realtime unsubscribe hook', () => realtimeUnsubscribe(ws, topic, ctx))
+	if (usesExplicitBoardPresenceLifecycle(topic)) return
 	bestEffort('presence unsubscribe hook', () => presence.hooks.unsubscribe(ws, topic, ctx))
 }
 

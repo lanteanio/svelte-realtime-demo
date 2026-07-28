@@ -9,6 +9,7 @@
 -->
 <script>
 	import { leaveTraces, saveDraft, auditTraces, forgetMe } from '$live/demos/forget'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -54,6 +55,7 @@
 
 	async function handleForget() {
 		if (busyForget) return
+		if (!confirmDestructive('Permanently erase your data from every shared surface?')) return
 		busyForget = true
 		lastError = ''
 		try {
@@ -100,7 +102,7 @@
 			<h2 class="card-title text-sm">1. Leave traces</h2>
 			<p class="text-xs opacity-60">
 				Writes three entries to an app-owned Redis log keyed by your user id and
-				caches an idempotent RPC result keyed by you. Your presence entry and
+				caches a cluster-shared idempotent RPC result keyed by you. Your presence entry and
 				push registration already exist just from having this tab open.
 			</p>
 			<div>
@@ -109,7 +111,11 @@
 				</button>
 			</div>
 			{#if traces}
-				<ul class="text-xs font-mono space-y-1" data-testid="fg-traces-result">
+				<ul
+					class="text-xs font-mono space-y-1"
+					data-testid="fg-traces-result"
+					data-state={`${traces.total}:${traces.draftSavedAt ?? ''}`}
+				>
 					<li data-testid="fg-traces-applog">app log: +{traces.added} entries ({traces.total} total for you)</li>
 					<li data-testid="fg-traces-draft">idempotency cache: draft result cached{traces.draftSavedAt ? ` at ${new Date(traces.draftSavedAt).toLocaleTimeString()}` : ''}</li>
 					<li class="opacity-60">presence roster: live entry (from this connection)</li>
@@ -146,12 +152,12 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">3. Forget me</h2>
 			<div>
-				<button class="btn btn-sm btn-error" onclick={handleForget} disabled={busyForget} data-testid="fg-forget">
+				<button class="btn btn-sm btn-outline btn-error" onclick={handleForget} disabled={busyForget} data-testid="fg-forget">
 					{busyForget ? 'Erasing...' : 'Forget me'}
 				</button>
 			</div>
 			{#if forgetResult}
-				<div class="space-y-2" data-testid="fg-forget-result">
+				<div class="space-y-2" data-testid="fg-forget-result" data-at={forgetResult.at}>
 					<p class="text-sm font-mono">
 						ok: <strong data-testid="fg-forget-ok">{String(forgetResult.ok)}</strong>,
 						rows affected: <strong data-testid="fg-forget-rows">{forgetResult.rowsAffected}</strong>

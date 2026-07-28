@@ -27,6 +27,7 @@
 		resetCounters
 	} from '$live/demos/schema-evolution'
 	import { subscribeAt } from 'svelte-realtime/testing/client'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -81,6 +82,7 @@
 
 	async function reset() {
 		if (busy) return
+		if (!confirmDestructive('Reset every shared schema-evolution counter?')) return
 		busy = true
 		lastError = ''
 		try {
@@ -182,7 +184,7 @@
 					</button>
 				{/each}
 				<button
-					class="btn btn-sm btn-ghost ml-auto"
+					class="btn btn-sm btn-outline btn-error ml-auto"
 					onclick={reset}
 					disabled={busy}
 					data-testid="reset"

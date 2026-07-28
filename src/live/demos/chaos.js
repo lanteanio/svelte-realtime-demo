@@ -97,6 +97,10 @@ export const startChaos = live(async (ctx, { seed, dropRate }) => {
 	const seedNum = Number(seed)
 	if (!Number.isFinite(seedNum)) return { ok: false, error: 'Invalid seed' }
 	const drop = Math.max(0, Math.min(1, Number(dropRate) || 0))
+	// A new run reuses tick ids from 1. Replace the mounted CRUD stream before
+	// the first new event so old keyed rows/counters cannot masquerade as the
+	// new deterministic sequence in another tab or on another replica.
+	ctx.publish(TOPICS.demoChaosTick(ctx.user.id), 'refreshed', [])
 	states.set(ctx.user.id, {
 		seed: seedNum | 0,
 		dropRate: drop,

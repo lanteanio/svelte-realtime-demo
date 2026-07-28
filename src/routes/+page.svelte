@@ -111,6 +111,7 @@
 			class="input flex-1"
 			bind:value={newTitle}
 			placeholder="New board name..."
+			maxlength="100"
 		/>
 		<button type="submit" class="btn btn-primary">Create</button>
 	</form>

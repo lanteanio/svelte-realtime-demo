@@ -16,10 +16,9 @@
  * (subCount hits 0, SDK drops the subscription). The server's cron
  * keeps publishing; events are stored in the durable Redis hash. Click
  * Resume; the page re-subscribes, the SDK sends its cached
- * `_lastSeq` on the wire, the server's replay buffer doesn't cover
- * this topic (not in the REPLAY_TOPIC_RE whitelist), so the
- * framework falls through to `delta.fromSeq` which reads from the
- * durable hash and returns the missed entries tagged `fromSeq`.
+ * `_lastSeq` on the wire, and once the pause outruns the bounded replay
+ * buffer the framework falls through to `delta.fromSeq`, which reads from
+ * the durable hash and returns the missed entries tagged `fromSeq`.
  *
  * The headline primitive: `delta.fromSeq(sinceSeq)` - the
  * user-provided bridge for older-than-buffer reconnects, the third
@@ -50,32 +49,56 @@ const PHRASES = [
 
 const NEXT_SEQ_KEY = 'demos:fromseq:next'
 const DURABLE_KEY = 'demos:fromseq:durable'
+const FAST_NEXT_SEQ_KEY = 'demos:fromseq:fast:next'
+const FAST_DURABLE_KEY = 'demos:fromseq:fast:durable'
 
-async function getNextSeq() {
-	const v = await redis.redis.get(NEXT_SEQ_KEY)
+async function getNextSeq(key = NEXT_SEQ_KEY) {
+	const v = await redis.redis.get(key)
 	if (v === null) return 0
 	const n = Number(v)
 	return Number.isFinite(n) ? n : 0
 }
 
-async function pruneStore(currentSeq) {
+async function pruneStore(currentSeq, key = DURABLE_KEY) {
 	if (currentSeq <= STORE_RETAIN) return
-	const cutoff = currentSeq - STORE_RETAIN
-	const fields = await redis.redis.hkeys(DURABLE_KEY)
-	const toDelete = []
-	for (const f of fields) {
-		const s = Number(f)
-		if (Number.isFinite(s) && s <= cutoff) toDelete.push(f)
-	}
-	if (toDelete.length > 0) await redis.redis.hdel(DURABLE_KEY, ...toDelete)
+	// The single publisher advances by one per tick, so exactly one field falls
+	// out of the window each time. Deleting it directly keeps this O(1); an
+	// HKEYS sweep would pull all ~200 retained field names off the wire every
+	// second just to identify that one field.
+	await redis.redis.hdel(key, String(currentSeq - STORE_RETAIN))
 }
 
-async function readRange(startSeq, endSeq) {
+/**
+ * True when this store can actually answer for `sinceSeq`.
+ *
+ * The cursor the framework hands `delta.fromSeq` is the replay extension's
+ * protocol seq, while this store is indexed by the application counter the
+ * cron increments. The single publisher advances both together, but they are
+ * distinct Redis counters with different lifetimes - the protocol counter
+ * carries the replay buffer's TTL, the application counter has none - so a
+ * publish gap longer than that TTL restarts one and not the other. Rather
+ * than return a confidently wrong slice, report a miss and let the framework
+ * fall through to the loader, which is the reconnect ladder's honest last
+ * tier. The same guard covers an ordinary pause that outruns STORE_RETAIN.
+ */
+function canAnswerFromSeq(sinceSeq, nextSeq) {
+	if (sinceSeq > nextSeq) return false
+	return sinceSeq >= nextSeq - STORE_RETAIN
+}
+
+async function readRange(startSeq, endSeq, key = DURABLE_KEY) {
 	if (endSeq < startSeq) return []
+	// `pruneStore` only ever retains the last STORE_RETAIN seqs, so a request
+	// reaching further back can only yield nulls. Clamp instead of expanding
+	// the field list: a resume cursor can lag the store arbitrarily far (a very
+	// long pause, or a replay-buffer TTL expiry that restarts the wire seq
+	// while the durable counter keeps climbing), and an unclamped range would
+	// build one HMGET with tens of thousands of guaranteed-miss fields.
+	const from = Math.max(startSeq, endSeq - STORE_RETAIN + 1)
 	const fields = []
-	for (let s = startSeq; s <= endSeq; s++) fields.push(String(s))
+	for (let s = from; s <= endSeq; s++) fields.push(String(s))
 	if (fields.length === 0) return []
-	const values = await redis.redis.hmget(DURABLE_KEY, ...fields)
+	const values = await redis.redis.hmget(key, ...fields)
 	const out = []
 	for (const v of values) {
 		if (v === null) continue
@@ -111,27 +134,80 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 	await redis.redis.hset(DURABLE_KEY, String(seq), JSON.stringify(entry))
 	await pruneStore(seq)
 	ctx.publish(TOPICS.demoFromSeqEvents, 'created', entry)
+
+	// The accelerant has its own aligned durable sequence domain. That keeps
+	// delta.fromSeq's application sequence equal to the replay protocol cursor
+	// even when this topic is introduced into an already-running deployment.
+	const fastSeq = await redis.redis.incr(FAST_NEXT_SEQ_KEY)
+	const fastEntry = {
+		id: 'fast-evt-' + fastSeq,
+		seq: fastSeq,
+		ts: entry.ts,
+		message: PHRASES[fastSeq % PHRASES.length] + ' #' + fastSeq,
+		tier: 'live'
+	}
+	await redis.redis.hset(FAST_DURABLE_KEY, String(fastSeq), JSON.stringify(fastEntry))
+	await pruneStore(fastSeq, FAST_DURABLE_KEY)
+	ctx.publish(TOPICS.demoFromSeqFastEvents, 'created', fastEntry)
 })
 
 /**
  * Stream with `delta.fromSeq`. The loader returns the recent window
  * (last RECENT_WINDOW entries) tagged `rehydrate`. On reconnect
  * with a stale `lastSeq`, the framework checks the replay buffer
- * (this topic isn't in `REPLAY_TOPIC_RE` so it's skipped) and
- * falls through to `delta.fromSeq`, which reads the durable hash
- * and returns the missed entries tagged `fromSeq`.
+ * first and falls through to `delta.fromSeq` once the gap outruns
+ * it; the bridge reads the durable hash and returns the missed
+ * entries tagged `fromSeq`.
+ *
+ * The bridge returns `{ event, data, seq }` envelopes, not bare rows:
+ * a `replay: true` array response is fed straight into the client's
+ * `_applyMerge`, which dispatches on `envelope.event`. Bare rows carry
+ * no `event`, so they silently fail to merge.
  *
  * Live publishes from `tickEvents` arrive as 'created' events
  * tagged `live`; they merge into the existing list by id.
  */
+async function loadRecentEvents() {
+	const nextSeq = await getNextSeq()
+	const startSeq = Math.max(1, nextSeq - RECENT_WINDOW + 1)
+	const entries = await readRange(startSeq, nextSeq)
+	return entries.map((e) => ({ ...e, tier: 'rehydrate' }))
+}
+
+async function loadEventsFromSeq(sinceSeq) {
+	if (typeof sinceSeq !== 'number' || sinceSeq < 0) return null
+	const nextSeq = await getNextSeq()
+	if (!canAnswerFromSeq(sinceSeq, nextSeq)) return null
+	const entries = await readRange(sinceSeq + 1, nextSeq)
+	return entries.map((e) => ({
+		event: 'created',
+		data: { ...e, tier: 'fromSeq' },
+		seq: e.seq
+	}))
+}
+
+async function loadRecentFastEvents() {
+	const nextSeq = await getNextSeq(FAST_NEXT_SEQ_KEY)
+	const startSeq = Math.max(1, nextSeq - RECENT_WINDOW + 1)
+	const entries = await readRange(startSeq, nextSeq, FAST_DURABLE_KEY)
+	return entries.map((e) => ({ ...e, tier: 'rehydrate' }))
+}
+
+async function loadFastEventsFromSeq(sinceSeq) {
+	if (typeof sinceSeq !== 'number' || sinceSeq < 0) return null
+	const nextSeq = await getNextSeq(FAST_NEXT_SEQ_KEY)
+	if (!canAnswerFromSeq(sinceSeq, nextSeq)) return null
+	const entries = await readRange(sinceSeq + 1, nextSeq, FAST_DURABLE_KEY)
+	return entries.map((e) => ({
+		event: 'created',
+		data: { ...e, tier: 'fromSeq' },
+		seq: e.seq
+	}))
+}
+
 export const eventStream = live.stream(
 	TOPICS.demoFromSeqEvents,
-	async () => {
-		const nextSeq = await getNextSeq()
-		const startSeq = Math.max(1, nextSeq - RECENT_WINDOW + 1)
-		const entries = await readRange(startSeq, nextSeq)
-		return entries.map((e) => ({ ...e, tier: 'rehydrate' }))
-	},
+	async () => loadRecentEvents(),
 	{
 		merge: 'crud',
 		key: 'id',
@@ -140,17 +216,33 @@ export const eventStream = live.stream(
 		// replay buffer (configured in src/lib/server/redis.js). The
 		// buffer covers gaps within its size (200 events at 1Hz =
 		// roughly 3 minutes); for older gaps the framework falls
-		// through to `delta.fromSeq` below. Topic is whitelisted in
-		// `REPLAY_TOPIC_RE` (src/hooks.ws.js) so cron publishes go
-		// through `replay.publish` and pick up wire-level seq numbers.
+		// through to `delta.fromSeq` below. The flag also routes cron
+		// publishes through `replay.publish` so they pick up the
+		// wire-level seq numbers the resume cursor is expressed in.
 		replay: true,
 		delta: {
-			fromSeq: async (sinceSeq) => {
-				if (typeof sinceSeq !== 'number' || sinceSeq < 0) return null
-				const nextSeq = await getNextSeq()
-				const entries = await readRange(sinceSeq + 1, nextSeq)
-				return entries.map((e) => ({ ...e, tier: 'fromSeq' }))
-			}
+			fromSeq: loadEventsFromSeq
+		}
+	}
+)
+
+/**
+ * Demo accelerant with a small, independent durable sequence domain. Its
+ * adapter replay seam reports a buffer miss on resume, so realtime proceeds
+ * through the real delta.fromSeq handler immediately. The normal eventStream
+ * above remains the production three-tier ladder; visitors opt into this
+ * stream only long enough to witness the named tier without a 200-second wait.
+ */
+export const eventStreamFast = live.stream(
+	TOPICS.demoFromSeqFastEvents,
+	async () => loadRecentFastEvents(),
+	{
+		merge: 'crud',
+		key: 'id',
+		max: STORE_RETAIN,
+		replay: true,
+		delta: {
+			fromSeq: loadFastEventsFromSeq
 		}
 	}
 )

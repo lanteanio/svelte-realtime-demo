@@ -9,6 +9,64 @@ export async function waitForWS(page) {
 	await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
+async function answerDestructiveConfirmation(locator, accept, clickOptions) {
+	const page = locator.page();
+	const dialogPromise = page.waitForEvent('dialog');
+	// A click on a confirm-gated control cannot settle until the dialog is
+	// answered, so the click can only win this race by failing outright - or by
+	// there being no gate at all. Racing does two things a bare `await
+	// dialogPromise` did not: a click rejection surfaces here instead of as an
+	// unhandled rejection while we are still parked on the event, and a control
+	// that has silently LOST its confirm gate fails loudly and immediately
+	// rather than stalling until the default event timeout.
+	let clickError = null;
+	const clickPromise = locator.click(clickOptions).catch((err) => { clickError = err; });
+	const dialog = await Promise.race([dialogPromise, clickPromise.then(() => null)]);
+	if (!dialog) {
+		throw clickError ?? new Error(
+			'Destructive control click completed without a confirmation dialog: the confirmDestructive gate is missing.'
+		);
+	}
+	const message = dialog.message();
+	const valid = dialog.type() === 'confirm'
+		&& message.includes('shared demo state for everyone')
+		&& message.includes('cannot be undone');
+	if (accept) await dialog.accept();
+	else await dialog.dismiss();
+	await clickPromise;
+	if (clickError) throw clickError;
+	if (!valid) throw new Error(`Unexpected destructive confirmation: ${dialog.type()} ${message}`);
+	return message;
+}
+
+/** Click a destructive control and accept its shared-state confirmation. */
+export function confirmAndClick(locator, clickOptions) {
+	return answerDestructiveConfirmation(locator, true, clickOptions);
+}
+
+/** Click a destructive control and cancel its shared-state confirmation. */
+export function dismissConfirmation(locator, clickOptions) {
+	return answerDestructiveConfirmation(locator, false, clickOptions);
+}
+
+/**
+ * Clone a context's storage state for a second context that must share the
+ * SAME identity.
+ *
+ * `+layout.server.js` sets the identity cookie `secure: !dev`, so a prod-build
+ * server - which is what the local e2e harness runs - marks it Secure even on
+ * http://localhost. `storageState()` round-trips that flag verbatim, and
+ * browsers refuse to send a Secure cookie over http://, so the second context
+ * silently mints a FRESH session instead of inheriting the first one. Every
+ * same-user assertion downstream (cross-tab push, one-identity-counts-once)
+ * then tests the wrong thing. Strip the flag unless the target really is https.
+ */
+export async function sharedIdentityState(context, targetUrl = process.env.BASE_URL) {
+	const state = await context.storageState();
+	if (String(targetUrl ?? '').startsWith('https://')) return state;
+	return { ...state, cookies: state.cookies.map((c) => ({ ...c, secure: false })) };
+}
+
 /** True only for the application's realtime socket, never Vite's HMR socket. */
 export function isAppWebSocket(ws) {
 	try {

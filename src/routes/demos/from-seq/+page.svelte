@@ -21,7 +21,8 @@
 	import { SvelteSet } from 'svelte/reactivity'
 	import {
 		myFromSeqState,
-		eventStream
+		eventStream,
+		eventStreamFast
 	} from '$live/demos/from-seq'
 
 	let { data } = $props()
@@ -36,6 +37,12 @@
 	let entries = $state(/** @type {Array<{ id: string, seq: number, ts: number, message: string, tier: string }>} */ ([]))
 	let subscribed = $state(true)
 	let pausedAt = $state(/** @type {number | null} */ (null))
+	let fastPath = $state(false)
+	let fastPathReady = $state(false)
+	// Live events seen since the fast path was armed. A local count, not a
+	// timestamp comparison, so the gate cannot depend on client/server clock
+	// agreement. Not $state: it is only ever read to set fastPathReady.
+	let liveSinceArm = 0
 
 	// Replay-buffer gap-fill detection. The framework delivers buffered
 	// events with their ORIGINAL `tier: 'live'` tag, indistinguishable
@@ -67,13 +74,26 @@
 	// effect_update_depth_exceeded.
 	$effect(() => {
 		if (!subscribed) return
-		const off = eventStream.subscribe((v) => {
+		const stream = fastPath ? eventStreamFast : eventStream
+		// Captured per subscription, so a straggler delivered from the previous
+		// stream between the toggle and this effect's teardown cannot merge a
+		// foreign sequence domain into the freshly cleared list.
+		const armed = fastPath
+		const off = stream.subscribe((v) => {
 			untrack(() => {
 				const arr = Array.isArray(v) ? v : []
 				if (arr.length === 0) return
+				if (armed !== fastPath) return
 				const merged = new Map(entries.map((e) => [e.id, e]))
 				for (const e of arr) {
 					merged.set(e.id, e)
+					// Arm on a live event ARRIVING, counted locally. Comparing the
+					// server-stamped `e.ts` against a browser Date.now() gates the
+					// whole feature on the two clocks agreeing: a client running
+					// even slightly fast never arms, and the Pause button stays
+					// disabled forever with no way to diagnose it.
+					if (armed && e.tier === 'live') liveSinceArm++
+					if (armed && liveSinceArm > 0) fastPathReady = true
 					if (
 						resumedAt > 0 &&
 						e.tier === 'live' &&
@@ -120,6 +140,21 @@
 			pausedAt = null
 			resumedAt = Date.now()
 		}
+	}
+
+	function toggleFastPath() {
+		if (!subscribed) return
+		fastPath = !fastPath
+		// Normal and accelerated streams intentionally use independent
+		// sequence domains; reset the rendered projection when switching so
+		// equal sequence numbers from the two domains cannot look duplicated.
+		entries = []
+		replayFillSeqs.clear()
+		pausedAtSeq = 0
+		fastPathReady = false
+		fastPathStartedAt = fastPath ? Date.now() : 0
+		resumedAt = 0
+		replayBurstCount = 0
 	}
 
 	let nowMs = $state(Date.now())
@@ -192,9 +227,19 @@
 				<button
 					class="btn btn-sm {subscribed ? 'btn-warning' : 'btn-success'}"
 					onclick={togglePause}
+					disabled={fastPath && subscribed && !fastPathReady}
 					data-testid="toggle-subscribe"
 				>
 					{subscribed ? 'Pause subscription' : `Resume subscription`}
+				</button>
+				<button
+					class="btn btn-sm {fastPath ? 'btn-primary' : 'btn-outline'}"
+					onclick={toggleFastPath}
+					disabled={!subscribed}
+					aria-pressed={fastPath}
+					data-testid="fromseq-fast-path"
+				>
+					{fastPath ? 'Fast fromSeq armed' : 'Arm fast fromSeq'}
 				</button>
 				<span class="text-xs opacity-60" data-testid="status">
 					status: <strong>{subscribed ? 'subscribed' : 'paused'}</strong>
@@ -209,7 +254,17 @@
 					{/if}
 				</span>
 			</div>
-			{#if fromSeqHint}
+			{#if fastPath}
+				<p class="text-xs opacity-70" data-testid="fromseq-fast-hint">
+					{#if !fastPathReady && subscribed}
+						Arming on the next live tick so the fast stream has a real resume cursor...
+					{:else if !subscribed}
+						Fast path paused. Wait at least 2 seconds, then resume; this demo-scoped stream reports a bounded-buffer miss and calls the real <code>delta.fromSeq</code> bridge.
+					{:else}
+						Fast path ready. Pause for 2 seconds, then resume to surface <code>fromSeq</code> without the 200-second replay-buffer wait.
+					{/if}
+				</p>
+			{:else if fromSeqHint}
 				<p class="text-xs opacity-70" data-testid="fromseq-hint">{fromSeqHint}</p>
 			{:else}
 				<p class="text-xs opacity-60">

@@ -21,6 +21,20 @@
 	let { children, background, boardId, ondblclick, noteCount = 0 } = $props()
 	let canvasEl = $state()
 
+	// The canvas background is a board setting, not a theme token, so the
+	// empty-state hint must contrast with IT rather than inherit the theme's
+	// base-content (near-white on dark, invisible on the default light canvas).
+	// The hint is 18px at normal weight, so WCAG AA wants 4.5:1, not the 3:1
+	// large-text bar. Measured against the five light board backgrounds, black
+	// needs alpha >= 0.545 to clear it; 0.45 lands at ~3.3:1 on all of them.
+	const hintColor = $derived.by(() => {
+		const m = /^#?([0-9a-f]{6})$/i.exec(background ?? '')
+		if (!m) return 'rgba(0, 0, 0, 0.55)'
+		const v = parseInt(m[1], 16)
+		const luminance = 0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255)
+		return luminance > 128 ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.55)'
+	})
+
 	function onPointerMove(e) {
 		if (!canvasEl || !boardId) return
 		const rect = canvasEl.getBoundingClientRect()
@@ -42,7 +56,7 @@
 >
 	{#if noteCount === 0}
 		<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-			<p class="text-lg opacity-30 select-none">Double-click anywhere to add a note</p>
+			<p class="text-lg select-none" style:color={hintColor}>Double-click anywhere to add a note</p>
 		</div>
 	{/if}
 

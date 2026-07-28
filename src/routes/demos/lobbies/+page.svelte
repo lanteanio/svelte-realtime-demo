@@ -154,25 +154,36 @@
 			<div class="card bg-base-200">
 				<div class="card-body py-3 space-y-3">
 					<h2 class="card-title text-sm">Open a table</h2>
-					<form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); joinTable(newId) }}>
-						<input
-							class="input input-bordered input-sm flex-1 font-mono"
-							bind:value={newId}
-							placeholder="Table number..."
-							data-testid="lob-new-id"
-						/>
-						<button type="button" class="btn btn-sm btn-ghost" onclick={randomId} data-testid="lob-random">random</button>
-						<button type="submit" class="btn btn-sm btn-primary" data-testid="lob-create">Join</button>
+					<form class="space-y-1" onsubmit={(e) => { e.preventDefault(); joinTable(newId) }}>
+						<label for="lob-new-id" class="block text-xs font-medium">Table number</label>
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(8rem,1fr)_auto]">
+							<input
+								id="lob-new-id"
+								class="input input-bordered input-sm w-full min-w-0 font-mono"
+								bind:value={newId}
+								placeholder="Number"
+								inputmode="numeric"
+								data-testid="lob-new-id"
+							/>
+							<div class="flex gap-2">
+								<button type="button" class="btn btn-sm btn-ghost flex-1" onclick={randomId} data-testid="lob-random">random</button>
+								<button type="submit" class="btn btn-sm btn-primary flex-1" data-testid="lob-create">Join</button>
+							</div>
+						</div>
 					</form>
-					<form class="flex gap-2" onsubmit={handleJoinByCode}>
-						<input
-							class="input input-bordered input-sm flex-1 font-mono"
-							bind:value={codeInput}
-							placeholder="...or a 6-char code"
-							maxlength="8"
-							data-testid="lob-code-input"
-						/>
-						<button type="submit" class="btn btn-sm" data-testid="lob-code-join">Join by code</button>
+					<form class="space-y-1" onsubmit={handleJoinByCode}>
+						<label for="lob-code-input" class="block text-xs font-medium">Share code</label>
+						<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(6rem,1fr)_auto]">
+							<input
+								id="lob-code-input"
+								class="input input-bordered input-sm w-full min-w-0 font-mono"
+								bind:value={codeInput}
+								placeholder="Code"
+								maxlength="8"
+								data-testid="lob-code-input"
+							/>
+							<button type="submit" class="btn btn-sm" data-testid="lob-code-join">Join by code</button>
+						</div>
 					</form>
 				</div>
 			</div>

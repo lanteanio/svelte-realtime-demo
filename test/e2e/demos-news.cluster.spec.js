@@ -8,9 +8,12 @@ import { waitForWS } from './helpers.js'
 //   1. A story published through the webhook bridge on replica A fans out over
 //      the cluster bus into B's already-subscribed stories list, and B's
 //      derived stats strip (cluster-shared Redis) reflects it.
-//   2. The firehose is a cluster SINGLETON (leader-gated cron) and the
-//      aggregate is cluster-shared, so a story published on A climbs the
-//      trending leaderboard rendered on B - even though B never touched it.
+//   2. The firehose is a cluster SINGLETON (leader-gated cron), and its event
+//      stream crosses the cluster bus. Aggregate windows remain per-replica
+//      process memory, but B folds that shared ordered stream into B's own
+//      leaderboard, so a story published on A can climb on B without B
+//      touching it. This suite deliberately makes no cross-replica count-
+//      equality claim.
 //
 // Runs in the cluster tier (playwright project 'cluster', started with two
 // instances + INSTANCE_B). Skipped elsewhere.
@@ -95,9 +98,9 @@ test.describe('cluster: /demos/news cross-replica', () => {
 				const headline = `xrep-${RUN}-trend`
 				await publishStory(a, headline)
 
-				// The story only exists because A published it, the firehose runs
-				// on the leader replica, and the aggregate is cluster-shared - yet
-				// the headline climbs into B's sliding-30s leaderboard by name.
+				// The story only exists because A published it. The cluster bus
+				// delivers the ordered firehose events to B, whose per-replica
+				// aggregate then puts the headline in B's sliding-30s leaderboard.
 				await expect(b.getByTestId('lb-news-last30s-name').filter({ hasText: headline }))
 					.toBeVisible({ timeout: 25_000 })
 			} finally {

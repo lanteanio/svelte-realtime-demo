@@ -15,6 +15,7 @@
 -->
 <script>
 	import { onMount, onDestroy } from 'svelte'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 	import {
 		myFlashState,
 		buyProduct,
@@ -165,6 +166,7 @@
 	let resetting = $state(false)
 	async function handleReset() {
 		if (resetting) return
+		if (!confirmDestructive('Reset the shared sale, stock, and coupon pool?')) return
 		resetting = true
 		try {
 			await resetSale()
@@ -268,11 +270,11 @@
 			<div class="card bg-base-100 border border-base-300" data-testid={'product-card-' + p.id}>
 				<div class="card-body py-3 space-y-2">
 					<div class="flex items-center gap-2">
-						<strong class="text-sm" data-testid="product-name">{p.name}</strong>
+						<strong class="text-sm min-w-0 truncate" title={p.name} data-testid="product-name">{p.name}</strong>
 						{#if p.soldOut}
-							<span class="ml-auto badge badge-error badge-sm" data-testid={'product-soldout-' + p.id}>SOLD OUT</span>
+							<span class="ml-auto shrink-0 whitespace-nowrap badge badge-error badge-sm" data-testid={'product-soldout-' + p.id}>SOLD OUT</span>
 						{:else}
-							<span class="ml-auto badge {stockClass(p)} badge-sm" data-testid={'product-stock-' + p.id}>{p.stock} / {p.stockInitial} left</span>
+							<span class="ml-auto shrink-0 whitespace-nowrap badge {stockClass(p)} badge-sm" data-testid={'product-stock-' + p.id}>{p.stock} / {p.stockInitial} left</span>
 						{/if}
 					</div>
 					<div class="flex items-baseline gap-2">
@@ -333,7 +335,7 @@
 				<button class="btn btn-sm btn-warning" onclick={handleStress} disabled={stressBusy} data-testid="stress-go">
 					{stressBusy ? 'Running...' : `Spam ${stressCount} buys`}
 				</button>
-				<button class="btn btn-sm btn-ghost" onclick={handleReset} disabled={resetting} data-testid="reset">
+				<button class="btn btn-sm btn-outline btn-error" onclick={handleReset} disabled={resetting} data-testid="reset">
 					Reset sale
 				</button>
 			</div>

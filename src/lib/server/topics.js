@@ -59,6 +59,7 @@ export const TOPICS = defineTopics({
 	demoEffectAudit: 'demos:effect:audit',
 	demoEffectNotifications: 'demos:effect:notifications',
 	demoFromSeqEvents: 'demos:fromseq:events',
+	demoFromSeqFastEvents: 'demos:fromseq:events:fast',
 	demoPurgeTick: 'demos:purge:tick',
 	demoCollabDoc: 'demos:collab-editor:doc',
 	demoCollabOffset: 'demos:collab-editor:offset',

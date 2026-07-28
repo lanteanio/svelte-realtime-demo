@@ -69,7 +69,7 @@
 	})
 
 	async function switchTo(org) {
-		if (switching) return
+		if (switching || org === me.org) return
 		switching = true
 		try {
 			const r = await fetch('/api/demos/set-org', {
@@ -138,12 +138,13 @@
 					{/if}
 				</div>
 			</div>
-			<div class="flex gap-2">
+			<div class="flex gap-2" role="group" aria-label="Organization">
 				<button
 					class="btn btn-sm"
 					class:btn-primary={me.org === 'acme'}
 					onclick={() => switchTo('acme')}
-					disabled={switching || me.org === 'acme'}
+					disabled={switching}
+					aria-pressed={me.org === 'acme'}
 					data-testid="switch-acme"
 				>
 					Acme
@@ -152,7 +153,8 @@
 					class="btn btn-sm"
 					class:btn-primary={me.org === 'globex'}
 					onclick={() => switchTo('globex')}
-					disabled={switching || me.org === 'globex'}
+					disabled={switching}
+					aria-pressed={me.org === 'globex'}
 					data-testid="switch-globex"
 				>
 					Globex

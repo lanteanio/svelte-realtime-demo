@@ -173,6 +173,35 @@ test.describe('/demos/news', () => {
 		}
 	})
 
+	test('five trending names remain visible across the 640/768/844 tablet rungs', async ({ page }) => {
+		test.setTimeout(45_000)
+		await page.setViewportSize({ width: 640, height: 900 })
+		await open(page)
+		try {
+			await setSpeed(page, 50)
+			const names = page.getByTestId('lb-news-lifetime-name')
+			await expect(names).toHaveCount(5, { timeout: 20_000 })
+			for (const width of [640, 768, 844]) {
+				await page.setViewportSize({ width, height: 1024 })
+				const gridTracks = await page.getByTestId('news-trending-grid').evaluate((element) => (
+					getComputedStyle(element).gridTemplateColumns.split(' ').length
+				))
+				expect(gridTracks).toBe(1)
+				const rendered = await names.evaluateAll((elements) => elements.map((element) => ({
+					text: element.textContent.trim(),
+					width: element.getBoundingClientRect().width
+				})))
+				expect(new Set(rendered.map((entry) => entry.text)).size).toBe(5)
+				for (const entry of rendered) {
+					expect(entry.text).not.toBe('')
+					expect(entry.width).toBeGreaterThan(100)
+				}
+			}
+		} finally {
+			await setSpeed(page, 5)
+		}
+	})
+
 	test('the derived stats strip tracks stories, views, and the newest headline', async ({ page }) => {
 		test.setTimeout(30_000)
 		await open(page)

@@ -1,175 +1,126 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { sharedIdentityState } from './helpers.js'
+import {
+	clearUploads,
+	fileRow,
+	openUpload,
+	selectOversizeFile,
+	uploadSyntheticFile,
+	waitForFile,
+	waitForUpload
+} from './upload-helpers.js'
 
-const RUN = `e2e-upload-${Date.now()}`
+const RUN = `e2e-upload-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
-async function gotoFreshUpload(page) {
-	await page.goto('/demos/upload')
-	await waitForWS(page)
-	await expect(page.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
-	await page.getByTestId('clear-button').click()
-	await expect(page.getByTestId('files-list-empty')).toBeVisible({ timeout: 5_000 })
-}
-
-/**
- * Build a deterministic file payload inside the browser. Every byte
- * pattern is reproducible from the seed string so the same seed produces
- * the same chunk hashes.
- */
-async function uploadSyntheticFile(page, { seed, sizeBytes, filename }) {
-	const buf = await page.evaluate(async ({ seed, sizeBytes }) => {
-		const enc = new TextEncoder().encode(seed)
-		const out = new Uint8Array(sizeBytes)
-		for (let i = 0; i < sizeBytes; i++) {
-			out[i] = enc[i % enc.length] ^ (i & 0xff)
-		}
-		// Stash a File on window for the input to consume.
-		const file = new File([out], 'placeholder', { type: 'application/octet-stream' })
-		window.__syntheticFile = file
-		return sizeBytes
-	}, { seed, sizeBytes })
-
-	// DataTransfer dance to feed the File into the input.
-	await page.evaluate(async ({ filename }) => {
-		const file = window.__syntheticFile
-		const dt = new DataTransfer()
-		dt.items.add(new File([await file.arrayBuffer()], filename, { type: 'application/octet-stream' }))
-		const input = document.querySelector('[data-testid="file-input"]')
-		input.files = dt.files
-		input.dispatchEvent(new Event('change', { bubbles: true }))
-	}, { filename })
-
-	return buf
-}
+test.describe.configure({ mode: 'serial' })
 
 test.describe('/demos/upload', () => {
-	test('renders form, stats strip, and files list', async ({ page }) => {
-		await gotoFreshUpload(page)
+	test('renders every idle control, stats state, limits disclosure, and empty clear behavior', async ({ page }) => {
+		await openUpload(page)
+		await clearUploads(page)
+		await expect(page.getByRole('heading', { name: 'Upload: streaming uploads with content-addressed dedup' })).toBeVisible()
 		await expect(page.getByTestId('upload-stats-strip')).toBeVisible()
-		await expect(page.getByTestId('upload-form')).toBeVisible()
-		await expect(page.getByTestId('files-list')).toBeVisible()
-		await expect(page.getByTestId('file-input')).toBeVisible()
-		await expect(page.locator('h1')).toContainText('Upload')
+		await expect(page.getByTestId('file-input')).toHaveAttribute('type', 'file')
+		await expect(page.getByTestId('file-input')).toBeEnabled()
+		await expect(page.getByTestId('clear-button')).toBeEnabled()
+		await expect(page.getByTestId('cancel-button')).toHaveCount(0)
+		await expect(page.getByTestId('upload-progress')).toHaveCount(0)
+		await expect(page.getByTestId('upload-error')).toHaveCount(0)
+		await expect(page.getByTestId('upload-result')).toHaveCount(0)
+		await expect(page.getByTestId('stat-idempotency')).toHaveText(/redis|memory only/)
+		await expect(page.getByText('0x00 marker + uint16 BE header length', { exact: false })).toBeVisible()
+		await expect(page.getByText('live.notify', { exact: false }).first()).toBeVisible()
 	})
 
-	test('upload a small synthetic file, see it in the list with chunk count + size', async ({ page }) => {
-		page.on('console', (msg) => console.log(`[browser ${msg.type()}]`, msg.text()))
-		page.on('pageerror', (err) => console.log('[browser pageerror]', err.message))
-		await gotoFreshUpload(page)
-
-		// live.upload auto-sizes chunks based on platform.maxPayloadLength,
-		// so we don't pin a specific chunk count - just assert the file
-		// uploaded and registered at least one chunk.
-		const sizeBytes = 200 * 1024
-		await uploadSyntheticFile(page, { seed: `${RUN}-A`, sizeBytes, filename: `${RUN}-A.bin` })
-
-		const row = page.getByTestId('file-row').first()
-		await expect(row).toBeVisible({ timeout: 15_000 })
-		await expect(row.getByTestId('file-row-name')).toHaveText(`${RUN}-A.bin`)
-		await expect(row.getByTestId('file-row-chunks')).toHaveText(/^\d+$/)
-
-		const upResult = page.getByTestId('upload-result')
-		await expect(upResult).toBeVisible({ timeout: 8_000 })
-		await expect(upResult.getByTestId('result-total-chunks')).toHaveText(/^\d+$/)
-		// Synthetic-bytes seeds are nearly-but-not-quite collision-free
-		// against the redis cache of prior test-run chunks; assert dedup
-		// is significantly less than total to keep the test stable. The
-		// dedup demo's strict "every chunk deduped on re-upload" lives in
-		// the next test.
-		const total = Number((await upResult.getByTestId('result-total-chunks').textContent())?.trim() ?? '0')
-		const deduped = Number((await upResult.getByTestId('result-deduped').textContent())?.trim() ?? '0')
-		expect(total).toBeGreaterThan(0)
-		expect(deduped).toBeLessThan(Math.max(2, Math.floor(total / 2)))
+	test('uploads a multi-chunk file, exposes progress/result metadata, updates stats, and clears it', async ({ page }) => {
+		await openUpload(page)
+		await clearUploads(page)
+		const filename = `${RUN}-fresh.bin`
+		await uploadSyntheticFile(page, { seed: `${RUN}-fresh`, sizeBytes: 700 * 1024, filename })
+		const result = await waitForUpload(page, filename)
+		expect(result.totalChunks).toBeGreaterThan(1)
+		expect(result.dedupedChunks).toBeLessThan(result.totalChunks)
+		await expect(page.getByTestId('upload-progress')).toBeVisible()
+		const totalText = await page.getByTestId('progress-total').textContent()
+		await expect(page.getByTestId('progress-sent')).toHaveText(totalText ?? '')
+		await expect(page.getByTestId('progress-chunks')).toHaveText(String(result.totalChunks))
+		const row = await waitForFile(page, filename)
+		await expect(row.getByTestId('file-row-chunks')).toHaveText(String(result.totalChunks))
+		await expect(page.getByTestId('stat-files')).toHaveText('1')
+		await expect(page.getByTestId('stat-bytes')).toHaveText('700.0 KB')
+		await clearUploads(page)
+		await expect(fileRow(page, filename)).toHaveCount(0)
 	})
 
-	test('re-upload of the same file dedupes every chunk', async ({ page }) => {
-		await gotoFreshUpload(page)
+	test('re-uploading identical bytes dedupes every chunk after Clear all', async ({ page }) => {
+		await openUpload(page)
+		await clearUploads(page)
+		const seed = `${RUN}-dedup`
+		await uploadSyntheticFile(page, { seed, sizeBytes: 200 * 1024, filename: `${seed}-first.bin` })
+		const first = await waitForUpload(page, `${seed}-first.bin`)
+		expect(first.totalChunks).toBe(1)
+		await clearUploads(page)
 
-		const sizeBytes = 200 * 1024
-		const seed = `${RUN}-DEDUP`
-
-		await uploadSyntheticFile(page, { seed, sizeBytes, filename: `${seed}.bin` })
-		await expect(page.getByTestId('upload-result')).toBeVisible({ timeout: 15_000 })
-		// Wait for upload to settle (the input is disabled while uploading).
-		await expect(page.getByTestId('file-input')).toBeEnabled({ timeout: 8_000 })
-
-		// Capture how many chunks the first upload produced; the second
-		// upload should match it AND have every chunk deduped.
-		const firstChunks = (await page.getByTestId('result-total-chunks').first().textContent())?.trim() ?? ''
-
-		// Clear the file list so the second run's row is unambiguous; the
-		// chunk cache + redis idempotency keys persist across the clear.
-		await page.getByTestId('clear-button').click()
-		await expect(page.getByTestId('files-list-empty')).toBeVisible({ timeout: 5_000 })
-
-		await uploadSyntheticFile(page, { seed, sizeBytes, filename: `${seed}-2.bin` })
-
-		const row = page.getByTestId('file-row').first()
-		await expect(row).toBeVisible({ timeout: 15_000 })
-		// Every chunk on the re-upload is a cache hit. Both totals match
-		// the first upload's chunk count even if live.upload renegotiated
-		// chunk size between the two (auto-discovery may bump after the
-		// first round-trip).
-		await expect(row.getByTestId('file-row-deduped')).toHaveText(firstChunks, { timeout: 8_000 })
-		await expect(row.getByTestId('file-row-chunks')).toHaveText(firstChunks)
-
-		const upResult = page.getByTestId('upload-result')
-		await expect(upResult.getByTestId('result-deduped')).toHaveText(firstChunks)
+		await uploadSyntheticFile(page, { seed, sizeBytes: 200 * 1024, filename: `${seed}-second.bin` })
+		const second = await waitForUpload(page, `${seed}-second.bin`)
+		expect(second).toEqual({ totalChunks: first.totalChunks, dedupedChunks: first.totalChunks })
+		const row = await waitForFile(page, `${seed}-second.bin`)
+		await expect(row.getByTestId('file-row-deduped')).toHaveText(String(first.totalChunks))
+		await clearUploads(page)
 	})
 
-	test('cross-device push: upload from tab A, tab B sees the incoming banner', async ({ browser }) => {
-		// Two contexts share one identity cookie so live.notify targets B's
-		// tab as "the same user" (the per-userId push registry holds the
-		// most-recently-registered ws, which is B's after B's open hook).
+	test('rejects client-oversize and server-empty selections, then recovers for another choice', async ({ page }) => {
+		await openUpload(page)
+		await clearUploads(page)
+		await selectOversizeFile(page, `${RUN}-oversize.bin`)
+		await expect(page.getByTestId('upload-error')).toContainText('file too large (max 52428800 bytes)')
+		await expect(page.getByTestId('upload-progress')).toHaveCount(0)
+
+		await page.getByTestId('file-input').setInputFiles({
+			name: `${RUN}-empty.bin`,
+			mimeType: 'application/octet-stream',
+			buffer: Buffer.alloc(0)
+		})
+		await expect(page.getByTestId('upload-error')).toContainText('empty upload', { timeout: 10_000 })
+		await expect(page.getByTestId('file-input')).toBeEnabled()
+		await expect(page.getByTestId('clear-button')).toBeEnabled()
+	})
+
+	test('Cancel aborts an active upload and does not finalize a file row', async ({ page }) => {
+		test.setTimeout(45_000)
+		await openUpload(page)
+		await clearUploads(page)
+		const filename = `${RUN}-cancel.bin`
+		await uploadSyntheticFile(page, { seed: `${RUN}-cancel`, sizeBytes: 8 * 1024 * 1024, filename })
+		await expect(page.getByTestId('cancel-button')).toBeVisible({ timeout: 5_000 })
+		await expect(page.getByTestId('file-input')).toBeDisabled()
+		await expect(page.getByTestId('clear-button')).toBeDisabled()
+		await page.getByTestId('cancel-button').click()
+		await expect(page.getByTestId('upload-error')).toContainText(/cancel/i, { timeout: 15_000 })
+		await expect(page.getByTestId('file-input')).toBeEnabled()
+		await expect(fileRow(page, filename)).toHaveCount(0)
+		await clearUploads(page)
+	})
+
+	test('most-recent same-identity tab receives the completed-upload push and shared file row', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const a = await ctxA.newPage()
-		await a.goto('/demos/upload')
-		await waitForWS(a)
-		await expect(a.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
-		const cookies = await ctxA.cookies()
-		const identityCookie = cookies.find((c) => c.name === 'identity')
-		expect(identityCookie, 'identity cookie set on first page load').toBeTruthy()
-
-		const ctxB = await browser.newContext()
-		// Strip the Secure flag when running over plain http (local dev /
-		// e2e against http://localhost). The production deploy sets
-		// `secure: !dev` on the identity cookie, so the cookie A receives
-		// is marked Secure. Browsers refuse to send Secure cookies over
-		// http://, which means B would mint a fresh session instead of
-		// inheriting A's identity, and the cross-device push would route
-		// to A's tab (the only ws registered for the original userId) -
-		// not B's. Production runs over https where the flag is fine.
-		const isHttps = identityCookie.domain
-			? Boolean(process.env.BASE_URL && process.env.BASE_URL.startsWith('https://'))
-			: false
-		await ctxB.addCookies([{ ...identityCookie, secure: isHttps }])
+		await openUpload(a)
+		const state = await sharedIdentityState(ctxA)
+		const ctxB = await browser.newContext({ storageState: state })
 		const b = await ctxB.newPage()
-		await b.goto('/demos/upload')
-		await waitForWS(b)
-		await expect(b.getByTestId('upload-form')).toBeVisible({ timeout: 10_000 })
-
-		// Wait for B's onPush handler to register before A uploads. Without
-		// this gate the server-fired notify can land before the handler is
-		// installed and the push drops (notify is fire-and-forget; no retry).
-		await expect(b.getByTestId('push-ready')).toBeAttached({ timeout: 5_000 })
-
+		await openUpload(b)
 		try {
-			await a.getByTestId('clear-button').click()
-			await expect(a.getByTestId('files-list-empty')).toBeVisible({ timeout: 5_000 })
-
-			const sizeBytes = 128 * 1024
-			const filename = `${RUN}-XDEV.bin`
-			await uploadSyntheticFile(a, { seed: `${RUN}-XDEV`, sizeBytes, filename })
-
-			// A's row lands.
-			await expect(a.getByTestId('file-row').first()).toBeVisible({ timeout: 15_000 })
-
-			// B sees the cross-device push banner within a few seconds.
-			await expect(b.getByTestId('incoming-banner')).toBeVisible({ timeout: 8_000 })
+			await clearUploads(a)
+			const filename = `${RUN}-push.bin`
+			await uploadSyntheticFile(a, { seed: `${RUN}-push`, sizeBytes: 300 * 1024, filename })
+			await waitForUpload(a, filename)
+			await waitForFile(b, filename)
+			await expect(b.getByTestId('incoming-banner')).toBeVisible({ timeout: 10_000 })
 			await expect(b.getByTestId('incoming-filename').first()).toHaveText(filename)
+			await clearUploads(a)
 		} finally {
-			await ctxA.close()
-			await ctxB.close()
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
 	})
 })

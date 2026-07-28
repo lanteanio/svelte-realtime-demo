@@ -25,7 +25,7 @@
 		return () => { for (const off of offs) off() }
 	})
 
-	let round = $state(/** @type {{ distinct: number, k: number, resetInSeconds: number } | null} */ (null))
+	let round = $state(/** @type {{ distinct: number, k: number, everPublished: boolean, resetInSeconds: number } | null} */ (null))
 	let lastError = $state('')
 	let submitting = $state(false)
 	let submittedScore = $state(/** @type {number | null} */ (null))
@@ -153,7 +153,15 @@
 					<span class="text-xs opacity-50">k = 3, Laplace noise</span>
 				</div>
 				<div data-testid="pv-protected-value-area">
-					{#if protectedState !== undefined}
+					<!-- The initial serve is an un-noised zero seed, not a real
+					     publish; without the everPublished gate a pristine server
+					     shows "0.00 (last published value)" for a publish that
+					     never happened. `round` stays null until its RPC returns,
+					     and that RPC is slower than the aggregate's in-memory
+					     serve, so the gate holds rather than assuming: a
+					     permissive fallback would flash the seed for exactly
+					     that window, which is the reading being prevented. -->
+					{#if protectedState !== undefined && round?.everPublished === true}
 						<p class="text-4xl font-bold tabular-nums" data-testid="pv-protected-value">{fmt(protectedState.avg)}</p>
 						<p class="text-xs opacity-60">
 							noisy average of a noisy <span class="font-mono" data-testid="pv-protected-n">{fmt(protectedState.n, 1)}</span>
@@ -161,8 +169,8 @@
 						</p>
 					{:else}
 						<p class="opacity-40 text-sm" data-testid="pv-protected-held">
-							Held. Nothing has been published: fewer than 3 distinct contributors
-							have fed this window since you subscribed.
+							Held. Nothing has been published yet: no round has reached
+							3 distinct contributors.
 						</p>
 					{/if}
 				</div>
@@ -170,7 +178,8 @@
 					<p class="text-xs opacity-50 border-t border-base-300 pt-2 mt-1" data-testid="pv-round-hint">
 						<span data-testid="pv-round-distinct">{round.distinct}</span> of
 						<span data-testid="pv-round-k">{round.k}</span> distinct contributors this
-						round (resets in ~{round.resetInSeconds}s). You can see this only because
+						round (resets in ~<span data-testid="pv-round-reset">{round.resetInSeconds}</span>s).
+						You can see this only because
 						the raw aggregate exists for comparison - the protected output alone never
 						reveals its cohort size.
 					</p>

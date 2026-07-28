@@ -46,7 +46,6 @@ const projects = [
 			'**/*.cluster.spec.js',
 			'**/cluster-probe.spec.js',
 			'**/cluster-bugs-probe.spec.js',
-			'**/demos-cluster-cron.spec.js',
 			'**/resilience.spec.js',
 			'**/stress.spec.js',
 			'**/destroyer.spec.js',
@@ -86,8 +85,7 @@ if (optionalProject === 'resilience') {
 		testMatch: [
 			'**/*.cluster.spec.js',
 			'**/cluster-probe.spec.js',
-			'**/cluster-bugs-probe.spec.js',
-			'**/demos-cluster-cron.spec.js'
+			'**/cluster-bugs-probe.spec.js'
 		],
 		use: { browserName: 'chromium' }
 	});

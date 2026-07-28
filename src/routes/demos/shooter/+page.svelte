@@ -163,7 +163,10 @@
 		</p>
 	</header>
 
-	<div class="grid gap-4 lg:grid-cols-[auto_1fr]">
+	<!-- An auto track sizes to the SVG's 300px replaced-element fallback
+	     (the svg has only a viewBox), so w-full/max-w never engage; fr
+	     tracks give the arena a definite width to fill. -->
+	<div class="grid gap-4 lg:grid-cols-[3fr_2fr]">
 		<div class="card bg-base-200">
 			<div class="card-body p-3 space-y-2">
 				<!-- svelte-ignore a11y_click_events_have_key_events -->

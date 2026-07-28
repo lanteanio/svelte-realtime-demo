@@ -1,6 +1,6 @@
 // realtime-allow-public -- this gallery demo is intentionally public.
 /**
- * /demos/upload - cross-device file uploads with content-addressed
+ * /demos/upload - streaming file uploads with content-addressed
  * chunk dedup, on top of `live.upload`.
  *
  * The pitch: pick a file. The page hands it to `uploadFile(file, args)`
@@ -10,7 +10,8 @@
  * `dedup: true` for every cached hit. Re-uploading the same file
  * stores zero new bytes. On stream end, finalize records the file
  * and `live.notify({ userId }, ...)` fires a fire-and-forget push to
- * every other tab the same user has open.
+ * the user's most recently connected tab (last-write-wins locally and
+ * through the cluster registry).
  *
  * Three primitives in one demo:
  *
@@ -29,8 +30,8 @@
  *      uploading the same file in parallel still store each unique
  *      chunk exactly once.
  *
- *  - live.notify({ userId }, ...) - fire-and-forget cross-device push
- *     . Counterpart to live.push for cases where the caller
+ *  - live.notify({ userId }, ...) - fire-and-forget delivery to the
+ *      user's most recently connected socket. Counterpart to live.push for cases where the caller
  *      doesn't need a reply. Returns Promise<void>; never rejects on
  *      offline / timeout / handler-error - silent by design.
  *

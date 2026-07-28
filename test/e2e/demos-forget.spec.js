@@ -1,63 +1,92 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import {
+	auditTraces,
+	displayedIdentity,
+	forget,
+	leaveTraces,
+	openForget
+} from './forget-helpers.js'
+
+test.describe.configure({ mode: 'serial' })
 
 test.describe('/demos/forget', () => {
-	test('renders the three erasure steps', async ({ page }) => {
-		await page.goto('/demos/forget')
-		await expect(page.getByTestId('fg-leave-traces')).toBeVisible()
-		await expect(page.getByTestId('fg-audit')).toBeVisible()
-		await expect(page.getByTestId('fg-forget')).toBeVisible()
+	test('renders all three ordered steps, identity context, controls, disclosure, and source link', async ({ page }) => {
+		await openForget(page)
+		await expect(page.getByRole('heading', { name: 'Right to erasure:' })).toBeVisible()
+		for (const [section, heading, control] of [
+			['fg-traces-section', '1. Leave traces', 'fg-leave-traces'],
+			['fg-audit-section', '2. Audit (app-side)', 'fg-audit'],
+			['fg-forget-section', '3. Forget me', 'fg-forget']
+		]) {
+			await expect(page.getByTestId(section).getByRole('heading', { name: heading })).toBeVisible()
+			await expect(page.getByTestId(control)).toBeVisible()
+			await expect(page.getByTestId(control)).toBeEnabled()
+		}
+		expect(await displayedIdentity(page)).toMatch(/You are .+ \([0-9a-f]{8}\) - the identity that gets erased below\./i)
+		await expect(page.getByText('erases you', { exact: false })).toBeVisible()
+		await expect(page.getByRole('link', { name: 'forget.js' })).toHaveAttribute('href', /src\/live\/demos\/forget\.js$/)
 	})
 
-	test('leave traces, audit nonzero, forget, audit zero', async ({ page }) => {
-		await page.goto('/demos/forget')
-		await waitForWS(page)
+	test('repeated writes add three traces each, while the idempotent draft result is reused', async ({ page }) => {
+		await openForget(page)
+		await forget(page)
+		const first = await leaveTraces(page)
+		expect(first.added).toBe(3)
+		expect(first.total).toBe(3)
+		await new Promise((resolve) => setTimeout(resolve, 1_100))
+		const second = await leaveTraces(page)
+		expect(second.added).toBe(3)
+		expect(second.total).toBe(6)
+		expect(second.draft).toBe(first.draft)
+		await auditTraces(page, 6)
+		await forget(page, 6)
+	})
 
-		// Step 1: leave traces (app log burst + idempotency cache entry).
-		await page.getByTestId('fg-leave-traces').click()
-		await expect(page.getByTestId('fg-traces-result')).toBeVisible({ timeout: 5_000 })
+	test('forget conserves the surface counts, clears app data, and permits fresh use on the same connection', async ({ page }) => {
+		await openForget(page)
+		await forget(page)
+		const identity = await displayedIdentity(page)
+		const before = await leaveTraces(page)
+		await auditTraces(page, 3)
+		const result = await forget(page, 3)
 
-		// Step 2: the app-side audit counts the app-owned log entries.
-		await page.getByTestId('fg-audit').click()
-		await expect.poll(async () => {
-			const text = await page.getByTestId('fg-audit-applog').textContent()
-			return Number(text)
-		}, { timeout: 5_000 }).toBeGreaterThanOrEqual(1)
+		expect(result.counts.appDemoLog).toBe(3)
+		expect(result.rowsAffected).toBeGreaterThanOrEqual(3)
+		await expect(page.getByTestId('fg-traces-result')).toHaveCount(0)
+		await expect(page.getByTestId('fg-audit-applog')).toHaveText('0')
+		await auditTraces(page, 0)
+		expect(await displayedIdentity(page)).toBe(identity)
+		await expect(page.locator('.text-success').first()).toBeVisible()
 
-		// Step 3: forget. The result renders ok: true plus the per-surface
-		// audit table (framework surfaces + the app-owned appDemoLog row).
-		await page.getByTestId('fg-forget').click()
-		await expect(
-			page.getByTestId('fg-forget-result').or(page.getByTestId('fg-error'))
-		).toBeVisible({ timeout: 10_000 })
+		await new Promise((resolve) => setTimeout(resolve, 1_100))
+		const after = await leaveTraces(page)
+		expect(after.added).toBe(3)
+		expect(after.total).toBe(3)
+		expect(after.draft).not.toBe(before.draft)
+		await auditTraces(page, 3)
+		await forget(page, 3)
+	})
 
-		// FORGET_STORE_FAILED is the framework's documented retryable state
-		// (the durable purge did not confirm). It currently reproduces on
-		// every connected user because of an upstream extensions bug:
-		// redis/presence.js purgeUser treats syncCounts (a topic -> number
-		// refcount map) as a per-user collection and throws TypeError.
-		// Mark instead of fail so this test starts asserting the full flow
-		// the moment the fixed extensions version is installed.
-		if ((await page.getByTestId('fg-error').count()) > 0) {
-			const errText = (await page.getByTestId('fg-error').textContent()) ?? ''
-			test.fixme(
-				errText.includes('FORGET_STORE_FAILED'),
-				'upstream svelte-adapter-uws-extensions: redis presence purgeUser throws on syncCounts refcounts, so live.forget rejects FORGET_STORE_FAILED'
-			)
-			throw new Error(`forget failed: ${errText}`)
+	test('two tabs share one identity: remote writes audit together, erasure clears both, and new traces accrue', async ({ page, context }) => {
+		await openForget(page)
+		await forget(page)
+		const other = await context.newPage()
+		try {
+			await openForget(other)
+			expect(await displayedIdentity(other)).toBe(await displayedIdentity(page))
+			const traces = await leaveTraces(other)
+			expect(traces.total).toBe(3)
+			await auditTraces(page, 3)
+
+			await forget(page, 3)
+			await auditTraces(other, 0)
+			await expect(other.locator('.text-success').first()).toBeVisible()
+			const fresh = await leaveTraces(other)
+			expect(fresh.total).toBe(3)
+			await auditTraces(page, 3)
+		} finally {
+			await forget(page, 3)
+			await other.close()
 		}
-		await expect(page.getByTestId('fg-forget-ok')).toHaveText('true')
-		await expect(page.getByTestId('fg-surfaces-table')).toBeVisible()
-		const rows = await page.getByTestId('fg-surface-row').count()
-		expect(rows).toBeGreaterThanOrEqual(1)
-		// The app-owned half must appear by name in the table.
-		await expect(page.getByTestId('fg-surfaces-table')).toContainText('appDemoLog')
-
-		// forgetMe re-runs the audit automatically; it must now read zero.
-		await expect(page.getByTestId('fg-audit-applog')).toHaveText('0', { timeout: 5_000 })
-
-		// And an explicit re-audit agrees.
-		await page.getByTestId('fg-audit').click()
-		await expect(page.getByTestId('fg-audit-applog')).toHaveText('0', { timeout: 5_000 })
 	})
 })

@@ -17,6 +17,7 @@
 -->
 <script>
 	import { count, reset } from '$live/demos/counter-resume'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 	import { status } from 'svelte-adapter-uws/client'
 	import { onMount } from 'svelte'
 
@@ -44,6 +45,7 @@
 	})
 
 	async function handleReset() {
+		if (!confirmDestructive('Reset the shared counter and ledger?')) return
 		await reset()
 		ledger = []
 	}
@@ -80,7 +82,7 @@
 	</div>
 
 	<div class="flex gap-3 justify-center">
-		<button class="btn btn-ghost btn-sm" onclick={handleReset} data-testid="reset-button">Reset counter + ledger</button>
+		<button class="btn btn-outline btn-error btn-sm" onclick={handleReset} data-testid="reset-button">Reset counter + ledger</button>
 	</div>
 
 	<div class="card bg-base-100 border border-base-300">

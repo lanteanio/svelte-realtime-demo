@@ -41,6 +41,7 @@
 
 import { live } from 'svelte-realtime/server'
 import { redis } from '$lib/server/redis'
+import { forgetDraftIdempotency } from '$lib/server/forget-demo'
 
 const LOG_TTL_SECONDS = 3600
 const logKey = (userId) => `demos:forget:log:${userId}`
@@ -52,7 +53,11 @@ const logKey = (userId) => `demos:forget:log:${userId}`
  * per-user row live.forget purges via its per-user reverse index.
  */
 export const saveDraft = live.idempotent(
-	{ keyFrom: (ctx) => `demos:forget:draft:${ctx.user.id}`, ttl: 300 },
+	{
+		keyFrom: (ctx) => `demos:forget:draft:${ctx.user.id}`,
+		ttl: 300,
+		store: forgetDraftIdempotency
+	},
 	async (ctx) => ({ savedAt: Date.now(), by: ctx.user.id })
 )
 

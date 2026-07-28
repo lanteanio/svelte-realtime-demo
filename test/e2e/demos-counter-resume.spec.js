@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { confirmAndClick, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/counter-resume - a server-driven
 // 1Hz counter (cluster-singleton cron -> Redis INCR) streamed with merge:'set'
@@ -78,7 +78,7 @@ test.describe('/demos/counter-resume', () => {
 		await expect.poll(() => counterValue(page), { timeout: 15_000 }).toBeGreaterThan(6)
 		const before = await counterValue(page)
 
-		await page.getByTestId('reset-button').click()
+		await confirmAndClick(page.getByTestId('reset-button'))
 
 		// Server sets the key to 0 and publishes 'set' 0; the visible counter must
 		// fall well below its pre-reset value (a real reset, not a stall).
@@ -195,7 +195,7 @@ test.describe('/demos/counter-resume', () => {
 			await expect.poll(() => counterValue(a), { timeout: 15_000 }).toBeGreaterThan(6)
 			const beforeB = await counterValue(b)
 
-			await a.getByTestId('reset-button').click()
+			await confirmAndClick(a.getByTestId('reset-button'))
 
 			// Tab B never touched Reset; its counter falls only because the server
 			// broadcast the 'set' 0 to every subscriber.

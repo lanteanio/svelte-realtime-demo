@@ -12,7 +12,7 @@
 	return shape plus the client store's `loadMore()` method.
 -->
 <script>
-	import { onMount } from 'svelte'
+	import { onDestroy, onMount } from 'svelte'
 	import {
 		myPaginationState,
 		appendLogEntry,
@@ -60,12 +60,49 @@
 	let appendSeverity = $state('info')
 	let appendMessage = $state('manual entry')
 	let appending = $state(false)
+	let pendingReveal = $state(/** @type {{ id: string, seq: number, message: string } | null} */ (null))
+	let highlightedId = $state(/** @type {string | null} */ (null))
+	let appendNotice = $state('')
+	let feedbackTimer = null
+
+	onDestroy(() => {
+		if (feedbackTimer) clearTimeout(feedbackTimer)
+	})
+
+	// The publish can land just before or just after the RPC response. Track
+	// both the returned id and the reactive list, then reveal only when the
+	// exact row is mounted. Remote appends do not steal another viewer's scroll.
+	$effect(() => {
+		const target = pendingReveal
+		if (!target || !entries.some((entry) => entry.id === target.id)) return
+		pendingReveal = null
+		highlightedId = target.id
+		appendNotice = `Appended #${target.seq}: ${target.message}`
+		requestAnimationFrame(() => {
+			const row = document.querySelector(`[data-entry-id="${target.id}"]`)
+			// 'nearest', not 'center': 'center' scrolls even when the row is
+			// already fully visible, so every append would jerk the page under a
+			// reader who could already see the row. With 'nearest' the
+			// scroll-margin-block below is also no longer inert.
+			row?.scrollIntoView({
+				behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+				block: 'nearest'
+			})
+		})
+		if (feedbackTimer) clearTimeout(feedbackTimer)
+		feedbackTimer = setTimeout(() => {
+			if (highlightedId === target.id) highlightedId = null
+			appendNotice = ''
+		}, 2400)
+	})
 
 	async function handleAppend() {
 		if (appending) return
 		appending = true
 		try {
-			await appendLogEntry({ severity: appendSeverity, message: appendMessage.trim() || 'manual entry' })
+			const message = appendMessage.trim() || 'manual entry'
+			const appended = await appendLogEntry({ severity: appendSeverity, message })
+			pendingReveal = { id: appended.id, seq: appended.seq, message: appended.message }
 		} catch (err) {
 			lastError = err?.message ?? String(err)
 		} finally {
@@ -86,6 +123,19 @@
 		return d.toLocaleTimeString()
 	}
 </script>
+
+<!-- The live region is mounted empty and permanently. Screen readers register
+     a live region when it enters the DOM and announce SUBSEQUENT mutations, so
+     inserting the region and its text in one go (the `{#if}` wrapping
+     everything) announces unreliably across JAWS / NVDA / VoiceOver. Only the
+     text inside is toggled; the visible toast is still conditional. -->
+<div class="toast toast-top toast-end z-50 pointer-events-none" role="status" aria-live="polite">
+	{#if appendNotice}
+		<div class="alert alert-success py-2 px-3 text-sm shadow-lg" data-testid="append-confirmation">
+			{appendNotice}
+		</div>
+	{/if}
+</div>
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
@@ -143,11 +193,20 @@
 			{:else}
 				<ul class="space-y-1 text-xs font-mono" data-testid="entries-list">
 					{#each entries as e (e.id)}
-						<li class="flex items-center gap-2" data-testid="entry-row" data-seq={e.seq}>
+						<!-- The fixed time/seq/badge columns consume a 320px row
+						     whole; letting the message wrap to its own line keeps
+						     the payload readable at phone widths. -->
+						<li
+							class="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+							class:append-highlight={highlightedId === e.id}
+							data-testid="entry-row"
+							data-entry-id={e.id}
+							data-seq={e.seq}
+						>
 							<span class="opacity-50 w-20" data-testid="entry-time">{timeOf(e.ts)}</span>
 							<span class="opacity-50 w-12 text-right">#{e.seq}</span>
 							<span class="badge badge-xs {severityClass(e.severity)}" data-testid="entry-severity">{e.severity}</span>
-							<span class="flex-1 truncate" data-testid="entry-message">{e.message}</span>
+							<span class="flex-1 min-w-40 truncate" data-testid="entry-message">{e.message}</span>
 						</li>
 					{/each}
 				</ul>
@@ -160,7 +219,7 @@
 					disabled={loading || !hasMore}
 					data-testid="load-more"
 				>
-					{loading ? 'Loading...' : (hasMore ? `Load older (${state.pageSize} more)` : 'No more entries')}
+					{loading ? 'Loading...' : (hasMore ? `Load more (next ${state.pageSize})` : 'No more entries')}
 				</button>
 				<span class="text-xs opacity-60" data-testid="has-more-state">hasMore: {hasMore ? 'true' : 'false'}</span>
 				{#if lastError}
@@ -189,3 +248,24 @@
 		</p>
 	</aside>
 </div>
+
+<style>
+	.append-highlight {
+		border-radius: 0.375rem;
+		scroll-margin-block: 5rem;
+		animation: append-flash 1.6s ease-out both;
+	}
+
+	@keyframes append-flash {
+		0%, 35% { background: color-mix(in oklch, var(--color-success) 32%, transparent); }
+		100% { background: transparent; }
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.append-highlight {
+			animation: none;
+			outline: 2px solid var(--color-success);
+			outline-offset: 2px;
+		}
+	}
+</style>

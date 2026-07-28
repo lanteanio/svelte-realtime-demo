@@ -29,10 +29,16 @@
 	const isProtected = $derived(board.slug === 'stress-me-out')
 </script>
 
-<a href="/board/{board.slug}" class="card bg-base-200 hover:bg-base-300 transition-colors">
+<!-- min-w-0 on the grid item too: a grid track's min-width:auto would
+     otherwise size the card to the nowrap title's intrinsic width and
+     the truncate below could never engage. -->
+<a href="/board/{board.slug}" class="card bg-base-200 hover:bg-base-300 transition-colors min-w-0">
 	<div class="card-body p-4 flex-row items-center justify-between">
-		<span class="font-medium">{board.title}</span>
-		<div class="flex items-center gap-2">
+		<!-- Titles are server-capped at 100 chars but may be one unbroken
+		     token; without min-w-0 + truncate a single hostile title sets
+		     the row's min-content width and widens the whole page. -->
+		<span class="font-medium min-w-0 truncate" title={board.title}>{board.title}</span>
+		<div class="flex items-center gap-2 shrink-0">
 			{#if !isProtected && board.last_activity}
 				<CountdownTimer lastActivity={board.last_activity} />
 			{/if}

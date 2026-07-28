@@ -1,126 +1,182 @@
 import { test, expect } from '@playwright/test'
 import { waitForWS } from './helpers.js'
 
-test.describe('/demos/arena', () => {
-	function collectErrors(page) {
-		const errors = []
-		page.on('pageerror', (err) => errors.push(`pageerror: ${err?.message ?? err}`))
-		page.on('console', (msg) => {
-			// Resource-load noise (favicons, aborted fetches on teardown) is
-			// not an app error; uncaught exceptions and app console.error are.
-			if (msg.type() === 'error' && !/Failed to load resource|favicon/i.test(msg.text())) {
-				errors.push(`console: ${msg.text()}`)
-			}
-		})
-		return errors
-	}
+function collectErrors(page) {
+	const errors = []
+	page.on('pageerror', (err) => errors.push(`pageerror: ${err?.message ?? err}`))
+	page.on('console', (msg) => {
+		if (msg.type() === 'error' && !/Failed to load resource|favicon/i.test(msg.text())) errors.push(`console: ${msg.text()}`)
+	})
+	return errors
+}
 
-	async function openArena(page) {
-		await page.goto('/demos/arena')
-		await waitForWS(page)
-	}
+async function open(page) {
+	await page.goto('/demos/arena')
+	await waitForWS(page)
+	await expect(page.getByTestId('arena-me')).toBeVisible({ timeout: 15_000 })
+}
+
+async function hud(page) {
+	const text = (await page.getByTestId('arena-hud').textContent()) ?? ''
+	const match = text.match(/receiving\s+(\d+)\s+of\s+(\d+)\s+entities\s+\((\d+)% culled\)/)
+	return match
+		? { receiving: Number(match[1]), total: Number(match[2]), culled: Number(match[3]) }
+		: { receiving: -1, total: -1, culled: -1 }
+}
+
+async function position(page) {
+	const me = page.getByTestId('arena-me')
+	return { x: Number(await me.getAttribute('data-x')), y: Number(await me.getAttribute('data-y')) }
+}
+
+async function hold(page, key, ms = 500) {
+	await page.keyboard.down(key)
+	await page.waitForTimeout(ms)
+	await page.keyboard.up(key)
+}
+
+async function camera(page) {
+	const text = (await page.getByTestId('arena-cam').textContent()) ?? ''
+	const match = text.match(/cam\s+(\d+),\s+(\d+)/)
+	return match ? { x: Number(match[1]), y: Number(match[2]) } : { x: NaN, y: NaN }
+}
+
+test.describe('/demos/arena', () => {
+	test('renders the complete world, own/remote entities, honest HUD math, legend, and controls without errors', async ({ page }) => {
+		const errors = collectErrors(page)
+		await open(page)
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Arena: area-of-interest culling')
+		const viewport = page.getByTestId('arena-viewport')
+		await expect(viewport).toBeVisible()
+		await expect(page.getByTestId('arena-fringe-ring')).toHaveAttribute('r', '300')
+		await expect(page.getByTestId('arena-fringe-ring')).toHaveAttribute('stroke-dasharray', '8 7')
+		await expect(page.getByTestId('arena-cull-ring')).toHaveAttribute('r', '420')
+		expect(await viewport.evaluate((svg) => {
+			const box = svg.viewBox.baseVal
+			const ring = svg.querySelector('[data-testid="arena-cull-ring"]')
+			return {
+				viewBox: [box.width, box.height],
+				leftArc: Number(ring.getAttribute('cx')) - Number(ring.getAttribute('r')),
+				rightArc: Number(ring.getAttribute('cx')) + Number(ring.getAttribute('r'))
+			}
+		})).toEqual({ viewBox: [900, 600], leftArc: 30, rightArc: 870 })
+		await expect(page.getByTestId('arena-radius-legend')).toContainText('fringe starts at 300')
+		await expect(page.getByTestId('arena-radius-legend')).toContainText('delivery stops at 420')
+		await expect(page.getByTestId('arena-radius-note')).toContainText('beyond its top and bottom edges')
+		await expect(page.getByTestId('arena-remote').first()).toBeVisible()
+		await expect.poll(async () => (await hud(page)).total, { timeout: 15_000 }).toBeGreaterThanOrEqual(150)
+		const values = await hud(page)
+		expect(values.receiving).toBeGreaterThan(0)
+		expect(values.receiving).toBeLessThan(values.total)
+		expect(values.culled).toBeGreaterThan(0)
+		expect(values.culled).toBeLessThanOrEqual(100)
+		await expect(page.getByText('WASD / arrows to move', { exact: true })).toBeVisible()
+		await expect(page.getByTestId('arena-spectate-toggle')).not.toBeChecked()
+		await expect(page.getByTestId('arena-error')).toHaveCount(0)
+		expect(errors).toEqual([])
+	})
+
+	test('WASD and arrow aliases move the predicted own dot in all four directions', async ({ page }) => {
+		const errors = collectErrors(page)
+		await open(page)
+		await page.waitForTimeout(1_000)
+		let before = await position(page)
+		await hold(page, 'd')
+		await expect.poll(async () => (await position(page)).x).toBeGreaterThan(before.x)
+		before = await position(page)
+		await hold(page, 'ArrowDown')
+		await expect.poll(async () => (await position(page)).y).toBeGreaterThan(before.y)
+		before = await position(page)
+		await hold(page, 'a')
+		await expect.poll(async () => (await position(page)).x).toBeLessThan(before.x)
+		before = await position(page)
+		await hold(page, 'ArrowUp')
+		await expect.poll(async () => (await position(page)).y).toBeLessThan(before.y)
+		expect(errors).toEqual([])
+	})
+
+	test('phone visitors get 44px touch controls that move the predicted player', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 })
+		await open(page)
+		const pad = page.getByTestId('arena-move-pad')
+		await expect(pad).toBeVisible()
+		const controls = pad.getByRole('button')
+		await expect(controls).toHaveCount(4)
+		for (const control of await controls.all()) {
+			const box = await control.boundingBox()
+			expect(box.width).toBeGreaterThanOrEqual(44)
+			expect(box.height).toBeGreaterThanOrEqual(44)
+		}
+
+		// Selecting by accessible name proves the handlers are wired but says
+		// nothing about where the buttons actually SIT. Grid auto-placement had
+		// them rendering as a scrambled cross - left drawn where right belongs -
+		// and a name-only test passed straight through it. Assert the geometry.
+		const boxes = {}
+		for (const dir of ['up', 'left', 'down', 'right']) {
+			boxes[dir] = await pad.getByTestId(`arena-move-${dir}`).boundingBox()
+		}
+		expect(boxes.left.x).toBeLessThan(boxes.up.x)
+		expect(boxes.up.x).toBeLessThan(boxes.right.x)
+		expect(Math.round(boxes.down.x)).toBe(Math.round(boxes.up.x))
+		expect(boxes.up.y).toBeLessThan(boxes.down.y)
+		expect(Math.round(boxes.left.y)).toBe(Math.round(boxes.down.y))
+		expect(Math.round(boxes.right.y)).toBe(Math.round(boxes.down.y))
+
+		// Press and hold: the pad feeds the same held-key set the keyboard does,
+		// so movement continues while held rather than stepping once per tap.
+		let before = await position(page)
+		await pad.getByTestId('arena-move-right').dispatchEvent('pointerdown')
+		await expect.poll(async () => (await position(page)).x).toBeGreaterThan(before.x)
+		await pad.getByTestId('arena-move-right').dispatchEvent('pointerup')
+		before = await position(page)
+		await pad.getByTestId('arena-move-up').dispatchEvent('pointerdown')
+		await expect.poll(async () => (await position(page)).y).toBeLessThan(before.y)
+		await pad.getByTestId('arena-move-up').dispatchEvent('pointerup')
+		// Releasing stops movement: the held set must not latch.
+		const settled = await position(page)
+		await page.waitForTimeout(300)
+		expect((await position(page)).y).toBe(settled.y)
+	})
+
+	test('Spectate exposes all pan controls with clamped 160-unit steps and suppresses player movement', async ({ page }) => {
+		await open(page)
+		await page.getByTestId('arena-spectate-toggle').click()
+		await expect(page.getByTestId('arena-spectate-toggle')).toBeChecked()
+		const start = await camera(page)
+		await page.getByTestId('arena-pan-right').click()
+		let current = await camera(page)
+		expect(current.x).toBe(Math.min(2400, start.x + 160))
+		await page.getByTestId('arena-pan-down').click()
+		const afterDown = await camera(page)
+		expect(afterDown.y).toBe(Math.min(1600, current.y + 160))
+		await page.getByTestId('arena-pan-left').click()
+		current = await camera(page)
+		expect(current.x).toBe(Math.max(0, afterDown.x - 160))
+		await page.getByTestId('arena-pan-up').click()
+		current = await camera(page)
+		expect(current.y).toBe(Math.max(0, afterDown.y - 160))
+
+		const own = await position(page)
+		await hold(page, 'ArrowRight')
+		expect(await position(page)).toEqual(own)
+		await page.getByTestId('arena-spectate-toggle').click()
+		await expect(page.getByTestId('arena-cam')).toHaveCount(0)
+		await expect(page.getByTestId('arena-spectate-toggle')).not.toBeChecked()
+	})
 
 	test('interest cull settles bounded after panning across the world', async ({ page }) => {
-		// Pan the interest center across the 2400x1600 world in spectate mode,
-		// then let it settle. The received set may spike transiently during rapid
-		// movement (stale entities briefly outrun the TTL sweep), but once panning
-		// stops it must settle back near the radius-420 subset, not stay pinned at
-		// the whole traversed population. Guards the cull's release path (a hard
-		// "never released" leak would leave this near 150).
-		await openArena(page)
-		await expect(page.getByTestId('arena-me')).toBeVisible({ timeout: 15_000 })
-		const receiving = async () => {
-			const t = (await page.getByTestId('arena-hud').textContent()) ?? ''
-			const m = t.match(/receiving\s+(\d+)\s+of\s+(\d+)/)
-			return m ? Number(m[1]) : -1
-		}
-		await page.waitForTimeout(3000)
+		test.setTimeout(45_000)
+		await open(page)
+		await page.waitForTimeout(3_000)
 		await page.getByTestId('arena-spectate-toggle').click()
 		for (let i = 0; i < 60; i++) {
 			await page.getByTestId('arena-pan-right').click()
 			await page.getByTestId('arena-pan-down').click()
 		}
-		// Poll while the sweep catches up; the received set must fall back well
-		// below the full population once movement stops.
-		await expect
-			.poll(() => receiving(), { message: 'received set should settle after panning', timeout: 12_000 })
-			.toBeLessThan(60)
-	})
-
-	test('own dot renders and the HUD counts culled remote entities', async ({ page }) => {
-		const errors = collectErrors(page)
-		await openArena(page)
-
-		await expect(page.getByTestId('arena-me')).toBeVisible({ timeout: 15_000 })
-
-		// 150 server-driven NPCs guarantee population inside the interest
-		// radius; the HUD's receiving count comes from view.remote.size.
-		await expect
-			.poll(async () => {
-				const text = await page.getByTestId('arena-hud').textContent()
-				const m = text?.match(/receiving (\d+) of (\d+)/)
-				return m ? Number(m[1]) : -1
-			}, { timeout: 15_000 })
-			.toBeGreaterThan(0)
-		await expect(page.getByTestId('arena-hud')).toContainText('% culled')
-
-		// The denominator (server catalog) must exceed what one client
-		// receives - that difference IS the cull. The catalog size is a 2s
-		// poll (`population`), and its first sample can land before the tick
-		// this client's own subscribe arms has populated the roster, so wait
-		// for the denominator to settle rather than sampling once.
-		await expect
-			.poll(async () => {
-				const text = await page.getByTestId('arena-hud').textContent()
-				const m = text?.match(/receiving (\d+) of (\d+)/)
-				return m ? Number(m[2]) - Number(m[1]) : -1
-			}, { timeout: 15_000 })
-			.toBeGreaterThan(0)
-
-		expect(errors).toEqual([])
-	})
-
-	test('arrow key moves the predicted own dot', async ({ page }) => {
-		const errors = collectErrors(page)
-		await openArena(page)
-
-		const me = page.getByTestId('arena-me')
-		await expect(me).toBeVisible({ timeout: 15_000 })
-
-		// Let the first sync land so the dot sits at its authoritative
-		// spawn before we measure (the pre-sync placeholder would move too,
-		// but measuring across the snap would be noisy).
-		await page.waitForTimeout(1_000)
-
-		const beforeX = Number(await me.getAttribute('data-x'))
-		expect(Number.isFinite(beforeX)).toBe(true)
-
-		await page.keyboard.down('ArrowRight')
-		await page.waitForTimeout(700)
-		await page.keyboard.up('ArrowRight')
-
-		await expect
-			.poll(async () => Number(await me.getAttribute('data-x')), { timeout: 5_000 })
-			.toBeGreaterThan(beforeX)
-
-		expect(errors).toEqual([])
-	})
-
-	test('spectate mode pans the reported area-of-interest center', async ({ page }) => {
-		await openArena(page)
-		await expect(page.getByTestId('arena-me')).toBeVisible({ timeout: 15_000 })
-
-		await page.getByTestId('arena-spectate-toggle').click()
-		const cam = page.getByTestId('arena-cam')
-		await expect(cam).toBeVisible()
-
-		const before = await cam.textContent()
-		await page.getByTestId('arena-pan-right').click()
-		await page.getByTestId('arena-pan-right').click()
-		await expect(cam).not.toHaveText(before ?? '')
-
-		// Toggling back reverts culling to the own-entity center.
-		await page.getByTestId('arena-spectate-toggle').click()
-		await expect(cam).not.toBeVisible()
+		await expect.poll(async () => (await hud(page)).receiving, {
+			message: 'received set should settle after panning',
+			timeout: 12_000
+		}).toBeLessThan(60)
 	})
 })

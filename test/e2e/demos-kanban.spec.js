@@ -1,92 +1,167 @@
 import { test, expect } from '@playwright/test'
+import {
+	addCard,
+	assertColumnCount,
+	card,
+	cardTitle,
+	deleteCard,
+	moveCard,
+	openKanban,
+	renameCard,
+	waitForCard,
+	waitInColumn
+} from './kanban-helpers.js'
 
-// The kanban board is ONE shared document for every visitor, so state
-// accumulates across test runs. Every card this spec creates carries a
-// Date.now() suffix and is deleted at the end of its test, keeping the
-// shared board clean for repeated runs.
-//
-// Card titles live in <input value=...> elements, not text nodes, so
-// membership checks go through data-testid card ids (stable across
-// moves and reloads) rather than hasText locators.
+test.describe.configure({ mode: 'serial' })
 
 test.describe('/demos/kanban', () => {
-	test('page loads and the document syncs', async ({ page }) => {
-		await page.goto('/demos/kanban')
-		await expect(page.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
-		for (const col of ['todo', 'doing', 'done']) {
-			await expect(page.getByTestId(`kb-col-${col}`)).toBeVisible()
+	test('renders all columns, forms, sync state, CRDT disclosure, and source link', async ({ page }) => {
+		await openKanban(page)
+		await expect(page.getByRole('heading', { name: 'Kanban: a shared CRDT document' })).toBeVisible()
+		for (const column of ['todo', 'doing', 'done']) {
+			await expect(page.getByTestId(`kb-col-${column}`)).toBeVisible()
+			await expect(page.getByTestId(`kb-add-input-${column}`)).toHaveAttribute('placeholder', 'Add a card...')
+			await expect(page.getByTestId(`kb-add-input-${column}`)).toBeEnabled()
+			await expect(page.getByTestId(`kb-add-button-${column}`)).toBeDisabled()
+			await assertColumnCount(page, column)
+		}
+		await expect(page.getByTestId('kb-syncing-badge')).toHaveCount(0)
+		await expect(page.getByTestId('kb-degraded-badge')).toHaveCount(0)
+		await expect(page.getByTestId('kb-readonly-badge')).toHaveCount(0)
+		await expect(page.getByTestId('kb-error')).toHaveCount(0)
+		await expect(page.getByText('local replica IS the offline queue', { exact: false }).first()).toBeVisible()
+		await expect(page.getByRole('link', { name: 'src/live/demos/kanban.js' })).toHaveAttribute('href', /src\/live\/demos\/kanban\.js$/)
+	})
+
+	test('add-card inputs keep a useful target width across tablet and desktop-shell breakpoints', async ({ page }) => {
+		await page.setViewportSize({ width: 640, height: 900 })
+		await openKanban(page)
+
+		for (const width of [640, 768, 1024]) {
+			await page.setViewportSize({ width, height: 900 })
+			for (const column of ['todo', 'doing', 'done']) {
+				const geometry = await page.getByTestId(`kb-add-input-${column}`).evaluate((input) => {
+					const form = input.closest('form')
+					const button = form?.querySelector('button')
+					const inputBox = input.getBoundingClientRect()
+					const formBox = form?.getBoundingClientRect()
+					const buttonBox = button?.getBoundingClientRect()
+					return {
+						inputWidth: inputBox.width,
+						buttonWidth: buttonBox?.width ?? 0,
+						insideForm: Boolean(formBox && inputBox.left >= formBox.left && (buttonBox?.right ?? Infinity) <= formBox.right + 0.5)
+					}
+				})
+				expect(geometry.inputWidth, `${column} input at ${width}px`).toBeGreaterThanOrEqual(96)
+				expect(geometry.inputWidth, `${column} input vs Add button at ${width}px`).toBeGreaterThan(geometry.buttonWidth)
+				expect(geometry.insideForm, `${column} form containment at ${width}px`).toBe(true)
+			}
 		}
 	})
 
-	test('add, move across columns, survive a reload, delete', async ({ page }) => {
-		await page.goto('/demos/kanban')
-		await expect(page.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
+	test('all three add forms, inline rename, both move directions, reload, and delete work', async ({ page }) => {
+		await openKanban(page)
+		const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+		const ids = []
+		try {
+			ids.push(await addCard(page, 'todo', `e2e-todo-${stamp}`, true))
+			ids.push(await addCard(page, 'doing', `e2e-doing-${stamp}`))
+			ids.push(await addCard(page, 'done', `e2e-done-${stamp}`))
+			const [todoId, doingId, doneId] = ids
 
-		// Add a uniquely-named card to the todo column.
-		const title = `e2e-card-${Date.now()}`
-		await page.getByTestId('kb-add-input-todo').fill(title)
-		await page.getByTestId('kb-add-button-todo').click()
+			await expect(page.getByTestId(`kb-move-left-${todoId}`)).toBeDisabled()
+			await expect(page.getByTestId(`kb-move-right-${doneId}`)).toBeDisabled()
+			const renamed = `e2e-renamed-${stamp}`
+			await renameCard(page, doingId, renamed)
+			await expect(cardTitle(page, doingId)).toHaveValue(renamed)
 
-		// push() appends, so the new card is the last one in the column.
-		// Writes apply to the local replica synchronously - no network wait.
-		const added = page.getByTestId('kb-cards-todo').locator('[data-testid^="kb-card-"]').last()
-		await expect(added.locator('[data-testid^="kb-title-"]')).toHaveValue(title)
+			await moveCard(page, todoId, 'right', 'doing')
+			await moveCard(page, todoId, 'right', 'done')
+			await moveCard(page, doneId, 'left', 'doing')
+			await moveCard(page, doneId, 'left', 'todo')
+			for (const column of ['todo', 'doing', 'done']) await assertColumnCount(page, column)
 
-		// Pin the card's id so it can be tracked through moves and reloads.
-		const cardTestId = await added.getAttribute('data-testid')
-		const cardId = cardTestId.slice('kb-card-'.length)
-
-		// Move it right into doing: one transact = one atomic wire update.
-		await page.getByTestId(`kb-move-right-${cardId}`).click()
-		await expect(page.getByTestId('kb-cards-doing').getByTestId(`kb-card-${cardId}`)).toBeVisible({ timeout: 5_000 })
-		await expect(page.getByTestId('kb-cards-todo').getByTestId(`kb-card-${cardId}`)).toHaveCount(0)
-
-		// Reload: the server replica is in-memory for the process lifetime,
-		// so a fresh sync must bring the card back in the doing column.
-		await page.reload()
-		await expect(page.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
-		const reloaded = page.getByTestId('kb-cards-doing').getByTestId(`kb-card-${cardId}`)
-		await expect(reloaded).toBeVisible({ timeout: 10_000 })
-		await expect(reloaded.locator('[data-testid^="kb-title-"]')).toHaveValue(title)
-
-		// Cleanup: delete the card (order entry + cards record in one
-		// transaction) so repeated runs never pile up state.
-		await page.getByTestId(`kb-delete-${cardId}`).click()
-		await expect(page.getByTestId(`kb-card-${cardId}`)).toHaveCount(0, { timeout: 5_000 })
+			await page.reload()
+			await expect(page.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
+			await waitInColumn(page, todoId, 'done')
+			await waitInColumn(page, doneId, 'todo')
+			await expect(cardTitle(page, doingId)).toHaveValue(renamed)
+		} finally {
+			for (const id of ids) await deleteCard(page, id)
+		}
 	})
 
-	test('concurrent adds from two contexts converge on both boards', async ({ browser }) => {
+	test('two identities concurrently move and rename different cards without index-shift loss', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
+		const ids = []
 		try {
-			await a.goto('/demos/kanban')
-			await b.goto('/demos/kanban')
-			await expect(a.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
-			await expect(b.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
+			await Promise.all([openKanban(a), openKanban(b)])
+			const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+			const [idA, idB] = await Promise.all([
+				addCard(a, 'todo', `e2e-concurrent-a-${stamp}`),
+				addCard(b, 'todo', `e2e-concurrent-b-${stamp}`)
+			])
+			ids.push(idA, idB)
+			await Promise.all([waitInColumn(a, idB, 'todo'), waitInColumn(b, idA, 'todo')])
 
-			const title = `e2e-sync-${Date.now()}`
-			await a.getByTestId('kb-add-input-todo').fill(title)
-			await a.getByTestId('kb-add-button-todo').click()
-
-			const added = a.getByTestId('kb-cards-todo').locator('[data-testid^="kb-card-"]').last()
-			await expect(added.locator('[data-testid^="kb-title-"]')).toHaveValue(title)
-			const cardTestId = await added.getAttribute('data-testid')
-			const cardId = cardTestId.slice('kb-card-'.length)
-
-			// The merge lands on B without any RPC or refetch.
-			const onB = b.getByTestId('kb-cards-todo').getByTestId(`kb-card-${cardId}`)
-			await expect(onB).toBeVisible({ timeout: 10_000 })
-			await expect(onB.locator('[data-testid^="kb-title-"]')).toHaveValue(title)
-
-			// Cleanup from B: a delete merged from the other side must also
-			// converge back to A.
-			await b.getByTestId(`kb-delete-${cardId}`).click()
-			await expect(a.getByTestId(`kb-card-${cardId}`)).toHaveCount(0, { timeout: 10_000 })
+			await Promise.all([
+				moveCard(a, idA, 'right', 'doing'),
+				moveCard(b, idB, 'right', 'doing')
+			])
+			await Promise.all([
+				waitInColumn(a, idB, 'doing'),
+				waitInColumn(b, idA, 'doing')
+			])
+			await Promise.all([
+				renameCard(a, idA, `e2e-a-renamed-${stamp}`),
+				renameCard(b, idB, `e2e-b-renamed-${stamp}`)
+			])
+			await expect(cardTitle(a, idB)).toHaveValue(`e2e-b-renamed-${stamp}`, { timeout: 10_000 })
+			await expect(cardTitle(b, idA)).toHaveValue(`e2e-a-renamed-${stamp}`, { timeout: 10_000 })
 		} finally {
-			await ctxA.close()
-			await ctxB.close()
+			for (const id of ids) await deleteCard(b, id)
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('offline local edits and online peer edits reconcile after reconnect', async ({ browser }) => {
+		test.setTimeout(45_000)
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		const ids = []
+		try {
+			await Promise.all([openKanban(a), openKanban(b)])
+			const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+			const ownId = await addCard(a, 'todo', `e2e-offline-own-${stamp}`)
+			const peerId = await addCard(b, 'todo', `e2e-offline-peer-${stamp}`)
+			ids.push(ownId, peerId)
+			await Promise.all([waitForCard(a, `e2e-offline-peer-${stamp}`), waitForCard(b, `e2e-offline-own-${stamp}`)])
+
+			await ctxA.setOffline(true)
+			await renameCard(a, ownId, `e2e-offline-own-edited-${stamp}`)
+			await moveCard(a, ownId, 'right', 'doing')
+			await renameCard(b, peerId, `e2e-offline-peer-edited-${stamp}`)
+			await moveCard(b, peerId, 'right', 'doing')
+			await expect(cardTitle(a, peerId)).toHaveValue(`e2e-offline-peer-${stamp}`)
+			await expect(cardTitle(b, ownId)).toHaveValue(`e2e-offline-own-${stamp}`)
+
+			await ctxA.setOffline(false)
+			await expect(a.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 20_000 })
+			await expect(cardTitle(a, peerId)).toHaveValue(`e2e-offline-peer-edited-${stamp}`, { timeout: 20_000 })
+			await expect(cardTitle(b, ownId)).toHaveValue(`e2e-offline-own-edited-${stamp}`, { timeout: 20_000 })
+			await Promise.all([
+				waitInColumn(a, peerId, 'doing'),
+				waitInColumn(b, ownId, 'doing')
+			])
+		} finally {
+			await ctxA.setOffline(false).catch(() => {})
+			for (const id of ids) await deleteCard(b, id)
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
 	})
 })

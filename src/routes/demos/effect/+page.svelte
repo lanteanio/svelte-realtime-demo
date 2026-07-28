@@ -9,6 +9,7 @@
 -->
 <script>
 	import { onMount } from 'svelte'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 	import {
 		myEffectState,
 		placeOrder,
@@ -96,6 +97,7 @@
 	let clearing = $state(false)
 	async function handleClear() {
 		if (clearing) return
+		if (!confirmDestructive('Clear all three shared effect feeds?')) return
 		clearing = true
 		try {
 			await clearFeeds()
@@ -155,7 +157,7 @@
 				<button type="button" class="btn btn-sm btn-warning" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
 					{burstBusy ? 'Bursting...' : 'Burst (5)'}
 				</button>
-				<button type="button" class="btn btn-sm btn-ghost ml-auto" onclick={handleClear} disabled={clearing} data-testid="clear">
+				<button type="button" class="btn btn-sm btn-outline btn-error ml-auto" onclick={handleClear} disabled={clearing} data-testid="clear">
 					Clear feeds
 				</button>
 			</form>
@@ -166,7 +168,7 @@
 	</section>
 
 	<!-- Three columns -->
-	<section class="grid sm:grid-cols-3 gap-3" data-testid="columns">
+	<section class="grid md:grid-cols-3 gap-3" data-testid="columns">
 		<div class="card bg-base-100 border border-base-300" data-testid="orders-column">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Orders ({ordersList.length})</h2>

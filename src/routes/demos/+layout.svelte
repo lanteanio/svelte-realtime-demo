@@ -5,8 +5,10 @@
 	sidebar is sticky-positioned so it stays put while the main
 	column scrolls.
 
-	Below 640px the switcher renders as a horizontal scroller at the
-	top of the page so mobile readers can still skim demos.
+	Below 1024px the switcher renders as a horizontal scroller at the
+	top of the page. Keeping the 640-1023px tablet band rail-free means
+	child pages' viewport breakpoints describe their actual content width;
+	the fixed 13rem sidebar would otherwise make every sm:/md: layout lie.
 
 	Layout uses a scoped `<style>` block instead of Tailwind responsive
 	variants so the breakpoint behaves the same regardless of the
@@ -23,26 +25,26 @@
 		{ slug: 'chat',              title: 'Chat rooms' },
 		{ slug: 'todos-rollback',    title: 'Optimistic rollback' },
 		{ slug: 'denials',           title: 'Subscribe denials' },
-		{ slug: 'pressure',          title: 'Pressure / admission' },
+		{ slug: 'pressure',          title: 'Admission-shedding' },
 		{ slug: 'chaos',             title: 'Deterministic chaos' },
-		{ slug: 'notifications',     title: 'Push + reply + cron' },
+		{ slug: 'notifications',     title: 'Notifications' },
 		{ slug: 'topk',              title: 'Top-K windows' },
 		{ slug: 'news',              title: 'Newsroom' },
-		{ slug: 'jobs',              title: 'Task runner' },
+		{ slug: 'jobs',              title: 'Jobs / task runner' },
 		{ slug: 'cluster-cron',      title: 'Cluster cron' },
-		{ slug: 'upload',            title: 'Streaming upload' },
+		{ slug: 'upload',            title: 'Upload streaming' },
 		{ slug: 'auctions',          title: 'Auctions' },
 		{ slug: 'schema-evolution',  title: 'Schema evolution' },
 		{ slug: 'flash-sales',       title: 'Flash sales' },
 		{ slug: 'pagination',        title: 'Pagination' },
-		{ slug: 'effect',            title: 'live.effect' },
-		{ slug: 'from-seq',          title: 'delta.fromSeq' },
-		{ slug: 'collab-editor',     title: 'CRDT selections' },
+		{ slug: 'effect',            title: 'Effects / live.effect' },
+		{ slug: 'from-seq',          title: 'Reconnect / fromSeq' },
+		{ slug: 'collab-editor',     title: 'Collab selections' },
 		{ slug: 'multiplayer',       title: 'Multiplayer lounge' },
-		{ slug: 'kanban',            title: 'CRDT kanban' },
+		{ slug: 'kanban',            title: 'Kanban CRDT' },
 		{ slug: 'offline',           title: 'Offline queue' },
-		{ slug: 'arena',             title: 'AoI arena' },
-		{ slug: 'shooter',           title: 'Lag-comp shooter' },
+		{ slug: 'arena',             title: 'Arena / AoI' },
+		{ slug: 'shooter',           title: 'Shooter / lag-comp' },
 		{ slug: 'lobbies',           title: 'Lobbies' },
 		{ slug: 'tenants',           title: 'Multi-tenancy' },
 		{ slug: 'flags',             title: 'Feature flags' },
@@ -51,12 +53,47 @@
 		{ slug: 'privacy',           title: 'Aggregate privacy' },
 		{ slug: 'ops',               title: 'Ops dashboard' },
 		{ slug: 'outbound-webhooks', title: 'Outbound webhooks' },
-		{ slug: 'phases',            title: 'Attach + batch' }
+		{ slug: 'phases',            title: 'Phases + batch' }
 	]
 
 	const currentSlug = $derived.by(() => {
 		const m = page.url.pathname.match(/^\/demos\/([^/]+)/)
 		return m ? m[1] : ''
+	})
+
+	// Neither the sidebar nor the sub-1024 scroller moves on its own, so a
+	// late-list demo would otherwise show a nav parked at the top/left with
+	// the active entry offscreen.
+	//
+	// Scrolling is confined to the nav's own scroll container rather than
+	// delegated to scrollIntoView. Above 1024 the rail is `position: fixed`
+	// with its own overflow, so scrollIntoView would be contained - but below
+	// 1024 the switcher is an in-flow strip at the top of the document, and
+	// scrollIntoView there scrolls the DOCUMENT whenever the strip is out of
+	// view. That would fight SvelteKit's scroll restoration on back-navigation
+	// and yank a reader mid-page back to the top on any re-run.
+	// Which element actually scrolls depends on the breakpoint: above 1024 the
+	// rail is the vertical scroller and the list does not scroll at all; below
+	// it the list is a horizontal strip and the rail does not scroll. Walking
+	// the ancestors and testing each axis covers both without encoding the
+	// breakpoint here a third time.
+	$effect(() => {
+		if (!currentSlug) return
+		const link = document.querySelector(`[data-testid="demos-nav-link-${currentSlug}"]`)
+		if (!(link instanceof HTMLElement)) return
+		const root = link.closest('.demos-aside')
+		if (!(root instanceof HTMLElement)) return
+		for (let node = link.parentElement; node instanceof HTMLElement; node = node.parentElement) {
+			const box = node.getBoundingClientRect()
+			const linkBox = link.getBoundingClientRect()
+			if (node.scrollHeight > node.clientHeight && (linkBox.top < box.top || linkBox.bottom > box.bottom)) {
+				node.scrollTop += linkBox.top - box.top
+			}
+			if (node.scrollWidth > node.clientWidth && (linkBox.left < box.left || linkBox.right > box.right)) {
+				node.scrollLeft += linkBox.left - box.left
+			}
+			if (node === root) break
+		}
 	})
 </script>
 
@@ -152,8 +189,25 @@
 		flex: 1 1 0;
 		overflow-x: auto;
 	}
+	/*
+	 * The closing explainer aside on every demo page is authored text-xs +
+	 * opacity-50 - a metadata treatment applied to dense API teaching copy. At
+	 * 12px that measures about 3.4:1 on light, under the 4.5:1 AA bar; this
+	 * lifts it to roughly 6.5:1 light and 7.9:1 dark. Matched on that utility
+	 * signature rather than blanket-restyling text-xs, so timestamps, compact
+	 * status labels, and other genuine metadata stay compact. Page intro
+	 * paragraphs already ship text-sm + opacity-70 and need no rule.
+	 *
+	 * Component <style> output is unlayered and so beats Tailwind's layered
+	 * utilities regardless of specificity - which is what lets this override
+	 * opacity-50 at all.
+	 */
+	:global(.demos-content aside.text-xs.opacity-50.leading-relaxed) {
+		font-size: 0.875rem;
+		opacity: 0.7;
+	}
 
-	@media (min-width: 640px) {
+	@media (min-width: 1024px) {
 		.demos-shell {
 			display: block;
 		}

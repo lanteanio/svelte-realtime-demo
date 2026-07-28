@@ -18,6 +18,7 @@
 -->
 <script>
 	import { onMount } from 'svelte'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 	import {
 		jobsList,
 		jobsStats,
@@ -82,6 +83,7 @@
 
 	async function handleClear() {
 		if (!available) return
+		if (!confirmDestructive('Clear all shared jobs?')) return
 		try {
 			await clearJobs()
 		} catch (err) {
@@ -191,7 +193,7 @@
 					</button>
 					<button
 						type="button"
-						class="btn btn-ghost btn-sm"
+						class="btn btn-outline btn-error btn-sm"
 						onclick={handleClear}
 						data-testid="jobs-clear-button"
 					>
