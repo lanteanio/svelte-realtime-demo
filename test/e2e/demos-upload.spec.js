@@ -125,11 +125,22 @@ test.describe('/demos/upload', () => {
 	})
 
 	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		test.setTimeout(45_000)
 		const { context, page } = await openTouchPage(browser)
 		try {
 			await openUpload(page)
 			await expectTouchTarget(page.getByTestId('file-input'), { minWidth: 0 })
 			await expectTouchTarget(page.getByTestId('clear-button'))
+			// The smallest control only exists mid-flight: start a real upload
+			// large enough to keep it on screen, then measure it live.
+			await clearUploads(page)
+			const filename = `${RUN}-touch-cancel.bin`
+			await uploadSyntheticFile(page, { seed: `${RUN}-touch-cancel`, sizeBytes: 8 * 1024 * 1024, filename })
+			await expect(page.getByTestId('cancel-button')).toBeVisible({ timeout: 5_000 })
+			await expectTouchTarget(page.getByTestId('cancel-button'))
+			await page.getByTestId('cancel-button').click()
+			await expect(page.getByTestId('file-input')).toBeEnabled({ timeout: 15_000 })
+			await clearUploads(page)
 		} finally {
 			await context.close()
 		}
