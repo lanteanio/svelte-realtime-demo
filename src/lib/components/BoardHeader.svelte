@@ -39,9 +39,9 @@
 	<!-- Background colors (hidden on mobile to save space) -->
 	<div class="hidden sm:flex gap-1 shrink-0">
 		{#each BACKGROUNDS as bg}
-			<!-- Tablet-visible swatches: 24px WCAG AA floor on coarse pointers without inflating the compact header. -->
+			<!-- Compact on fine pointers; full 44px circles on coarse ones, flex-wrap absorbs the extra width. -->
 			<button
-				class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110 pointer-coarse:min-h-6 pointer-coarse:min-w-6 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
+				class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110 pointer-coarse:w-11 pointer-coarse:h-11 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
 				style:background={bg}
 				aria-label="Set background to {bg}"
 				onclick={() => onUpdate({ background: bg })}

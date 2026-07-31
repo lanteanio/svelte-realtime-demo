@@ -140,7 +140,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- On mobile, controls are always visible (no hover on touch devices) -->
 	<div class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity flex items-center gap-1" onpointerdown={stopDrag}>
-		<!-- Compact on fine pointers, 44px where taps land; color dots hold a 32px floor so the popover still fits the note. -->
+		<!-- Compact on fine pointers, 44px where taps land; the color popover trades its row for a grid on coarse pointers so full-size dots still fit the note. -->
 		<button
 			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 			aria-label="Pick color"
@@ -156,10 +156,11 @@
 	<!-- Color picker dropdown -->
 	{#if showColors}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="absolute -top-9 right-0 flex gap-1 bg-white/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg" onpointerdown={stopDrag}>
+		<!-- Anchored above the note so the coarse-pointer grid grows upward instead of covering the controls. -->
+		<div class="absolute bottom-full mb-1.5 right-0 flex gap-1 pointer-coarse:grid pointer-coarse:grid-cols-3 pointer-coarse:gap-1.5 bg-white/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg" onpointerdown={stopDrag}>
 			{#each NOTE_COLORS as c}
 				<button
-					class="w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform pointer-coarse:min-h-8 pointer-coarse:min-w-8 {note.color === c ? 'border-black/30' : 'border-black/10'}"
+					class="w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform pointer-coarse:w-11 pointer-coarse:h-11 {note.color === c ? 'border-black/30' : 'border-black/10'}"
 					style:background={c}
 					aria-label="Set color to {c}"
 					onclick={() => { onEdit({ color: c }); showColors = false }}

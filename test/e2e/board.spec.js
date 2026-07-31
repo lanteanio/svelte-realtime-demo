@@ -224,9 +224,20 @@ test.describe('/board/[slug]', () => {
 		const { context, page } = await openTouchPage(browser)
 		try {
 			await createFreshBoard(page, `Board touch ${Date.now()}`)
-			const note = await createNoteAt(page, 120, 150)
+			// Low enough on the canvas that the upward-growing color grid stays unclipped.
+			const note = await createNoteAt(page, 120, 300)
 			await expectTouchTarget(note.getByLabel('Pick color'))
 			await expectTouchTarget(note.getByLabel('Delete note'))
+			await note.getByLabel('Pick color').tap()
+			const dots = note.getByLabel(/Set color to #/)
+			await expect(dots).toHaveCount(6)
+			for (const dot of await dots.all()) await expectTouchTarget(dot)
+			// The background swatches only exist from the sm breakpoint up: re-rung
+			// as a coarse-pointer tablet and measure all six.
+			await page.setViewportSize({ width: 834, height: 1194 })
+			const swatches = page.getByLabel(/Set background to #/)
+			await expect(swatches).toHaveCount(6)
+			for (const swatch of await swatches.all()) await expectTouchTarget(swatch)
 		} finally {
 			await context.close()
 		}
