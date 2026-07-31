@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/news - a live newsroom wiring
 // FOUR realtime primitives together: a live.webhook publish bridge
@@ -243,6 +243,62 @@ test.describe('/demos/news', () => {
 			await expect.poll(() => totalViews(page), { timeout: 12_000 }).toBeGreaterThan(paused)
 		} finally {
 			await setSpeed(page, 5)
+		}
+	})
+
+	test('panel title and subtitle separate onto their own lines at narrow rungs', async ({ page }) => {
+		await open(page)
+		const header = page.getByTestId('lb-news-last30s').locator('h2').first()
+		const subtitle = page.getByTestId('lb-news-last30s').locator('h2 + span').first()
+
+		// Wide: both sit on one line, so their vertical extents overlap.
+		await page.setViewportSize({ width: 1440, height: 900 })
+		await expect.poll(async () => {
+			const [a, b] = await Promise.all([header.boundingBox(), subtitle.boundingBox()])
+			return a && b ? b.y < a.y + a.height : null
+		}).toBe(true)
+
+		// Narrow: the subtitle wraps clear of the title instead of butting
+		// against it. Without flex-wrap both are pinned to one line and this
+		// assertion fails, which is the regression it exists to catch.
+		await page.setViewportSize({ width: 320, height: 720 })
+		await expect.poll(async () => {
+			const [a, b] = await Promise.all([header.boundingBox(), subtitle.boundingBox()])
+			return a && b ? b.y >= a.y + a.height : null
+		}).toBe(true)
+	})
+
+	test('newest timestamp stays visible while a long headline truncates', async ({ page }) => {
+		await open(page)
+		const headline = `long-headline-regression-${Date.now()}-${'x'.repeat(30)}`
+		await publishStory(page, headline)
+		await expect(page.getByTestId('stat-newestHeadline')).toContainText(headline.slice(0, 20), { timeout: 10_000 })
+
+		await page.setViewportSize({ width: 320, height: 720 })
+		const time = page.getByTestId('stat-newestTime')
+		await expect(time).toBeVisible()
+		await expect(time).not.toHaveText('')
+
+		// The headline must be the element that gives way, not the time: the
+		// time used to sit inside the truncating flow and vanish first.
+		await expect.poll(() => page.getByTestId('stat-newestHeadline').evaluate(
+			(element) => element.scrollWidth > element.clientWidth
+		)).toBe(true)
+		const box = await time.boundingBox()
+		expect(box.width, 'timestamp must keep real width at 320').toBeGreaterThan(0)
+		expect(box.x + box.width, 'timestamp must stay inside the viewport').toBeLessThanOrEqual(320)
+	})
+
+	test('publish form controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			await expectTouchTarget(page.getByTestId('news-headline-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('news-summary-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('news-publish-button'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('news-speed-input'), { minWidth: 0 })
+		} finally {
+			await context.close()
 		}
 	})
 })
