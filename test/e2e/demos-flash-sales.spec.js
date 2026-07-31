@@ -195,6 +195,107 @@ test.describe('/demos/flash-sales', () => {
 		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
 	})
 
+	test('the buy outcome never moves the stress panel, at a narrow rung', async ({ page }) => {
+		// 320 is where a one-line reservation stops being enough: the outcome
+		// wraps and a minimum-height slot grows with it.
+		await page.setViewportSize({ width: 320, height: 900 })
+		await reset(page)
+		const stressTop = () => page.getByTestId('stress-section').evaluate(
+			(element) => Math.round(element.getBoundingClientRect().top + window.scrollY)
+		)
+
+		const atRest = await stressTop()
+		expect(atRest, 'stress panel must be measurable').toBeGreaterThan(0)
+
+		// A normal success outcome.
+		await page.getByTestId('product-buy-phone').click()
+		await expect(page.getByTestId('buy-outcome')).toBeVisible()
+		expect(await stressTop(), 'a normal outcome must not move the panel').toBe(atRest)
+
+		const slotHeight = () => page.getByTestId('buy-outcome-slot').evaluate(
+			(element) => Math.round(element.getBoundingClientRect().height)
+		)
+		const boundedHeight = await slotHeight()
+
+		// The real messages happen to fit one line even at 320, so a natural
+		// outcome cannot prove the region is BOUNDED - only that this message
+		// fits. Force the worst case directly: a message far longer than any
+		// the server sends. A minimum-height slot grows with it; a bounded one
+		// keeps its height and scrolls internally.
+		await page.getByTestId('buy-outcome').evaluate((element) => {
+			element.querySelector('span').textContent = 'sold - '.concat('a really long outcome detail that wraps many times over '.repeat(6))
+		})
+		expect(await slotHeight(), 'the outcome region must be bounded, not merely have a minimum').toBe(boundedHeight)
+		expect(await stressTop(), 'an overlong outcome must not move the panel either').toBe(atRest)
+	})
+
+	test('the stress tally fills in while the burst is still running', async ({ page }) => {
+		test.setTimeout(90_000)
+		await reset(page)
+		const TOTAL = 40
+		await setStress(page, 'phone', TOTAL)
+
+		const tally = async () => {
+			const counts = await Promise.all(
+				['stress-ok', 'stress-soldout', 'stress-locktimeout'].map((id) =>
+					page.getByTestId(id).textContent().then((t) => Number(t?.match(/^\d+/)?.[0] ?? 0)).catch(() => 0)
+				)
+			)
+			return counts.reduce((a, b) => a + b, 0)
+		}
+
+		await page.getByTestId('stress-go').click()
+
+		// Sample repeatedly and keep the strongest evidence of PARTIAL progress
+		// observed while the button still said Running. An implementation that
+		// only publishes its tally after every promise settles can never
+		// produce such a sample.
+		let sawPartialWhileRunning = false
+		for (let i = 0; i < 120 && !sawPartialWhileRunning; i += 1) {
+			const label = await page.getByTestId('stress-go').textContent().catch(() => '')
+			if (!label?.includes('Running')) break
+			const sum = await tally()
+			if (sum > 0 && sum < TOTAL) sawPartialWhileRunning = true
+			else await page.waitForTimeout(50)
+		}
+		expect(sawPartialWhileRunning, 'tally must be partially filled while the burst runs').toBe(true)
+
+		await expect(page.getByTestId('stress-go')).not.toHaveText('Running...', { timeout: 40_000 })
+		expect(await tally(), 'every attempt must be accounted for once it finishes').toBe(TOTAL)
+	})
+
+	test('a tab opened before the claim still reads Already claimed, and the pool moves once', async ({ browser }) => {
+		// One context so both tabs carry the SAME identity cookie - the coupon
+		// rule is per user, so two contexts would be two users and prove nothing.
+		const context = await browser.newContext()
+		try {
+			const b = await context.newPage()
+			await reset(b)
+			const a = await context.newPage()
+			await openSale(a)
+
+			// B's snapshot predates A's claim and stays at 50: it holds no live
+			// subscription to the pool. Any classification that trusts this
+			// number, or the idempotent replay's identical body, mislabels B's
+			// click as a fresh claim.
+			await expect(b.getByTestId('coupon-pool')).toHaveText('50')
+
+			await a.getByTestId('coupon-claim').click()
+			await expect(a.getByTestId('coupon-result')).toHaveText(/Claimed:.*SAVE20/)
+			await expect(a.getByTestId('coupon-pool')).toHaveText('49')
+
+			await b.getByTestId('coupon-claim').click()
+			await expect(b.getByTestId('coupon-result')).toHaveText(/Already claimed:.*SAVE20/)
+			// And the pool moved exactly once across both tabs.
+			await expect(b.getByTestId('coupon-pool')).toHaveText('49')
+			await a.reload()
+			await waitForWS(a)
+			await expect(a.getByTestId('coupon-pool')).toHaveText('49')
+		} finally {
+			await context.close()
+		}
+	})
+
 	test('two tabs converge on concurrent stock changes and a cluster-wide reset', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()

@@ -145,17 +145,24 @@
 		if (couponBusy) return
 		couponBusy = true
 		try {
-			const poolBefore = state.couponPoolRemaining
+			// Ask the server whether this identity already holds the coupon,
+			// immediately before claiming. Neither of the two locally available
+			// signals can answer it: this tab's snapshot goes stale the moment
+			// another tab on the same identity claims, and `live.idempotent`
+			// replays the FIRST call's body, so the response a duplicate
+			// receives is byte-identical to the one the fresh claim got - pool
+			// number included. Only a read taken now distinguishes them.
+			let heldBefore = state.alreadyClaimed
+			try {
+				const authoritative = await myFlashState()
+				heldBefore = authoritative.alreadyClaimed
+				state = { ...state, ...authoritative }
+			} catch {
+				// Probe failed: fall back to this tab's own belief, which is
+				// right for the single-tab case.
+			}
 			const result = await claimCoupon()
-			// `live.idempotent` returns the cached first response for the
-			// same userId; the second call resolves with the same shape.
-			// A FRESH claim decrements the pool below what this tab already
-			// saw; a cached replay carries a pool value at or above it. That
-			// holds across tabs (a tab opened after the claim seeds the
-			// decremented pool), where a per-tab claimed flag would mislabel
-			// the duplicate as fresh.
-			const duplicate = state.alreadyClaimed || result.poolRemaining >= poolBefore
-			couponResult = duplicate
+			couponResult = heldBefore
 				? { kind: 'duplicate', code: result.code, poolRemaining: result.poolRemaining }
 				: { kind: 'ok', code: result.code, poolRemaining: result.poolRemaining }
 			state = { ...state, alreadyClaimed: true, couponPoolRemaining: result.poolRemaining }
@@ -316,10 +323,13 @@
 		{/each}
 	</section>
 
-	<!-- Fixed-height slot: the outcome appearing must not shove the page. -->
-	<div class="min-h-10">
+	<!-- A FIXED slot, not a minimum. min-h-10 reserved one line, so a longer
+	     outcome that wrapped at narrow rungs still grew the box and shoved the
+	     stress panel down. The box is now a constant height at every rung and a
+	     long message scrolls inside it. -->
+	<div class="h-16" data-testid="buy-outcome-slot">
 		{#if lastOutcome}
-			<div class="alert {outcomeAlert(lastOutcome.kind)} py-2" data-testid="buy-outcome">
+			<div class="alert {outcomeAlert(lastOutcome.kind)} py-2 h-full items-start overflow-y-auto" data-testid="buy-outcome">
 				<span class="text-sm">
 					<strong data-testid="buy-outcome-kind">{outcomeLabel(lastOutcome.kind)}</strong>
 					{#if lastOutcome.detail} - {lastOutcome.detail}{/if}
