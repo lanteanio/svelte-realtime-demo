@@ -39,6 +39,7 @@
 	let mode = $state('succeed')
 	let busy = $state(false)
 	let lastError = $state('')
+	let clearError = $state('')
 	// Takeover failures land on the row that caused them, not in the form.
 	let rowErrors = $state({})
 	// Liveness: when the 1Hz stats tick last arrived.
@@ -47,7 +48,14 @@
 	$effect(() => {
 		const offs = [
 			jobsList.subscribe((v) => { list = Array.isArray(v) ? v : [] }),
-			jobsStats.subscribe((v) => { stats = v ?? stats; lastTickAt = Date.now() })
+			// Only a real snapshot counts as a tick. The store emits undefined
+			// synchronously on subscribe, and stamping that moment claimed a live
+			// 1Hz tick before the stream had delivered anything at all.
+			jobsStats.subscribe((v) => {
+				if (v == null) return
+				stats = v
+				lastTickAt = Date.now()
+			})
 		]
 		return () => { for (const off of offs) off() }
 	})
@@ -98,10 +106,14 @@
 	async function handleClear() {
 		if (!available) return
 		if (!confirmDestructive('Clear all shared jobs?')) return
+		clearError = ''
 		try {
 			await clearJobs()
 		} catch (err) {
-			lastError = err?.message ?? String(err)
+			// Scoped to the Clear control's own surface: routing this into
+			// lastError put a clear-all failure inside the enqueue form, which
+			// had nothing to do with it.
+			clearError = err?.message ?? String(err)
 		}
 	}
 
@@ -212,14 +224,6 @@
 					>
 						{busy ? 'Enqueuing...' : 'Enqueue'}
 					</button>
-					<button
-						type="button"
-						class="btn btn-outline btn-error btn-sm"
-						onclick={handleClear}
-						data-testid="jobs-clear-button"
-					>
-						Clear all
-					</button>
 				</div>
 				<p class="text-xs opacity-60">
 					Fence mirror in Redis: <span data-testid="fence-status">{fenceEnabled ? 'enabled' : 'disabled (no REDIS_URL)'}</span>.
@@ -233,7 +237,23 @@
 
 		<div class="card bg-base-100 border border-base-300" data-testid="jobs-list">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Recent tasks ({list.length})</h2>
+				<!-- Clear all lives with the list it clears, not in the enqueue
+				     form, and reports its own failures here rather than into the
+				     unrelated form's error slot. -->
+				<div class="flex flex-wrap items-baseline justify-between gap-2">
+					<h2 class="card-title text-sm">Recent tasks ({list.length})</h2>
+					<button
+						type="button"
+						class="btn btn-outline btn-error btn-sm pointer-coarse:min-h-11"
+						onclick={handleClear}
+						data-testid="jobs-clear-button"
+					>
+						Clear all
+					</button>
+				</div>
+				{#if clearError}
+					<p class="text-xs text-error" data-testid="jobs-clear-error">{clearError}</p>
+				{/if}
 				{#if list.length === 0}
 					<p class="text-base-content/70 text-xs" data-testid="jobs-list-empty">
 						No tasks yet. Enqueue one above - try a 10s duration so you have

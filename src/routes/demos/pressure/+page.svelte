@@ -244,7 +244,7 @@
 			<!-- The clear control lives with the log it clears. -->
 			<div class="flex items-center justify-between gap-2">
 				<h2 class="card-title text-sm">Shed log ({shedRows.length})</h2>
-				<button class="btn btn-sm btn-outline btn-error" onclick={handleClear} disabled={shedRows.length === 0} data-testid="clear-shed">
+				<button class="btn btn-sm btn-outline btn-error pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={shedRows.length === 0} data-testid="clear-shed">
 					Clear shed log
 				</button>
 			</div>

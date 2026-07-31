@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick, waitForWS } from './helpers.js'
+import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -108,6 +108,20 @@ test.describe('/demos/pressure', () => {
 			await expect(a.getByTestId('shed-row')).toHaveCount(0)
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('all five controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			// All five, not just the four the earlier sweep reached: Clear shed
+			// log was relocated into the log header and kept its btn-sm dress.
+			for (const id of ['load-100', 'load-1000', 'load-5000', 'simulate-shed', 'clear-shed']) {
+				await expectTouchTarget(page.getByTestId(id))
+			}
+		} finally {
+			await context.close()
 		}
 	})
 })

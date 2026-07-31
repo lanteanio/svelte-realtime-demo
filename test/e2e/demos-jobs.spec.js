@@ -140,4 +140,60 @@ test.describe('/demos/jobs', () => {
 			await context.close()
 		}
 	})
+
+	test('liveness stays honest before any stats snapshot arrives', async ({ page }) => {
+		// Let the socket connect and the page subscribe for real, but drop every
+		// stats snapshot on the way back. The store still emits its initial
+		// undefined synchronously at subscribe time - the moment the defect
+		// stamped as a live tick - while no actual snapshot ever lands, so the
+		// readout must keep saying it is waiting.
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((message) => server.send(message))
+			server.onMessage((message) => {
+				if (String(message).includes('demos:jobs:stats')) return
+				ws.send(message)
+			})
+		})
+		await page.goto('/demos/jobs')
+		await waitForWS(page)
+		const tick = page.getByTestId('jobs-last-tick')
+		await expect(tick).toBeVisible()
+		// Well past several 1Hz ticks, so a stamp would certainly have appeared.
+		await page.waitForTimeout(2_500)
+		await expect(tick).toHaveText('waiting for the first 1Hz tick...')
+		await expect(tick).not.toContainText('last tick')
+	})
+
+	test('a failed Clear all reports next to the list, not in the enqueue form', async ({ page }) => {
+		await gotoFreshJobs(page)
+
+		// Drop the socket the moment the clear RPC goes out, so the in-flight
+		// call rejects for real rather than being simulated.
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((message) => {
+				if (String(message).includes('clear')) {
+					ws.close()
+					return
+				}
+				server.send(message)
+			})
+			server.onMessage((message) => ws.send(message))
+		})
+		await page.reload()
+		await waitForWS(page)
+		await expect(page.getByTestId('jobs-enqueue-form')).toBeVisible()
+
+		await confirmAndClick(page.getByTestId('jobs-clear-button'))
+
+		const clearError = page.getByTestId('jobs-clear-error')
+		await expect(clearError).toBeVisible({ timeout: 15_000 })
+		await expect(clearError).not.toHaveText('')
+		// The enqueue form's own error slot must stay empty: routing a clear
+		// failure there was the defect.
+		await expect(page.getByTestId('jobs-error')).toHaveCount(0)
+		// And the message belongs to the list card that owns the control.
+		await expect(page.getByTestId('jobs-list').getByTestId('jobs-clear-error')).toBeVisible()
+	})
 })
