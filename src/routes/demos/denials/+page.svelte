@@ -176,11 +176,17 @@
 		</div>
 	</div>
 
-	<div class="grid @3xl:grid-cols-2 gap-4">
+	<!-- @2xl, not @3xl: the container is the viewport less the scrollbar below
+	     1024, so a 768px container rung engages at a 783px viewport and the old
+	     md: (768px viewport) intent was lost at exactly 768 - iPad portrait. -->
+	<div class="grid @2xl:grid-cols-2 gap-4" data-testid="denials-columns">
 		{#each [{ slug: 'acme', label: 'Acme', entries: acmeEntries, error: acmeError }, { slug: 'globex', label: 'Globex', entries: globexEntries, error: globexError }] as col (col.slug)}
 			<!-- The fixed height only earns its keep beside a sibling column;
 			     stacked cards hug their content. -->
-			<div class="card border border-base-300 @3xl:min-h-[20rem]" data-testid="card-{col.slug}">
+			<!-- Tracks the grid rung above: the equalising height is what keeps two
+			     side-by-side cards from jittering, so it must engage with the
+			     second column, not one rung later. -->
+			<div class="card border border-base-300 @2xl:min-h-[20rem]" data-testid="card-{col.slug}">
 				<div class="card-body py-3">
 					<div class="flex justify-between items-baseline">
 						<h2 class="card-title text-sm">{col.label} audit log</h2>

@@ -93,7 +93,9 @@
 		</p>
 	</header>
 
-	<div class="grid @3xl:grid-cols-2 gap-4">
+	<!-- @2xl, not @3xl: a 768px container rung engages at a 783px viewport, so
+	     the old md: (768px viewport) intent was lost at exactly 768. -->
+	<div class="grid @2xl:grid-cols-2 gap-4" data-testid="pressure-columns">
 		<div class="card bg-base-200">
 			<div class="card-body py-3">
 				<h2 class="card-title text-sm">Current pressure</h2>
