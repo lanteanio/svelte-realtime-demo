@@ -152,7 +152,6 @@
 		replayFillSeqs.clear()
 		pausedAtSeq = 0
 		fastPathReady = false
-		fastPathStartedAt = fastPath ? Date.now() : 0
 		resumedAt = 0
 		replayBurstCount = 0
 	}

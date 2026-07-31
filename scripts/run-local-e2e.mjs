@@ -56,6 +56,8 @@ try {
 				await startApp(targetPort, project === 'stress' || project === 'destroyer')
 			}
 
+			await waitForCronWarmup()
+
 			const env = {
 				...commonEnvironment(),
 				BASE_URL: `http://127.0.0.1:${targetPort}`,
@@ -195,6 +197,31 @@ async function startApp(port, production = false) {
 			return false
 		}
 	}, 120_000)
+}
+
+/**
+ * The from-seq demo renders rows only after its leader-elected 1Hz cron has
+ * written events into the freshly flushed Redis keyspace, and leadership can
+ * take several seconds to settle after boot. A spec that opens that page
+ * right away would stare at an empty durable store for its whole readiness
+ * budget. Gate each tier on the first two ticks instead of making every spec
+ * pad its own timeout for a one-time boot race.
+ */
+async function waitForCronWarmup() {
+	await waitFor('from-seq cron warmup', async () => {
+		const output = await capture('docker', ['exec', redisName, 'redis-cli', 'GET', 'demos:fromseq:next'])
+		return Number(output.trim()) >= 2
+	}, 90_000)
+}
+
+function capture(command, args) {
+	return new Promise((resolve, reject) => {
+		const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'ignore'] })
+		let out = ''
+		child.stdout.on('data', (chunk) => { out += chunk })
+		child.once('error', reject)
+		child.once('exit', () => resolve(out))
+	})
 }
 
 async function waitFor(label, probe, timeout = 60_000) {
