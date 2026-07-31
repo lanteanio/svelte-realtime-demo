@@ -79,7 +79,8 @@ function sinkOrigin() {
  * The outbound webhook. Fires on every publish to the orders topic
  * (leader-gated across the cluster). Body is the default
  * `{ event, data }`; the signature rides `x-webhook-signature` as
- * `sha256=<hex>` over the raw body.
+ * `sha256=<hex>` over `<x-webhook-timestamp>.<rawBody>`, so the
+ * receiver bounds freshness against its own clock.
  */
 export const orderEvents = live.webhooks.outbound([TOPICS.demoOutboundOrders], {
 	url: () => `${sinkOrigin()}/api/demos/webhook-sink`,

@@ -30,6 +30,9 @@ export const joinBoard = live(async (ctx, boardId) => {
 		await cursor.attach(ctx.ws, topic, ctx.platform)
 	} catch (error) {
 		if (error instanceof LiveError) throw error
+		// cursor.attach authorizes before granting (extensions next.63) and
+		// throws SUBSCRIBE_DENIED on refusal - a denial, not an outage.
+		if (error?.code === 'SUBSCRIBE_DENIED') throw new LiveError('FORBIDDEN', 'Not allowed on this board')
 		throw new LiveError('REALTIME_UNAVAILABLE', 'Realtime presence is temporarily unavailable')
 	}
 })

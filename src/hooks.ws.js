@@ -160,9 +160,17 @@ live.admission({
  *   matching bearer ADMIN_TOKEN; unset token = nothing is ever admitted.
  * - protocolVersion: stale-bundle signal; pairs with configure({
  *   protocolVersion }) in the root layout.
+ * - privacySecret: keys the differential-privacy noise stream for
+ *   /demos/privacy's hybrid aggregate (required at init since realtime
+ *   next.90; without it a subscriber could recompute and subtract the
+ *   noise). Shared across replicas so they agree on the same draws. The
+ *   dev fallback keeps zero-config local runs booting; real deployments
+ *   must override DEMO_PRIVACY_SECRET or the noise is recomputable by
+ *   anyone who reads this repo.
  */
 const realtimeConfig = realtime({
 	tenant: (user) => user?.tenant ?? null,
+	privacySecret: env.DEMO_PRIVACY_SECRET || 'demo-privacy-noise-secret',
 	admin: {
 		requires: (request) =>
 			Boolean(env.ADMIN_TOKEN) && request.headers.get('authorization') === `Bearer ${env.ADMIN_TOKEN}`
@@ -296,6 +304,11 @@ export async function init({ platform }) {
 	// purge per-user rows. Entries without purgeUser (e.g. idempotency
 	// before Postgres activation) are skipped by the composer; the DLQ
 	// stamps data.userId at capture via its forgetUserId extractor.
+	// The second argument hands the composer the same Redis client the
+	// app stashes on platform.redis, so purgeUser also evicts the user
+	// from the cluster-wide room-owner hashes and presence rosters and
+	// reports each owner succession - which realtime (next.89+) then
+	// announces on the affected rooms' :owner streams.
 	configureForget({
 		store: createForgetStore({
 			registry,
@@ -306,7 +319,7 @@ export async function init({ platform }) {
 			idempotency: idempotencyStore(),
 			forgetDraftIdempotency,
 			deadLetter: webhookControls.deadLetter
-		}),
+		}, { redis: redis.redis }),
 		platform
 	})
 	// Outbound-webhook plane: fleet-shared retry budget + endpoint breaker

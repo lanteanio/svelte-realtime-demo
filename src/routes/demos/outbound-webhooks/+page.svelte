@@ -249,10 +249,13 @@
 			<a class="link" href="https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/outbound-webhooks.js">outbound-webhooks.js</a>.
 		</p>
 		<p>
-			The body is signed with HMAC-SHA256
-			(<code>x-webhook-signature: sha256=&lt;hex&gt;</code>, verified
-			timing-safe by the sink, rotation-ready via comma-separated
-			entries). Delivery is at-least-once with a stable
+			Each delivery is signed with a timestamped HMAC-SHA256:
+			<code>x-webhook-signature: sha256=&lt;hex&gt;</code> over
+			<code>&lt;x-webhook-timestamp&gt;.&lt;body&gt;</code>, so a
+			captured delivery stops verifying once the freshness window
+			passes (the sink verifies with the package's own
+			<code>verifyWebhookSignature</code>: timing-safe,
+			rotation-ready via comma-separated entries). Delivery is at-least-once with a stable
 			<code>idempotency-key</code>; the retry budget, endpoint breaker,
 			and dead-letter store are Redis-backed and fleet-shared via
 			<code>configureWebhooks</code>, and <code>configureCron(&#123;

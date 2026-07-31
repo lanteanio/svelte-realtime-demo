@@ -93,6 +93,10 @@ services:
       # unguessable across deploys.
       DEMO_OUTBOUND_WEBHOOK_SECRET: ${DEMO_OUTBOUND_WEBHOOK_SECRET:-}
       ROOMS_CODE_SECRET: ${ROOMS_CODE_SECRET:-}
+      # Keys the /demos/privacy differential-privacy noise stream; with the
+      # dev fallback the noise is recomputable from the repo. Same value on
+      # every replica so their draws agree.
+      DEMO_PRIVACY_SECRET: ${DEMO_PRIVACY_SECRET:-}
       # Cursor per-connection and per-topic throttle, in milliseconds. Default
       # 8ms = ~120Hz both layers; set to 16 / 33 to match a 60Hz / 30Hz client
       # publish rate (CURSOR_INTERVAL_MS on the destroyer side). The two must

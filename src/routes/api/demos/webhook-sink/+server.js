@@ -10,13 +10,16 @@
  * demonstration that the receiver of an outbound webhook is just a
  * plain HTTP endpoint.
  *
- * Signature verification follows the documented receiver contract: the
- * header carries one or more comma-separated `sha256=<hex>` entries
- * (two during a key rotation, current key first); accept when ANY
- * entry matches, comparing timing-safe. An invalid signature is still
- * recorded (with `sigValid: false`) rather than rejected, so the page
- * can SHOW the verification result - a real receiver would return 401
- * and process nothing.
+ * Signature verification follows the documented receiver contract via
+ * the sender package's own `verifyWebhookSignature`: the signed
+ * material is `<x-webhook-timestamp>.<rawBody>` (timestamped so a
+ * captured delivery stops verifying once the freshness window passes),
+ * the header carries one or more comma-separated `sha256=<hex>` entries
+ * (several during a key rotation), any entry may match, and the compare
+ * is constant-time. An invalid signature is still recorded (with
+ * `sigValid: false`) rather than rejected, so the page can SHOW the
+ * verification result - a real receiver would return 401 and process
+ * nothing.
  *
  * Failure mode: when the delivered order carries `data.mode === 'fail'`
  * the sink answers 500, standing in for a receiver outage. The sender
@@ -32,8 +35,8 @@
  * anyway to make the signature demonstration honest.
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import { json } from '@sveltejs/kit'
+import { verifyWebhookSignature } from 'svelte-adapter-uws/plugins/webhooks'
 import { redis } from '$lib/server/redis'
 
 const RECEIPTS_KEY = 'demos:outbound:receipts'
@@ -41,29 +44,16 @@ const RECEIPTS_MAX = 30
 
 const WEBHOOK_SECRET = process.env.DEMO_OUTBOUND_WEBHOOK_SECRET || 'demo-outbound-secret'
 
-/**
- * True when any comma-separated `sha256=<hex>` entry in the header
- * matches the HMAC-SHA256 of the raw body under the shared secret.
- * Length mismatch is itself a failure (timingSafeEqual requires
- * equal-length buffers), checked before the constant-time compare.
- */
-function signatureValid(body, header) {
-	if (typeof header !== 'string' || header.length === 0) return false
-	const expected = createHmac('sha256', WEBHOOK_SECRET).update(body).digest('hex')
-	const expectedBuf = Buffer.from(expected, 'utf8')
-	for (const entry of header.split(',')) {
-		const hex = entry.trim().startsWith('sha256=') ? entry.trim().slice(7) : entry.trim()
-		if (hex.length !== expected.length) continue
-		if (timingSafeEqual(Buffer.from(hex, 'utf8'), expectedBuf)) return true
-	}
-	return false
-}
-
 export async function POST({ request }) {
-	const body = await request.text()
-	const sigValid = signatureValid(body, request.headers.get('x-webhook-signature'))
+	// The signature covers the exact bytes the sender shipped, so hand
+	// the verifier the raw buffer and decode for JSON only afterwards.
+	const rawBody = await request.arrayBuffer()
+	const sigValid = verifyWebhookSignature(Object.fromEntries(request.headers), rawBody, {
+		secret: WEBHOOK_SECRET
+	})
 	const idempotencyKey = request.headers.get('idempotency-key') ?? null
 
+	const body = Buffer.from(rawBody).toString('utf8')
 	let payload = null
 	try { payload = JSON.parse(body) } catch { /* non-JSON body: receipt records nulls */ }
 	const failRequested = payload?.data?.mode === 'fail'

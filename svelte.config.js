@@ -31,6 +31,12 @@ const config = {
 			readinessCheckPath: '/readyz',
 			websocket: {
 				upgradeRateLimit: 0,
+				// Same rationale as upgradeRateLimit: the stress harness drives
+				// 1000+ connections from one IP, and the auth-preflight door
+				// (default 30 per 10s per IP since adapter next.87) would refuse
+				// most of them. For production behind real client IPs, set both
+				// to reasonable values instead.
+				authPathRateLimit: 0,
 				upgradeAdmission: {
 					// Cap in-flight upgrades. 4000 keeps the 1000-bot stress harness
 					// (plus 4x burst-room above it) entirely on the cheap shed path.
