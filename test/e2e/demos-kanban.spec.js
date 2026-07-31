@@ -11,6 +11,7 @@ import {
 	waitForCard,
 	waitInColumn
 } from './kanban-helpers.js'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -162,6 +163,20 @@ test.describe('/demos/kanban', () => {
 			await ctxA.setOffline(false).catch(() => {})
 			for (const id of ids) await deleteCard(b, id)
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		let id = ''
+		try {
+			await openKanban(page)
+			id = await addCard(page, 'todo', `e2e-touch-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+			await expectTouchTarget(page.getByTestId(`kb-move-right-${id}`))
+			await expectTouchTarget(page.getByTestId(`kb-delete-${id}`))
+		} finally {
+			if (id) await deleteCard(page, id)
+			await context.close()
 		}
 	})
 })

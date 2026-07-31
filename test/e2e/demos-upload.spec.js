@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { sharedIdentityState } from './helpers.js'
+import { expectTouchTarget, openTouchPage, sharedIdentityState } from './helpers.js'
 import {
 	clearUploads,
 	fileRow,
@@ -121,6 +121,17 @@ test.describe('/demos/upload', () => {
 			await clearUploads(a)
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openUpload(page)
+			await expectTouchTarget(page.getByTestId('file-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('clear-button'))
+		} finally {
+			await context.close()
 		}
 	})
 })

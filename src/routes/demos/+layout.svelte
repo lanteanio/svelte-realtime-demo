@@ -184,6 +184,15 @@
 		border-left-color: var(--color-primary);
 		font-weight: 600;
 	}
+	/* Coarse pointers: pad the nav links so line-height plus padding reaches the 44px touch floor. */
+	@media (pointer: coarse) {
+		.demos-link {
+			padding: 0.75rem;
+		}
+		.demos-home-link {
+			padding: 0.875rem 0.75rem;
+		}
+	}
 	.demos-content {
 		min-width: 0;
 		flex: 1 1 0;

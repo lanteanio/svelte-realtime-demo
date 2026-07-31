@@ -106,7 +106,8 @@
 				push registration already exist just from having this tab open.
 			</p>
 			<div>
-				<button class="btn btn-sm btn-primary" onclick={handleLeaveTraces} disabled={busyLeave} data-testid="fg-leave-traces">
+				<!-- Compact on fine pointers, 44px floor where taps land. -->
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleLeaveTraces} disabled={busyLeave} data-testid="fg-leave-traces">
 					{busyLeave ? 'Writing...' : 'Leave traces'}
 				</button>
 			</div>
@@ -135,7 +136,7 @@
 				map <code>live.forget</code> returns in step 3.
 			</p>
 			<div class="flex items-center gap-3">
-				<button class="btn btn-sm" onclick={handleAudit} disabled={busyAudit} data-testid="fg-audit">
+				<button class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleAudit} disabled={busyAudit} data-testid="fg-audit">
 					{busyAudit ? 'Counting...' : 'Audit my traces'}
 				</button>
 				{#if audit}
@@ -152,7 +153,7 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">3. Forget me</h2>
 			<div>
-				<button class="btn btn-sm btn-outline btn-error" onclick={handleForget} disabled={busyForget} data-testid="fg-forget">
+				<button class="btn btn-sm btn-outline btn-error pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleForget} disabled={busyForget} data-testid="fg-forget">
 					{busyForget ? 'Erasing...' : 'Forget me'}
 				</button>
 			</div>

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 import {
 	RESTORE, NAV, setSpeed, setRawSpeed, setBias, expectHydrated, rows, total,
 	leaderShare, populated, dominant, spread, describeShare,
@@ -654,6 +654,20 @@ test.describe('/demos/topk', () => {
 		} finally {
 			// Best-effort AND bounded - see restoreDefaults.
 			await restoreDefaults(page)
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			// Full-width slider: height is the constrained axis.
+			await expectTouchTarget(page.getByTestId('speed-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('bias-uniform'))
+			await expectTouchTarget(page.getByTestId('bias-hot'))
+			await expectTouchTarget(page.getByTestId('bias-monopoly'))
+		} finally {
+			await context.close()
 		}
 	})
 })

@@ -174,8 +174,9 @@
 											class="inline-block w-2 h-2 rounded-full shrink-0"
 											style:background={card?.color ?? '#888888'}
 										></span>
+										<!-- Per-card controls: compact on fine pointers, 44px where taps land. -->
 										<input
-											class="input input-ghost input-xs flex-1 min-w-0 px-1"
+											class="input input-ghost input-xs flex-1 min-w-0 px-1 pointer-coarse:min-h-11"
 											value={card?.title ?? ''}
 											disabled={board.readOnly}
 											oninput={(e) => renameCard(id, e.currentTarget.value)}
@@ -184,7 +185,7 @@
 									</div>
 									<div class="flex justify-between">
 										<button
-											class="btn btn-ghost btn-xs"
+											class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 											onclick={() => moveCard(col.id, index, -1)}
 											disabled={board.readOnly || col.id === COLUMN_IDS[0]}
 											aria-label="Move left"
@@ -193,7 +194,7 @@
 											&larr;
 										</button>
 										<button
-											class="btn btn-ghost btn-xs opacity-60"
+											class="btn btn-ghost btn-xs opacity-60 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 											onclick={() => deleteCard(col.id, index, id)}
 											disabled={board.readOnly}
 											aria-label="Delete card"
@@ -202,7 +203,7 @@
 											&#10005;
 										</button>
 										<button
-											class="btn btn-ghost btn-xs"
+											class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 											onclick={() => moveCard(col.id, index, 1)}
 											disabled={board.readOnly || col.id === COLUMN_IDS[COLUMN_IDS.length - 1]}
 											aria-label="Move right"
@@ -223,7 +224,7 @@
 						class="flex gap-1"
 					>
 						<input
-							class="input input-bordered input-sm flex-1 min-w-0 bg-base-200"
+							class="input input-bordered input-sm flex-1 min-w-0 bg-base-200 pointer-coarse:min-h-11"
 							bind:value={drafts[col.id]}
 							disabled={board.readOnly}
 							placeholder="Add a card..."
@@ -231,7 +232,7 @@
 						/>
 						<button
 							type="submit"
-							class="btn btn-primary btn-sm"
+							class="btn btn-primary btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 							disabled={board.readOnly || !drafts[col.id].trim()}
 							data-testid="kb-add-button-{col.id}"
 						>

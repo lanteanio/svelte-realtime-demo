@@ -129,24 +129,25 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Schedule (one pending alarm per room - scheduling replaces it)</h2>
 			<div class="flex flex-wrap gap-2 items-end">
-				<button class="btn btn-sm btn-primary" onclick={() => handleSchedule(10)} disabled={busy} data-testid="al-schedule-10">+10s</button>
-				<button class="btn btn-sm btn-primary" onclick={() => handleSchedule(30)} disabled={busy} data-testid="al-schedule-30">+30s</button>
-				<button class="btn btn-sm btn-primary" onclick={() => handleSchedule(120)} disabled={busy} data-testid="al-schedule-120">+2min</button>
+				<!-- Compact on fine pointers; a 44px floor keeps adjacent presets apart under a thumb. -->
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleSchedule(10)} disabled={busy} data-testid="al-schedule-10">+10s</button>
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleSchedule(30)} disabled={busy} data-testid="al-schedule-30">+30s</button>
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleSchedule(120)} disabled={busy} data-testid="al-schedule-120">+2min</button>
 				<form onsubmit={(e) => { e.preventDefault(); handleSchedule(Number(customSeconds)) }} class="flex gap-2 items-end">
 					<label class="form-control w-28">
 						<span class="label-text text-xs">Custom (2-600s)</span>
 						<input
 							type="number"
-							class="input input-bordered input-sm"
+							class="input input-bordered input-sm pointer-coarse:min-h-11"
 							min="2" max="600" step="1"
 							bind:value={customSeconds}
 							disabled={busy}
 							data-testid="al-custom-seconds"
 						/>
 					</label>
-					<button type="submit" class="btn btn-sm" disabled={busy} data-testid="al-schedule-custom">Schedule</button>
+					<button type="submit" class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="al-schedule-custom">Schedule</button>
 				</form>
-				<button class="btn btn-sm btn-ghost" onclick={handleCancel} disabled={busy} data-testid="al-cancel">Cancel pending</button>
+				<button class="btn btn-sm btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleCancel} disabled={busy} data-testid="al-cancel">Cancel pending</button>
 			</div>
 			{#if lastError}
 				<p class="text-xs text-error" data-testid="al-error">{lastError}</p>

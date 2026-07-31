@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/flags - two live.flag values
 // (banner {enabled, text}, dark-launch {enabled, rolloutPct}) set through
@@ -288,6 +288,20 @@ test.describe('/demos/flags', () => {
 			await expect(a.getByTestId('fl-promo-banner')).toHaveCount(0, { timeout: 10_000 })
 		} finally {
 			await ctxA.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			// The toggle's tap surface is its wrapping label, not the widget.
+			await expectTouchTarget(page.getByTestId('fl-banner-toggle').locator('..'))
+			await expectTouchTarget(page.getByTestId('fl-dark-toggle').locator('..'))
+			await expectTouchTarget(page.getByTestId('fl-banner-text'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('fl-rollout'), { minWidth: 0 })
+		} finally {
+			await context.close()
 		}
 	})
 })

@@ -139,8 +139,10 @@
 				</div>
 			</div>
 			<div class="flex gap-2" role="group" aria-label="Organization">
+				<!-- A mis-tap costs a full reload: compact on fine pointers,
+				     44px where taps land. -->
 				<button
-					class="btn btn-sm"
+					class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 					class:btn-primary={me.org === 'acme'}
 					onclick={() => switchTo('acme')}
 					disabled={switching}
@@ -150,7 +152,7 @@
 					Acme
 				</button>
 				<button
-					class="btn btn-sm"
+					class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 					class:btn-primary={me.org === 'globex'}
 					onclick={() => switchTo('globex')}
 					disabled={switching}

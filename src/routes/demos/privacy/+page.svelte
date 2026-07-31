@@ -101,8 +101,10 @@
 			<h2 class="card-title text-sm">How is your day? (each submission feeds both aggregates)</h2>
 			<div class="flex flex-wrap gap-2">
 				{#each MOODS as m (m.score)}
+					<!-- The page's single participatory act: keep the compact dress on
+					     fine pointers, meet the 44px platform floor where taps land. -->
 					<button
-						class="btn btn-sm"
+						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						class:btn-primary={submittedScore === m.score}
 						onclick={() => handleSubmit(m.score)}
 						disabled={submitting}

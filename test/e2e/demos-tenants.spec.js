@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -144,5 +145,20 @@ test.describe('/demos/tenants', () => {
 		await page.reload()
 		await expect(page.getByTestId('tn-active-tenant')).toHaveText('none', { timeout: 10_000 })
 		await waitForWsConfirmed(page)
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			await expectTouchTarget(page.getByTestId('tn-set-acme'))
+			await expectTouchTarget(page.getByTestId('tn-set-globex'))
+			await expectTouchTarget(page.getByTestId('tn-clear'))
+			// Flex-grown composer input: height is the constrained axis.
+			await expectTouchTarget(page.getByTestId('tn-note-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('tn-note-submit'))
+		} finally {
+			await context.close()
+		}
 	})
 })

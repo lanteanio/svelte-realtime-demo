@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick, waitForWS } from './helpers.js'
+import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 const PRODUCTS = [
 	{ name: 'bagel', price: 4 },
@@ -190,6 +190,20 @@ test.describe('/demos/effect', () => {
 			await clearFeeds(b)
 			await expectCounts(a, 0)
 			await expectCounts(b, 0)
+		} finally {
+			await context.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openEffect(page)
+			await expectTouchTarget(page.getByTestId('place-product'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('place-qty'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('place-submit'))
+			await expectTouchTarget(page.getByTestId('burst'))
+			await expectTouchTarget(page.getByTestId('clear'))
 		} finally {
 			await context.close()
 		}

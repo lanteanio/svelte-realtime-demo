@@ -157,17 +157,18 @@
 					<form class="space-y-1" onsubmit={(e) => { e.preventDefault(); joinTable(newId) }}>
 						<label for="lob-new-id" class="block text-xs font-medium">Table number</label>
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(8rem,1fr)_auto]">
+							<!-- Compact on fine pointers, 44px where taps land. -->
 							<input
 								id="lob-new-id"
-								class="input input-bordered input-sm w-full min-w-0 font-mono"
+								class="input input-bordered input-sm w-full min-w-0 font-mono pointer-coarse:min-h-11"
 								bind:value={newId}
 								placeholder="Number"
 								inputmode="numeric"
 								data-testid="lob-new-id"
 							/>
 							<div class="flex gap-2">
-								<button type="button" class="btn btn-sm btn-ghost flex-1" onclick={randomId} data-testid="lob-random">random</button>
-								<button type="submit" class="btn btn-sm btn-primary flex-1" data-testid="lob-create">Join</button>
+								<button type="button" class="btn btn-sm btn-ghost flex-1 pointer-coarse:min-h-11" onclick={randomId} data-testid="lob-random">random</button>
+								<button type="submit" class="btn btn-sm btn-primary flex-1 pointer-coarse:min-h-11" data-testid="lob-create">Join</button>
 							</div>
 						</div>
 					</form>
@@ -176,13 +177,13 @@
 						<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(6rem,1fr)_auto]">
 							<input
 								id="lob-code-input"
-								class="input input-bordered input-sm w-full min-w-0 font-mono"
+								class="input input-bordered input-sm w-full min-w-0 font-mono pointer-coarse:min-h-11"
 								bind:value={codeInput}
 								placeholder="Code"
 								maxlength="8"
 								data-testid="lob-code-input"
 							/>
-							<button type="submit" class="btn btn-sm" data-testid="lob-code-join">Join by code</button>
+							<button type="submit" class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11" data-testid="lob-code-join">Join by code</button>
 						</div>
 					</form>
 				</div>
@@ -203,7 +204,7 @@
 								{/if}
 								<span class="opacity-60 text-xs ml-auto" data-testid="lob-room-count">{t.count}/{t.meta?.cap ?? '-'}</span>
 								<button
-									class="btn btn-xs"
+									class="btn btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 									onclick={() => joinTable(t.key)}
 									disabled={joinedId === t.key}
 									data-testid={`lob-room-join-${t.key}`}
@@ -232,7 +233,7 @@
 						{:else if owner?.key}
 							<span class="badge badge-sm badge-ghost" data-testid="lob-owner-badge">owned by {owner.key.slice(0, 8)}</span>
 						{/if}
-						<button class="btn btn-xs btn-ghost ml-auto" onclick={leaveTable} data-testid="lob-leave">leave</button>
+						<button class="btn btn-xs btn-ghost ml-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={leaveTable} data-testid="lob-leave">leave</button>
 					</div>
 
 					{#if streamError}
@@ -265,18 +266,18 @@
 
 					<form onsubmit={handleSay} class="flex gap-2">
 						<input
-							class="input input-bordered input-sm flex-1"
+							class="input input-bordered input-sm flex-1 pointer-coarse:min-h-11"
 							bind:value={draft}
 							maxlength="140"
 							placeholder="Say something..."
 							disabled={sending}
 							data-testid="lob-composer-input"
 						/>
-						<button type="submit" class="btn btn-sm btn-primary" disabled={sending || !draft.trim()} data-testid="lob-send">Send</button>
+						<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={sending || !draft.trim()} data-testid="lob-send">Send</button>
 					</form>
 
 					<button
-						class="btn btn-sm btn-error btn-outline"
+						class="btn btn-sm btn-error btn-outline pointer-coarse:min-h-11"
 						onclick={handleClose}
 						disabled={!isOwner}
 						data-testid="lob-close"

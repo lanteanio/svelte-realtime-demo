@@ -284,9 +284,10 @@
 				</label>
 				<label class="form-control flex-1 min-w-[10rem]">
 					<span class="label-text text-xs">Schedule ({scheduleSec}s)</span>
+					<!-- Compact dress on fine pointers, 44px floor where taps land. -->
 					<input
 						type="range"
-						class="range range-sm"
+						class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 						min="0" max="30" step="1"
 						bind:value={scheduleSec}
 						data-testid="schedule-input"
@@ -295,7 +296,7 @@
 			</div>
 			<form onsubmit={(e) => { e.preventDefault(); handleSend() }} class="flex gap-2">
 				<input
-					class="input input-bordered input-sm flex-1"
+					class="input input-bordered input-sm flex-1 pointer-coarse:min-h-11"
 					bind:value={text}
 					placeholder="Your message..."
 					maxlength="200"
@@ -303,7 +304,7 @@
 				/>
 				<button
 					type="submit"
-					class="btn btn-sm btn-primary"
+					class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 					disabled={busy || recipients.length === 0 || !text.trim()}
 					data-testid="send-button"
 				>
@@ -337,7 +338,7 @@
 							<span class="opacity-70">{entry.fromUserName} &rarr; {entry.toUserName}:</span>
 							<span class="flex-1 truncate">{entry.text}</span>
 							<button
-								class="btn btn-ghost btn-xs"
+								class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 								onclick={() => handleCancel(entry.id)}
 								data-testid="scheduled-cancel-{entry.id}"
 							>

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 import {
 	expectMembership,
 	expectNoLobbyErrors,
@@ -182,6 +183,24 @@ test.describe('/demos/lobbies', () => {
 				b.getByTestId('lob-leave').click({ timeout: 2_000 }).catch(() => {})
 			])
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		const id = freshTableId()
+		try {
+			await openLobbies(page)
+			await joinById(page, id)
+			// A row exists now: its btn-xs join control and the joined-table
+			// leave control are the near-the-floor targets the audit flagged.
+			await expectTouchTarget(roomRow(page, id).getByTestId(`lob-room-join-${id}`))
+			await expectTouchTarget(page.getByTestId('lob-leave'))
+			// Flex-grown form submit: height is the constrained axis.
+			await expectTouchTarget(page.getByTestId('lob-create'), { minWidth: 0 })
+		} finally {
+			await page.getByTestId('lob-leave').click({ timeout: 2_000 }).catch(() => {})
+			await context.close()
 		}
 	})
 })

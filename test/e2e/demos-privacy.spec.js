@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 import {
 	openPrivacy,
 	protectedSnapshot,
@@ -98,6 +99,18 @@ test.describe('/demos/privacy', () => {
 			for (const page of pages) await expect(page.getByTestId('pv-error')).toHaveCount(0)
 		} finally {
 			await Promise.allSettled(contexts.map((context) => context.close()))
+		}
+	})
+
+	test('mood buttons meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openPrivacy(page)
+			for (const score of [1, 2, 3, 4, 5]) {
+				await expectTouchTarget(page.getByTestId(`pv-submit-${score}`))
+			}
+		} finally {
+			await context.close()
 		}
 	})
 })

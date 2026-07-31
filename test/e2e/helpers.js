@@ -2,6 +2,8 @@
  * Shared helpers for E2E tests
  */
 
+import { expect } from '@playwright/test';
+
 /**
  * Wait for the WebSocket to be connected (green wifi icon visible).
  */
@@ -149,4 +151,39 @@ export async function waitForBoardReady(page) {
 	await page.locator('.loading').waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
 	await page.locator('h1').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
 	await page.waitForTimeout(500);
+}
+
+/**
+ * Open a coarse-pointer (touch) page for target-size assertions. The
+ * pointer-coarse: styles only apply on a genuinely coarse rung, so the
+ * helper asserts `(pointer: coarse)` matches before handing the page
+ * back - without that gate a fine-pointer context measures the compact
+ * desktop sizes and the assertion is vacuous in whichever direction.
+ * Caller closes the returned context.
+ */
+export async function openTouchPage(browser, { width = 390, height = 844 } = {}) {
+const context = await browser.newContext({
+		viewport: { width, height },
+		hasTouch: true,
+		isMobile: true
+	});
+	const page = await context.newPage();
+	await page.goto('about:blank');
+	expect(
+		await page.evaluate(() => matchMedia('(pointer: coarse)').matches),
+		'touch emulation must present a coarse pointer or every touch-target assertion is vacuous'
+	).toBe(true);
+	return { context, page };
+}
+
+/**
+ * Assert a control's rendered box meets the platform touch floor.
+ * 44px per Apple HIG / WCAG 2.5.8 AAA; pass minWidth: 0 for full-width
+ * controls where only height is the constrained axis.
+ */
+export async function expectTouchTarget(locator, { minWidth = 44, minHeight = 44 } = {}) {
+const box = await locator.boundingBox();
+	expect(box, 'control must be visible to measure').not.toBeNull();
+	if (minHeight > 0) expect(box.height, 'touch-target height').toBeGreaterThanOrEqual(minHeight);
+	if (minWidth > 0) expect(box.width, 'touch-target width').toBeGreaterThanOrEqual(minWidth);
 }

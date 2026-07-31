@@ -285,8 +285,9 @@
 					<div class="flex items-center gap-2 text-xs opacity-60">
 						<span data-testid={'product-sold-' + p.id}>sold: {p.sold}</span>
 					</div>
+					<!-- The racing CTA: compact on fine pointers, 44px where taps land. -->
 					<button
-						class="btn btn-sm btn-primary w-full"
+						class="btn btn-sm btn-primary w-full pointer-coarse:min-h-11"
 						onclick={() => handleBuy(p.id)}
 						disabled={p.soldOut || busyBuy.has(p.id)}
 						data-testid={'product-buy-' + p.id}

@@ -106,7 +106,9 @@
 			<h2 class="card-title text-sm">You are the operator</h2>
 
 			<div class="flex flex-wrap items-end gap-4">
-				<label class="flex items-center gap-2 cursor-pointer">
+				<!-- Compact dress on fine pointers, 44px floor where taps land; the
+				     label is the toggle's tap surface, so it carries the floor. -->
+				<label class="flex items-center gap-2 cursor-pointer pointer-coarse:min-h-11">
 					<input
 						type="checkbox"
 						class="toggle toggle-primary toggle-sm"
@@ -120,7 +122,7 @@
 				<label class="form-control flex-1 min-w-[14rem]">
 					<span class="label-text text-xs">Banner text (commits on blur / Enter)</span>
 					<input
-						class="input input-bordered input-sm"
+						class="input input-bordered input-sm pointer-coarse:min-h-11"
 						value={bannerDraft.text}
 						maxlength="120"
 						disabled={!ready}
@@ -131,7 +133,7 @@
 			</div>
 
 			<div class="flex flex-wrap items-end gap-4">
-				<label class="flex items-center gap-2 cursor-pointer">
+				<label class="flex items-center gap-2 cursor-pointer pointer-coarse:min-h-11">
 					<input
 						type="checkbox"
 						class="toggle toggle-primary toggle-sm"
@@ -148,7 +150,7 @@
 					</span>
 					<input
 						type="range"
-						class="range range-primary range-sm"
+						class="range range-primary range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 						min="0"
 						max="100"
 						step="1"

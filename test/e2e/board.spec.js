@@ -19,7 +19,7 @@ import {
 	positions,
 	setNoteColor
 } from './board-helpers.js'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -217,6 +217,18 @@ test.describe('/board/[slug]', () => {
 			await expectCardPresence(home, path, 0)
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close(), ctxHome.close()])
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await createFreshBoard(page, `Board touch ${Date.now()}`)
+			const note = await createNoteAt(page, 120, 150)
+			await expectTouchTarget(note.getByLabel('Pick color'))
+			await expectTouchTarget(note.getByLabel('Delete note'))
+		} finally {
+			await context.close()
 		}
 	})
 })

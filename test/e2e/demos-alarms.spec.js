@@ -8,6 +8,7 @@ import {
 	recentAlarms,
 	scheduleCustom
 } from './alarms-helpers.js'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -127,5 +128,18 @@ test.describe('/demos/alarms', () => {
 		await openAlarms(reopened)
 		await expectRecentAlarmCount(reopened, since, 1, 8_000)
 		await expect(reopened.getByTestId('al-pending-empty')).toBeVisible()
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openAlarms(page)
+			for (const id of ['al-schedule-10', 'al-schedule-30', 'al-schedule-120', 'al-schedule-custom', 'al-cancel']) {
+				await expectTouchTarget(page.getByTestId(id))
+			}
+			await expectTouchTarget(page.getByTestId('al-custom-seconds'), { minWidth: 0 })
+		} finally {
+			await context.close()
+		}
 	})
 })

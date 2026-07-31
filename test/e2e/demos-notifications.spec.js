@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/notifications - live.push
 // request/reply, a global scheduled queue drained by a 6-field live.cron,
@@ -313,6 +313,18 @@ test.describe('/demos/notifications', () => {
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			await expectTouchTarget(page.getByTestId('text-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('send-button'))
+			await expectTouchTarget(page.getByTestId('schedule-input'), { minWidth: 0 })
+		} finally {
+			await context.close()
 		}
 	})
 })

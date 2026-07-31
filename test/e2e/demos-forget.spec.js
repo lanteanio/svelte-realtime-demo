@@ -6,6 +6,7 @@ import {
 	leaveTraces,
 	openForget
 } from './forget-helpers.js'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -87,6 +88,19 @@ test.describe('/demos/forget', () => {
 		} finally {
 			await forget(page, 3)
 			await other.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openForget(page)
+			// Measure only; Forget me is behind a confirm dialog and must not be clicked here.
+			await expectTouchTarget(page.getByTestId('fg-leave-traces'))
+			await expectTouchTarget(page.getByTestId('fg-audit'))
+			await expectTouchTarget(page.getByTestId('fg-forget'))
+		} finally {
+			await context.close()
 		}
 	})
 })

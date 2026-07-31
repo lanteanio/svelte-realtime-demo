@@ -120,8 +120,10 @@
 					</div>
 				</div>
 				<div class="flex gap-2" role="group" aria-label="Tenant scope">
+					<!-- A mis-tap reloads into the wrong tenant scope: compact on
+					     fine pointers, 44px where taps land. -->
 					<button
-						class="btn btn-sm"
+						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						class:btn-primary={activeTenant === 'acme'}
 						onclick={() => switchTenant('acme')}
 						disabled={switching}
@@ -131,7 +133,7 @@
 						Acme
 					</button>
 					<button
-						class="btn btn-sm"
+						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						class:btn-primary={activeTenant === 'globex'}
 						onclick={() => switchTenant('globex')}
 						disabled={switching}
@@ -141,7 +143,7 @@
 						Globex
 					</button>
 					<button
-						class="btn btn-sm"
+						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						class:btn-primary={activeTenant === null}
 						onclick={() => switchTenant(null)}
 						disabled={switching}
@@ -192,7 +194,7 @@
 
 			<form onsubmit={(e) => { e.preventDefault(); handlePost() }} class="flex gap-2">
 				<input
-					class="input input-bordered input-sm flex-1"
+					class="input input-bordered input-sm flex-1 pointer-coarse:min-h-11"
 					bind:value={noteDraft}
 					maxlength="200"
 					placeholder="Leave a note for everyone in this scope..."
@@ -201,7 +203,7 @@
 				/>
 				<button
 					type="submit"
-					class="btn btn-sm btn-primary"
+					class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 					disabled={posting || !noteDraft.trim()}
 					data-testid="tn-note-submit"
 				>

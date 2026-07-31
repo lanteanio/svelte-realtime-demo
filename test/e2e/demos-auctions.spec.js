@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 
 const RUN = `e2e-${Date.now()}`
 
@@ -323,6 +324,20 @@ test.describe('/demos/auctions', () => {
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await page.goto('/demos/auctions')
+			await expectTouchTarget(page.getByTestId('list-item-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('list-start-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('list-reserve-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('list-duration-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('list-submit'))
+		} finally {
+			await context.close()
 		}
 	})
 })

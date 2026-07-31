@@ -137,13 +137,14 @@
 	</div>
 
 	<form onsubmit={(e) => { e.preventDefault(); handleAdd() }} class="flex gap-2">
+		<!-- Compact on fine pointers, 44px where taps land; the row checkbox holds the 24px WCAG AA floor. -->
 		<input
-			class="input input-bordered flex-1"
+			class="input input-bordered flex-1 pointer-coarse:min-h-11"
 			bind:value={draft}
 			placeholder="Add a todo..."
 			data-testid="todo-input"
 		/>
-		<button type="submit" class="btn btn-primary" disabled={!draft.trim()} data-testid="add-button">
+		<button type="submit" class="btn btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={!draft.trim()} data-testid="add-button">
 			Add
 		</button>
 		<button
@@ -171,7 +172,7 @@
 					<li class="flex items-center gap-2">
 						<input
 							type="checkbox"
-							class="checkbox checkbox-sm"
+							class="checkbox checkbox-sm pointer-coarse:checkbox-md"
 							checked={todo.done}
 							onchange={() => handleToggle(todo)}
 							data-testid="todo-toggle-{todo.id}"
@@ -180,7 +181,7 @@
 							{todo.text}
 						</span>
 						<button
-							class="btn btn-ghost btn-xs"
+							class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 							onclick={() => handleRemove(todo)}
 							data-testid="todo-remove-{todo.id}"
 						>

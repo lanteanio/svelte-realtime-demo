@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick, waitForWS } from './helpers.js'
+import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 const PRODUCTS = [
 	{ id: 'phone', name: 'Wireless earbuds', original: 99, sale: 29, stock: 5 },
@@ -219,6 +219,19 @@ test.describe('/demos/flash-sales', () => {
 			}
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('every Buy button meets the 44px height floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openSale(page)
+			for (const product of PRODUCTS) {
+				// Full-width CTA: height is the constrained axis.
+				await expectTouchTarget(page.getByTestId(`product-buy-${product.id}`), { minWidth: 0 })
+			}
+		} finally {
+			await context.close()
 		}
 	})
 })

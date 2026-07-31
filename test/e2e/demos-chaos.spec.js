@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 const CELL_SELECTOR = '[data-testid^="tick-"]'
 
@@ -191,6 +191,21 @@ test.describe('/demos/chaos', () => {
 
 			await stopChaos(first)
 			await pageTicksToSettle(first, second)
+		} finally {
+			await context.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openChaos(page)
+			for (const id of ['preset-1234', 'preset-7777', 'preset-42', 'random-seed']) {
+				await expectTouchTarget(page.getByTestId(id))
+			}
+			await expectTouchTarget(page.getByTestId('seed-input'))
+			await expectTouchTarget(page.getByTestId('start-button'))
+			await expectTouchTarget(page.getByTestId('drop-rate-input'), { minWidth: 0 })
 		} finally {
 			await context.close()
 		}

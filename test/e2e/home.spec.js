@@ -12,7 +12,7 @@ import {
 	navbarIdentity,
 	openHome
 } from './home-helpers.js'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 test.describe('home + gallery', () => {
 	test('navbar identity, connection, default colors, GitHub, and theme all work', async ({ browser, page }) => {
@@ -224,6 +224,18 @@ test.describe('home + gallery', () => {
 			})).toEqual({ fontSize: '14px', opacity: '0.7' })
 			await page.locator('.demos-home-link').click()
 			await page.waitForURL(/\/$/)
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await page.goto('/demos/alarms')
+			await waitForWS(page)
+			await expectTouchTarget(page.locator('.demos-link').first(), { minWidth: 0 })
+			await expectTouchTarget(page.locator('.demos-home-link'), { minWidth: 0 })
+		} finally {
+			await context.close()
 		}
 	})
 })

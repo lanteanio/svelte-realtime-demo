@@ -377,9 +377,10 @@
 							{#if card.state === 'pending'}
 								<form onsubmit={(e) => { e.preventDefault(); submitBid(card, card.draftAmount) }} class="flex gap-2 items-center">
 									<span class="text-xs opacity-60">your bid $</span>
+									<!-- Compact on fine pointers, 44px floor where taps land. -->
 									<input
 										type="number"
-										class="input input-bordered input-sm w-28"
+										class="input input-bordered input-sm w-28 pointer-coarse:min-h-11"
 										min={Math.max(1, (top ? top.amount + 1 : card.startingPrice))}
 										max={caps.maxPrice}
 										step="1"
@@ -388,7 +389,7 @@
 									/>
 									<button
 										type="submit"
-										class="btn btn-sm btn-success"
+										class="btn btn-sm btn-success pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 										disabled={isOver || !Number.isFinite(card.draftAmount) || card.draftAmount < (top ? top.amount + 1 : card.startingPrice)}
 										data-testid="inbox-card-bid"
 									>
@@ -396,7 +397,7 @@
 									</button>
 									<button
 										type="button"
-										class="btn btn-sm btn-ghost"
+										class="btn btn-sm btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 										onclick={() => passCard(card)}
 										data-testid="inbox-card-pass"
 									>
@@ -418,28 +419,28 @@
 									<p class="text-sm flex-1" data-testid="inbox-card-outcome">
 										You won <strong>{card.outcome?.item}</strong> for <strong>${card.outcome?.soldPrice}</strong>.
 									</p>
-									<button class="btn btn-xs btn-ghost" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
+									<button class="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
 								</div>
 							{:else if card.state === 'outbid'}
 								<div class="flex items-center gap-2">
 									<p class="text-sm flex-1" data-testid="inbox-card-outcome">
 										Sold to <strong>{card.outcome?.winnerName}</strong> at <strong>${card.outcome?.soldPrice}</strong>.
 									</p>
-									<button class="btn btn-xs btn-ghost" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
+									<button class="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
 								</div>
 							{:else if card.state === 'no-sale'}
 								<div class="flex items-center gap-2">
 									<p class="text-sm flex-1" data-testid="inbox-card-outcome">
 										No-sale (reserve not met).
 									</p>
-									<button class="btn btn-xs btn-ghost" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
+									<button class="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
 								</div>
 							{:else if card.state === 'no-bidders'}
 								<div class="flex items-center gap-2">
 									<p class="text-sm flex-1" data-testid="inbox-card-outcome">
 										Lot closed with no recipients.
 									</p>
-									<button class="btn btn-xs btn-ghost" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
+									<button class="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => dismissCard(card)} data-testid="inbox-card-dismiss">Dismiss</button>
 								</div>
 							{/if}
 						</li>
@@ -518,7 +519,7 @@
 					<label class="form-control flex-1 min-w-[14rem]">
 						<span class="label-text text-xs">Item</span>
 						<input
-							class="input input-bordered input-sm"
+							class="input input-bordered input-sm pointer-coarse:min-h-11"
 							bind:value={item}
 							placeholder="Vintage typewriter"
 							maxlength={caps.maxItemLen}
@@ -531,7 +532,7 @@
 						<span class="label-text text-xs">Starting price ($)</span>
 						<input
 							type="number"
-							class="input input-bordered input-sm"
+							class="input input-bordered input-sm pointer-coarse:min-h-11"
 							min="0" max={caps.maxPrice} step="1"
 							bind:value={startingPrice}
 							data-testid="list-start-input"
@@ -541,7 +542,7 @@
 						<span class="label-text text-xs">Reserve price ($)</span>
 						<input
 							type="number"
-							class="input input-bordered input-sm"
+							class="input input-bordered input-sm pointer-coarse:min-h-11"
 							min={startingPrice} max={caps.maxPrice} step="1"
 							bind:value={reservePrice}
 							data-testid="list-reserve-input"
@@ -551,7 +552,7 @@
 						<span class="label-text text-xs">Duration ({durationSec}s)</span>
 						<input
 							type="range"
-							class="range range-sm"
+							class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 							min={caps.minDurationSec} max={caps.maxDurationSec} step="1"
 							bind:value={durationSec}
 							data-testid="list-duration-input"
@@ -561,7 +562,7 @@
 				<div class="flex items-center gap-2 flex-wrap">
 					<button
 						type="submit"
-						class="btn btn-sm btn-primary"
+						class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						disabled={!canList}
 						data-testid="list-submit"
 					>

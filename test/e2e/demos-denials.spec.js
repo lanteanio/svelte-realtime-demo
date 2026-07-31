@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 async function setOrg(page, org) {
 	await page.goto('/')
@@ -156,6 +156,17 @@ test.describe('/demos/denials', () => {
 			await expect(entryWith(b, 'globex', globexText)).toHaveCount(1)
 			await expectAccessShape(a, 'globex', 'acme')
 			await expectAccessShape(b, 'globex', 'acme')
+		} finally {
+			await context.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openAs(page, 'acme')
+			await expectTouchTarget(page.getByTestId('switch-acme'))
+			await expectTouchTarget(page.getByTestId('switch-globex'))
 		} finally {
 			await context.close()
 		}

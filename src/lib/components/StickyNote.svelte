@@ -140,13 +140,14 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<!-- On mobile, controls are always visible (no hover on touch devices) -->
 	<div class="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 max-sm:opacity-100 transition-opacity flex items-center gap-1" onpointerdown={stopDrag}>
+		<!-- Compact on fine pointers, 44px where taps land; color dots hold a 32px floor so the popover still fits the note. -->
 		<button
-			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors"
+			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 			aria-label="Pick color"
 			onclick={() => showColors = !showColors}
 		><Palette size={14} /></button>
 		<button
-			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors"
+			class="w-6 h-6 flex items-center justify-center rounded-full text-black/40 hover:text-black/70 hover:bg-black/10 transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 			onclick={() => onDelete()}
 			aria-label="Delete note"
 		><X size={14} /></button>
@@ -158,7 +159,7 @@
 		<div class="absolute -top-9 right-0 flex gap-1 bg-white/90 backdrop-blur-sm rounded-lg p-1.5 shadow-lg" onpointerdown={stopDrag}>
 			{#each NOTE_COLORS as c}
 				<button
-					class="w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform {note.color === c ? 'border-black/30' : 'border-black/10'}"
+					class="w-6 h-6 rounded-full border-2 hover:scale-125 transition-transform pointer-coarse:min-h-8 pointer-coarse:min-w-8 {note.color === c ? 'border-black/30' : 'border-black/10'}"
 					style:background={c}
 					aria-label="Set color to {c}"
 					onclick={() => { onEdit({ color: c }); showColors = false }}

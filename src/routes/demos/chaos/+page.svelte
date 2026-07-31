@@ -86,8 +86,9 @@
 			<div class="flex flex-wrap gap-3 items-end">
 				<label class="form-control">
 					<span class="label-text text-xs">Seed</span>
+					<!-- Compact dress on fine pointers, 44px floor where taps land. -->
 					<input
-						class="input input-bordered input-sm w-32 font-mono"
+						class="input input-bordered input-sm w-32 font-mono pointer-coarse:min-h-11"
 						bind:value={seedInput}
 						disabled={running}
 						data-testid="seed-input"
@@ -97,7 +98,7 @@
 					<span class="label-text text-xs">Drop rate ({(dropRate * 100).toFixed(0)}%)</span>
 					<input
 						type="range"
-						class="range range-sm"
+						class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 						min="0" max="1" step="0.01"
 						bind:value={dropRate}
 						disabled={running}
@@ -105,21 +106,21 @@
 					/>
 				</label>
 				{#if running}
-					<button class="btn btn-sm btn-error" onclick={handleStop} disabled={busy} data-testid="stop-button">
+					<button class="btn btn-sm btn-error pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleStop} disabled={busy} data-testid="stop-button">
 						Stop
 					</button>
 				{:else}
-					<button class="btn btn-sm btn-primary" onclick={handleStart} disabled={busy} data-testid="start-button">
+					<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleStart} disabled={busy} data-testid="start-button">
 						Start
 					</button>
 				{/if}
 			</div>
 			<div class="flex flex-wrap gap-2 text-xs">
 				<span class="opacity-60">Presets:</span>
-				<button class="btn btn-xs" onclick={() => preset(1234, 0.3)} disabled={running} data-testid="preset-1234">seed 1234, 30%</button>
-				<button class="btn btn-xs" onclick={() => preset(7777, 0.5)} disabled={running} data-testid="preset-7777">seed 7777, 50%</button>
-				<button class="btn btn-xs" onclick={() => preset(42, 0.1)} disabled={running} data-testid="preset-42">seed 42, 10%</button>
-				<button class="btn btn-xs btn-ghost" onclick={randomSeed} disabled={running} data-testid="random-seed">random seed</button>
+				<button class="btn btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => preset(1234, 0.3)} disabled={running} data-testid="preset-1234">seed 1234, 30%</button>
+				<button class="btn btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => preset(7777, 0.5)} disabled={running} data-testid="preset-7777">seed 7777, 50%</button>
+				<button class="btn btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => preset(42, 0.1)} disabled={running} data-testid="preset-42">seed 42, 10%</button>
+				<button class="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={randomSeed} disabled={running} data-testid="random-seed">random seed</button>
 			</div>
 		</div>
 	</div>

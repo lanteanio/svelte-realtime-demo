@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick, waitForWS } from './helpers.js'
+import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/todos-rollback - optimistic mutate
 // with concurrent-failure rollback. Drives add / toggle / remove / clear /
@@ -205,6 +205,29 @@ test.describe('/demos/todos-rollback', () => {
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
+		}
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			const text = uniq('touch')
+			await page.getByTestId('todo-input').fill(text)
+			await page.getByTestId('add-button').click()
+			const li = page.getByTestId('todos').locator('li', { hasText: text })
+			await expect(li).toHaveCount(1, { timeout: 10_000 })
+
+			await expectTouchTarget(page.getByTestId('todo-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('add-button'))
+			// Checkbox floor is the 24px WCAG AA minimum, not the 44px button floor.
+			await expectTouchTarget(li.locator('[data-testid^="todo-toggle-"]'), { minWidth: 24, minHeight: 24 })
+			await expectTouchTarget(li.locator('[data-testid^="todo-remove-"]'))
+
+			await li.locator('[data-testid^="todo-remove-"]').click()
+			await expect(li).toHaveCount(0, { timeout: 10_000 })
+		} finally {
+			await context.close()
 		}
 	})
 })

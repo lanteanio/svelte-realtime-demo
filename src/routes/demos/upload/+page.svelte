@@ -250,16 +250,17 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Pick a file</h2>
 			<div class="flex flex-wrap gap-3 items-end">
+				<!-- Compact dress on fine pointers, 44px floor where taps land. -->
 				<input
 					type="file"
-					class="file-input file-input-bordered file-input-sm flex-1 min-w-[16rem]"
+					class="file-input file-input-bordered file-input-sm flex-1 min-w-[16rem] pointer-coarse:min-h-11"
 					onchange={handleFile}
 					disabled={uploading}
 					data-testid="file-input"
 				/>
 				<button
 					type="button"
-					class="btn btn-outline btn-error btn-sm"
+					class="btn btn-outline btn-error btn-sm pointer-coarse:min-h-11"
 					onclick={handleClear}
 					disabled={uploading}
 					data-testid="clear-button"
@@ -283,7 +284,7 @@
 						max={progress.total}
 					></progress>
 					{#if uploading}
-						<button type="button" class="btn btn-xs btn-ghost" onclick={handleCancel} data-testid="cancel-button">
+						<button type="button" class="btn btn-xs btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleCancel} data-testid="cancel-button">
 							Cancel
 						</button>
 					{/if}

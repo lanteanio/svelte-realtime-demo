@@ -141,7 +141,8 @@
 			<form onsubmit={(e) => { e.preventDefault(); handlePlace() }} class="flex flex-wrap gap-2 items-end">
 				<label class="form-control flex-1 min-w-[10rem]">
 					<span class="label-text text-xs">Product</span>
-					<select class="select select-bordered select-sm" bind:value={selectedProduct} disabled={busy} data-testid="place-product">
+					<!-- Compact on fine pointers, 44px floor where taps land. -->
+					<select class="select select-bordered select-sm pointer-coarse:min-h-11" bind:value={selectedProduct} disabled={busy} data-testid="place-product">
 						{#each state.products as p (p.name)}
 							<option value={p.name}>{p.name} (${p.price})</option>
 						{/each}
@@ -149,15 +150,15 @@
 				</label>
 				<label class="form-control flex-1 min-w-[6rem]">
 					<span class="label-text text-xs">Qty</span>
-					<input type="number" class="input input-bordered input-sm" min="1" max="20" step="1" bind:value={qty} disabled={busy} data-testid="place-qty" />
+					<input type="number" class="input input-bordered input-sm pointer-coarse:min-h-11" min="1" max="20" step="1" bind:value={qty} disabled={busy} data-testid="place-qty" />
 				</label>
-				<button type="submit" class="btn btn-sm btn-primary" disabled={busy} data-testid="place-submit">
+				<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="place-submit">
 					{busy ? 'Placing...' : 'Place order'}
 				</button>
-				<button type="button" class="btn btn-sm btn-warning" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
+				<button type="button" class="btn btn-sm btn-warning pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
 					{burstBusy ? 'Bursting...' : 'Burst (5)'}
 				</button>
-				<button type="button" class="btn btn-sm btn-outline btn-error ml-auto" onclick={handleClear} disabled={clearing} data-testid="clear">
+				<button type="button" class="btn btn-sm btn-outline btn-error ml-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={clearing} data-testid="clear">
 					Clear feeds
 				</button>
 			</form>

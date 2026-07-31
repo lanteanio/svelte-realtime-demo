@@ -82,9 +82,10 @@
 			<div class="flex flex-wrap gap-3 items-end">
 				<label class="form-control flex-1 min-w-[12rem]">
 					<span class="label-text text-xs">Firehose ({speedVal} events/sec)</span>
+					<!-- Compact on fine pointers, 44px where taps land. -->
 					<input
 						type="range"
-						class="range range-sm"
+						class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 						min="0" max="50" step="1"
 						value={speedVal}
 						onchange={handleSpeedChange}
@@ -96,7 +97,7 @@
 					<div class="join">
 						{#each BIASES as b (b.id)}
 							<button
-								class="btn btn-sm join-item"
+								class="btn btn-sm join-item pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 								class:btn-primary={biasVal === b.id}
 								onclick={() => handleBias(b.id)}
 								data-testid="bias-{b.id}"
