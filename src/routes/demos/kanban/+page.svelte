@@ -25,7 +25,9 @@
 	delete) wrap in doc.transact() = one atomic wire update.
 -->
 <script>
+	import { SvelteSet } from 'svelte/reactivity'
 	import { kanban } from '$live/demos/kanban'
+	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -71,6 +73,7 @@
 		const title = drafts[colId].trim().slice(0, 120)
 		if (!title) return
 		const id = crypto.randomUUID()
+		markLocal(id)
 		tryEdit(() => {
 			// Card body and column membership land as one wire update, so
 			// a peer never sees an id whose card record is missing.
@@ -87,6 +90,7 @@
 		if (!toCol) return
 		const id = orders[fromCol].at(index)
 		if (id === undefined) return
+		markLocal(id)
 		tryEdit(() => {
 			// Atomic move: delete + insert in one transaction. Without the
 			// transact a peer could briefly render the card in both columns
@@ -99,6 +103,7 @@
 	}
 
 	function deleteCard(colId, index, id) {
+		if (!confirmDestructive('Delete this card from the shared board?')) return
 		tryEdit(() => {
 			board.transact(() => {
 				orders[colId].delete(index)
@@ -110,8 +115,68 @@
 	// Replace-on-write: values are plain JSON, so a rename writes the
 	// whole {title, color} record back under the same key.
 	function renameCard(id, title) {
+		markLocal(id)
 		tryEdit(() => {
 			cards.set(id, { ...cards.get(id), title })
+		})
+	}
+
+	// Renames commit on blur/Enter; while focused the input shows a local
+	// draft, so a concurrent remote rename (map values are replace-on-write,
+	// last-writer-wins) cannot clobber the caret mid-typing.
+	let editingCardId = $state(null)
+	let editingTitle = $state('')
+	function beginRename(id) {
+		editingCardId = id
+		editingTitle = cards.get(id)?.title ?? ''
+	}
+	function commitRename(id) {
+		if (editingCardId !== id) return
+		const title = editingTitle.trim().slice(0, 120)
+		editingCardId = null
+		if (title && title !== cards.get(id)?.title) renameCard(id, title)
+	}
+
+	// Brief ring on cards a PEER just moved or renamed: diff each render's
+	// membership+title signature against the previous one, skip ids this tab
+	// touched in the last second, and highlight the rest for a moment.
+	const remoteRing = new SvelteSet()
+	const localTouch = new Map()
+	function markLocal(id) { localTouch.set(id, Date.now()) }
+	let prevSignatures = new Map()
+	$effect(() => {
+		const next = new Map()
+		for (const col of columns) {
+			for (const id of col.cardIds) next.set(id, col.id + ':' + (cards.get(id)?.title ?? ''))
+		}
+		const now = Date.now()
+		const changed = []
+		for (const [id, sig] of next) {
+			const old = prevSignatures.get(id)
+			if (old !== undefined && old !== sig && now - (localTouch.get(id) ?? 0) > 1000) changed.push(id)
+		}
+		prevSignatures = next
+		if (changed.length > 0) {
+			for (const id of changed) remoteRing.add(id)
+			setTimeout(() => { for (const id of changed) remoteRing.delete(id) }, 1200)
+		}
+	})
+
+	function seedSampleCards() {
+		const samples = [
+			{ col: 'todo', title: 'Open this page in a second tab' },
+			{ col: 'doing', title: 'Move a card in each tab at once' },
+			{ col: 'done', title: 'Watch both edits survive the merge' }
+		]
+		tryEdit(() => {
+			board.transact(() => {
+				for (const s of samples) {
+					const id = crypto.randomUUID()
+					markLocal(id)
+					cards.set(id, { title: s.title, color: me?.color ?? '#888888' })
+					orders[s.col].push(id)
+				}
+			})
 		})
 	}
 </script>
@@ -124,7 +189,8 @@
 			One <code>live.doc</code>, zero RPC handlers. A
 			<code>cards</code> map plus one order array per column; every
 			edit applies to the local replica in the same tick and merges
-			everywhere. Concurrent moves from two tabs both survive
+			everywhere. Cards move between columns with their arrow buttons.
+			Concurrent moves from two tabs both survive
 			(per-element CRDT identity), and offline edits reconcile in one
 			exchange on reconnect - the local replica IS the offline queue.
 		</p>
@@ -134,6 +200,7 @@
 				<span class="inline-block w-2 h-2 rounded-full align-middle" style:background={me.color}></span>
 				<strong>{me.name}</strong>
 				<span class="font-mono">({me.id.slice(0, 8)})</span>
+				- cards carry their creator's color; a ring marks a peer's fresh edit
 			</p>
 		{/if}
 	</header>
@@ -155,7 +222,17 @@
 		{/if}
 	</div>
 
-	<div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+	{#if board.synced && columns.every((c) => c.cardIds.length === 0)}
+		<div class="alert py-2 text-sm flex flex-wrap items-center gap-2" data-testid="kb-seed">
+			<span>The shared board is empty.</span>
+			<button class="btn btn-sm btn-primary" onclick={seedSampleCards} data-testid="kb-seed-button">
+				Add sample cards
+			</button>
+			<span>then open this page in a second tab and move cards in both.</span>
+		</div>
+	{/if}
+
+	<div class="grid grid-cols-1 @2xl:grid-cols-3 gap-4">
 		{#each columns as col (col.id)}
 			<section class="card bg-base-100 border border-base-300" data-testid="kb-col-{col.id}">
 				<div class="card-body p-3 space-y-2">
@@ -167,7 +244,7 @@
 					<ul class="space-y-2 min-h-[8rem]" data-testid="kb-cards-{col.id}">
 						{#each col.cardIds as id, index (id)}
 							{@const card = cards.get(id)}
-							<li class="card bg-base-200" data-testid="kb-card-{id}">
+							<li class="card bg-base-200 transition-shadow {remoteRing.has(id) ? 'ring-2 ring-primary/60' : ''}" data-testid="kb-card-{id}">
 								<div class="card-body p-2 gap-1">
 									<div class="flex items-center gap-2">
 										<span
@@ -177,24 +254,41 @@
 										<!-- Per-card controls: compact on fine pointers, 44px where taps land. -->
 										<input
 											class="input input-ghost input-xs flex-1 min-w-0 px-1 pointer-coarse:min-h-11"
-											value={card?.title ?? ''}
+											value={editingCardId === id ? editingTitle : (card?.title ?? '')}
 											disabled={board.readOnly}
-											oninput={(e) => renameCard(id, e.currentTarget.value)}
+											onfocus={() => beginRename(id)}
+											oninput={(e) => { editingTitle = e.currentTarget.value }}
+											onblur={() => commitRename(id)}
+											onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+											aria-label="Card title"
 											data-testid="kb-title-{id}"
 										/>
 									</div>
-									<div class="flex justify-between">
+									<!-- Arrows pair up on the left; delete sits apart on the right so the
+									     highest-frequency taps never bracket the destructive one. Below the
+									     two-column rung the columns stack vertically, so the glyphs turn
+									     vertical too - the action is the same "previous/next column" either way. -->
+									<div class="flex gap-1">
 										<button
 											class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 											onclick={() => moveCard(col.id, index, -1)}
 											disabled={board.readOnly || col.id === COLUMN_IDS[0]}
-											aria-label="Move left"
+											aria-label="Move to previous column"
 											data-testid="kb-move-left-{id}"
 										>
-											&larr;
+											<span class="@2xl:hidden">&uarr;</span><span class="hidden @2xl:inline">&larr;</span>
 										</button>
 										<button
-											class="btn btn-ghost btn-xs opacity-60 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+											class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+											onclick={() => moveCard(col.id, index, 1)}
+											disabled={board.readOnly || col.id === COLUMN_IDS[COLUMN_IDS.length - 1]}
+											aria-label="Move to next column"
+											data-testid="kb-move-right-{id}"
+										>
+											<span class="@2xl:hidden">&darr;</span><span class="hidden @2xl:inline">&rarr;</span>
+										</button>
+										<button
+											class="btn btn-ghost btn-xs ml-auto text-error/60 hover:text-error pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 											onclick={() => deleteCard(col.id, index, id)}
 											disabled={board.readOnly}
 											aria-label="Delete card"
@@ -202,20 +296,11 @@
 										>
 											&#10005;
 										</button>
-										<button
-											class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-											onclick={() => moveCard(col.id, index, 1)}
-											disabled={board.readOnly || col.id === COLUMN_IDS[COLUMN_IDS.length - 1]}
-											aria-label="Move right"
-											data-testid="kb-move-right-{id}"
-										>
-											&rarr;
-										</button>
 									</div>
 								</div>
 							</li>
 						{:else}
-							<li class="opacity-40 text-xs text-center py-4">No cards</li>
+							<li class="text-base-content/70 text-xs text-center py-4">No cards - add one below.</li>
 						{/each}
 					</ul>
 

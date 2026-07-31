@@ -9,6 +9,8 @@ export async function openUpload(page, url = '/demos/upload') {
 }
 
 export async function clearUploads(page) {
+	// The clear control is honestly disabled when there is nothing to clear.
+	if (await page.getByTestId('files-list-empty').isVisible().catch(() => false)) return
 	await confirmAndClick(page.getByTestId('clear-button'))
 	await expect(page.getByTestId('files-list-empty')).toBeVisible({ timeout: 10_000 })
 	await expect(page.getByTestId('stat-files')).toHaveText('0')

@@ -39,7 +39,7 @@ export async function createFreshBoard(page, title, origin = '') {
 }
 
 export async function expectOnline(page, count) {
-	await expect(page.locator('.text-xs.opacity-50').filter({ hasText: new RegExp(`^${count} online$`) })).toHaveCount(1, { timeout: 15_000 })
+	await expect(page.locator('.text-xs.opacity-50').filter({ hasText: new RegExp(`^${count} on this board$`) })).toHaveCount(1, { timeout: 15_000 })
 }
 
 export async function createNoteAt(page, x, y) {

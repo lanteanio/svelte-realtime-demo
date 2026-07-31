@@ -22,7 +22,7 @@ test.describe('/demos/upload', () => {
 		await expect(page.getByTestId('upload-stats-strip')).toBeVisible()
 		await expect(page.getByTestId('file-input')).toHaveAttribute('type', 'file')
 		await expect(page.getByTestId('file-input')).toBeEnabled()
-		await expect(page.getByTestId('clear-button')).toBeEnabled()
+		await expect(page.getByTestId('clear-button')).toBeDisabled()
 		await expect(page.getByTestId('cancel-button')).toHaveCount(0)
 		await expect(page.getByTestId('upload-progress')).toHaveCount(0)
 		await expect(page.getByTestId('upload-error')).toHaveCount(0)
@@ -73,7 +73,7 @@ test.describe('/demos/upload', () => {
 		await openUpload(page)
 		await clearUploads(page)
 		await selectOversizeFile(page, `${RUN}-oversize.bin`)
-		await expect(page.getByTestId('upload-error')).toContainText('file too large (max 52428800 bytes)')
+		await expect(page.getByTestId('upload-error')).toContainText('file too large (max 50.00 MB)')
 		await expect(page.getByTestId('upload-progress')).toHaveCount(0)
 
 		await page.getByTestId('file-input').setInputFiles({
@@ -83,7 +83,7 @@ test.describe('/demos/upload', () => {
 		})
 		await expect(page.getByTestId('upload-error')).toContainText('empty upload', { timeout: 10_000 })
 		await expect(page.getByTestId('file-input')).toBeEnabled()
-		await expect(page.getByTestId('clear-button')).toBeEnabled()
+		await expect(page.getByTestId('clear-button')).toBeDisabled()
 	})
 
 	test('Cancel aborts an active upload and does not finalize a file row', async ({ page }) => {

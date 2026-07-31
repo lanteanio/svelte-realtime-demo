@@ -30,9 +30,9 @@
  *    Postgres AND Redis. Force-takeover is the visible reproducer.
  *
  *  - createIdempotencyStore (postgres/idempotency): caller retry
- *    dedup, wired into the runner. Repeating an enqueue with the
- *    same idempotency key returns the cached result instead of
- *    queuing a duplicate.
+ *    dedup, wired into the runner for the run() path. enqueue()
+ *    stores the caller's key on the row but does not dedupe on it;
+ *    every enqueue creates a fresh task.
  *
  *  - live.cron (svelte-realtime): 1Hz tick that re-reads the table
  *    via tasks.list() / tasks.counts() and publishes both snapshots.

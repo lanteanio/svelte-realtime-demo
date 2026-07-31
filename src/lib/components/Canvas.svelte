@@ -46,9 +46,11 @@
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- touch-manipulation kills double-tap zoom so a double-tap can create a
+     note instead of zooming the page (and drops the legacy tap delay). -->
 <div
 	bind:this={canvasEl}
-	class="relative w-full overflow-auto"
+	class="relative w-full overflow-auto touch-manipulation"
 	style:background
 	style:height="calc(100dvh - 7rem)"
 	onpointermove={onPointerMove}
@@ -56,7 +58,7 @@
 >
 	{#if noteCount === 0}
 		<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-			<p class="text-lg select-none" style:color={hintColor}>Double-click anywhere to add a note</p>
+			<p class="text-lg select-none" style:color={hintColor}><span class="pointer-coarse:hidden">Double-click</span><span class="hidden pointer-coarse:inline">Double-tap</span> anywhere to add a note</p>
 		</div>
 	{/if}
 

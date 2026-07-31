@@ -32,7 +32,11 @@
 	let newId = $state('')
 	let codeInput = $state('')
 	let joinedId = $state(null)
-	let errorMsg = $state('')
+	// Errors render where they happen: under the field, under the code
+	// form, or inside the joined panel - never in one far-away slot.
+	let fieldError = $state('')
+	let codeError = $state('')
+	let panelError = $state('')
 
 	function randomId() {
 		newId = String(Math.floor(Math.random() * 1_000_000))
@@ -41,11 +45,13 @@
 	function joinTable(id) {
 		const clean = String(id ?? '').trim()
 		if (!/^\d{1,9}$/.test(clean)) {
-			errorMsg = 'Table ids are numeric (1-9 digits).'
+			fieldError = 'Table numbers are numeric (1-9 digits).'
 			return
 		}
-		errorMsg = ''
+		fieldError = ''
+		panelError = ''
 		joinedId = clean
+		scrollJoinedIntoView()
 	}
 
 	async function handleJoinByCode(e) {
@@ -55,15 +61,35 @@
 		try {
 			const id = await resolveCode(code)
 			if (id === null) {
-				errorMsg = 'That code does not decode.'
+				codeError = 'That code does not decode.'
 				return
 			}
-			errorMsg = ''
+			codeError = ''
+			panelError = ''
 			joinedId = id
 			codeInput = ''
+			scrollJoinedIntoView()
 		} catch (err) {
-			errorMsg = err?.message ?? 'Code lookup failed'
+			codeError = err?.message ?? 'Code lookup failed'
 		}
+	}
+
+	// At single-column widths the joined panel is the last card; bring it to
+	// the visitor after a join instead of mutating below the fold.
+	function scrollJoinedIntoView() {
+		setTimeout(() => {
+			document.querySelector('[data-testid="lob-table"]')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+		}, 50)
+	}
+
+	// Share code: click to copy from inside the joined panel.
+	let codeCopied = $state(false)
+	async function copyShareCode(code) {
+		try {
+			await navigator.clipboard.writeText(code)
+			codeCopied = true
+			setTimeout(() => { codeCopied = false }, 1500)
+		} catch { /* clipboard permission denied - the chip still shows the code */ }
 	}
 
 	function leaveTable() {
@@ -111,9 +137,9 @@
 		try {
 			await lobby.say(joinedId, draft)
 			draft = ''
-			errorMsg = ''
+			panelError = ''
 		} catch (err) {
-			errorMsg = err?.message ?? 'Send failed'
+			panelError = err?.message ?? 'Send failed'
 		} finally {
 			sending = false
 		}
@@ -123,13 +149,25 @@
 		if (!joinedId) return
 		try {
 			await lobby.closeTable(joinedId)
-			errorMsg = ''
+			panelError = ''
 		} catch (err) {
 			// Non-owners are rejected server-side (FORBIDDEN) even if the
 			// button were enabled - ownerOnly is the enforcement, not the UI.
-			errorMsg = err?.code === 'FORBIDDEN' ? 'Only the table owner can close it.' : (err?.message ?? 'Close failed')
+			panelError = err?.code === 'FORBIDDEN' ? 'Only the table owner can close it.' : (err?.message ?? 'Close failed')
 		}
 	}
+
+	// The friendly name for the owner, resolved against the same presence
+	// roster the member chips use; the raw key prefix is only the fallback.
+	const ownerName = $derived.by(() => {
+		if (!owner?.key) return null
+		const match = presence.find((p) => p.key === owner.key)
+		return match?.data?.name ? { name: match.data.name, color: match.data.color } : null
+	})
+
+	// The joined table's share code, resolved from the same lobby browser
+	// the Active list renders.
+	const joinedCode = $derived(tables.find((t) => t.key === joinedId)?.meta?.code ?? null)
 </script>
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
@@ -145,18 +183,14 @@
 		</p>
 	</header>
 
-	{#if errorMsg}
-		<p class="text-error text-xs" data-testid="lob-error">{errorMsg}</p>
-	{/if}
-
-	<div class="grid gap-4 md:grid-cols-2">
+	<div class="grid gap-4 @3xl:grid-cols-2">
 		<div class="space-y-4">
 			<div class="card bg-base-200">
 				<div class="card-body py-3 space-y-3">
 					<h2 class="card-title text-sm">Open a table</h2>
 					<form class="space-y-1" onsubmit={(e) => { e.preventDefault(); joinTable(newId) }}>
 						<label for="lob-new-id" class="block text-xs font-medium">Table number</label>
-						<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(8rem,1fr)_auto]">
+						<div class="grid grid-cols-1 gap-2 @2xl:grid-cols-[minmax(8rem,1fr)_auto]">
 							<!-- Compact on fine pointers, 44px where taps land. -->
 							<input
 								id="lob-new-id"
@@ -164,27 +198,35 @@
 								bind:value={newId}
 								placeholder="Number"
 								inputmode="numeric"
+								pattern="[0-9]*"
 								data-testid="lob-new-id"
 							/>
 							<div class="flex gap-2">
-								<button type="button" class="btn btn-sm btn-ghost flex-1 pointer-coarse:min-h-11" onclick={randomId} data-testid="lob-random">random</button>
-								<button type="submit" class="btn btn-sm btn-primary flex-1 pointer-coarse:min-h-11" data-testid="lob-create">Join</button>
+								<button type="button" class="btn btn-sm btn-outline flex-1 pointer-coarse:min-h-11" onclick={randomId} data-testid="lob-random">random</button>
+								<!-- A fresh number opens (and owns) the table; an existing one joins it. -->
+								<button type="submit" class="btn btn-sm btn-primary flex-1 pointer-coarse:min-h-11" data-testid="lob-create">Open / join</button>
 							</div>
 						</div>
+						{#if fieldError}
+							<p class="text-error text-xs" data-testid="lob-error">{fieldError}</p>
+						{/if}
 					</form>
 					<form class="space-y-1" onsubmit={handleJoinByCode}>
 						<label for="lob-code-input" class="block text-xs font-medium">Share code</label>
-						<div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(6rem,1fr)_auto]">
+						<div class="grid grid-cols-1 gap-2 @2xl:grid-cols-[minmax(6rem,1fr)_auto]">
 							<input
 								id="lob-code-input"
 								class="input input-bordered input-sm w-full min-w-0 font-mono pointer-coarse:min-h-11"
 								bind:value={codeInput}
 								placeholder="Code"
-								maxlength="8"
+								maxlength="6"
 								data-testid="lob-code-input"
 							/>
 							<button type="submit" class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11" data-testid="lob-code-join">Join by code</button>
 						</div>
+						{#if codeError}
+							<p class="text-error text-xs" data-testid="lob-code-error">{codeError}</p>
+						{/if}
 					</form>
 				</div>
 			</div>
@@ -223,15 +265,26 @@
 			</div>
 		</div>
 
-		<div class="card bg-base-100 border border-base-300 min-h-[16rem]">
+		<div class="card bg-base-100 border border-base-300 min-h-[16rem]" data-testid="lob-table">
 			<div class="card-body py-3 space-y-2">
 				{#if joinedId}
-					<div class="flex items-center gap-2">
+					<div class="flex items-center gap-2 flex-wrap">
 						<h2 class="card-title text-sm" data-testid="lob-table-title">Table {joinedId}</h2>
 						{#if isOwner}
 							<span class="badge badge-sm badge-primary" data-testid="lob-owner-badge">you own this table</span>
+						{:else if ownerName}
+							<span class="badge badge-sm badge-ghost gap-1" data-testid="lob-owner-badge">
+								<span class="inline-block w-2 h-2 rounded-full" style:background={ownerName.color ?? '#888'}></span>
+								owned by {ownerName.name}
+							</span>
 						{:else if owner?.key}
 							<span class="badge badge-sm badge-ghost" data-testid="lob-owner-badge">owned by {owner.key.slice(0, 8)}</span>
+						{/if}
+						{#if joinedCode}
+							<!-- The share code lives where sharing happens; click copies it. -->
+							<button class="badge badge-sm badge-outline font-mono cursor-pointer pointer-coarse:min-h-11" onclick={() => copyShareCode(joinedCode)} title="Copy share code" data-testid="lob-share-code">
+								{codeCopied ? 'copied' : joinedCode}
+							</button>
 						{/if}
 						<button class="btn btn-xs btn-ghost ml-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={leaveTable} data-testid="lob-leave">leave</button>
 					</div>
@@ -276,6 +329,9 @@
 						<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={sending || !draft.trim()} data-testid="lob-send">Send</button>
 					</form>
 
+					{#if panelError}
+						<p class="text-error text-xs" data-testid="lob-panel-error">{panelError}</p>
+					{/if}
 					<button
 						class="btn btn-sm btn-error btn-outline pointer-coarse:min-h-11"
 						onclick={handleClose}
@@ -284,6 +340,12 @@
 					>
 						Close table (owner only)
 					</button>
+					{#if !isOwner}
+						<p class="text-xs opacity-60">
+							ownerOnly is enforced server-side - a forged close from a
+							non-owner gets a real FORBIDDEN, not a UI courtesy.
+						</p>
+					{/if}
 				{:else}
 					<p class="opacity-40 text-sm my-auto text-center">
 						Join a table to see its feed, presence, and owner role.

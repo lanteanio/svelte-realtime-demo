@@ -39,14 +39,23 @@
 	let mode = $state('succeed')
 	let busy = $state(false)
 	let lastError = $state('')
+	// Takeover failures land on the row that caused them, not in the form.
+	let rowErrors = $state({})
+	// Liveness: when the 1Hz stats tick last arrived.
+	let lastTickAt = $state(0)
 
 	$effect(() => {
 		const offs = [
 			jobsList.subscribe((v) => { list = Array.isArray(v) ? v : [] }),
-			jobsStats.subscribe((v) => { stats = v ?? stats })
+			jobsStats.subscribe((v) => { stats = v ?? stats; lastTickAt = Date.now() })
 		]
 		return () => { for (const off of offs) off() }
 	})
+
+	// Every enqueue carries a generated idempotency key; the runner stores it
+	// on the row. Enqueue-level dedup (same key returning the original task)
+	// is not part of the shipped enqueue contract yet, so the page makes no
+	// claim it cannot demonstrate.
 
 	onMount(async () => {
 		const s = await myJobsState()
@@ -63,7 +72,8 @@
 		try {
 			await enqueueJob({
 				durationMs: Math.round(durationSec * 1000),
-				mode
+				mode,
+				idempotencyKey: crypto.randomUUID()
 			})
 		} catch (err) {
 			lastError = err?.message ?? String(err)
@@ -76,8 +86,12 @@
 		if (!available) return
 		try {
 			await forceTakeover(taskId)
+			if (rowErrors[taskId]) {
+				const { [taskId]: gone, ...rest } = rowErrors
+				rowErrors = rest
+			}
 		} catch (err) {
-			lastError = err?.message ?? String(err)
+			rowErrors = { ...rowErrors, [taskId]: err?.message ?? String(err) }
 		}
 	}
 
@@ -117,9 +131,8 @@
 		<h1 class="text-2xl font-bold mt-2">Jobs: durable task runner with fence + retry + force-takeover</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Postgres-backed task framework via <code>createTaskRunner</code>. Per-attempt fence in
-			Postgres + an optional Redis mirror via <code>createRedisFence</code>; an idempotency store
-			(<code>createIdempotencyStore</code>) caches results so a retry with the same key returns the
-			cached output instead of duplicating work. <code>live.cron</code> runs a 1Hz refresh tick that
+			Postgres + an optional Redis mirror via <code>createRedisFence</code>.
+			<code>live.cron</code> runs a 1Hz refresh tick that
 			polls the table and publishes both the row list and a stats snapshot.
 		</p>
 	</header>
@@ -137,7 +150,7 @@
 		</div>
 	{:else}
 		<div class="card bg-base-200" data-testid="jobs-stats-strip">
-			<div class="card-body py-3 grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
+			<div class="card-body py-3 grid grid-cols-2 @2xl:grid-cols-3 @3xl:grid-cols-5 gap-3 text-sm">
 				<div>
 					<div class="text-xs opacity-60">Pending</div>
 					<div class="font-mono text-lg" data-testid="stat-pending">{stats.pending}</div>
@@ -158,6 +171,10 @@
 					<div class="text-xs opacity-60">Total</div>
 					<div class="font-mono text-lg" data-testid="stat-total">{stats.total}</div>
 				</div>
+				<!-- Liveness at a glance, even with every counter at zero. -->
+				<div class="col-span-full text-right text-[10px] opacity-60" data-testid="jobs-last-tick">
+					{lastTickAt > 0 ? `last tick ${fmtTime(lastTickAt)}` : 'waiting for the first 1Hz tick...'}
+				</div>
 			</div>
 		</div>
 
@@ -165,18 +182,22 @@
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Enqueue simulate-work</h2>
 				<div class="flex flex-wrap gap-3 items-end">
-					<label class="form-control flex-1 min-w-[10rem]">
-						<span class="label-text text-xs">Duration ({durationSec.toFixed(1)}s)</span>
+					<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
+						<span class="opacity-70 text-xs">Duration ({durationSec.toFixed(1)}s)</span>
 						<input
 							type="range"
-							class="range range-sm"
+							class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 							min="0.4" max="15" step="0.1"
 							bind:value={durationSec}
 							data-testid="jobs-duration-input"
 						/>
+						<div class="flex justify-between text-[10px] opacity-60">
+							<span>0.4s</span>
+							<span>15s</span>
+						</div>
 					</label>
-					<label class="form-control min-w-[12rem]">
-						<span class="label-text text-xs">Mode</span>
+					<label class="flex flex-col gap-1 min-w-[12rem]">
+						<span class="opacity-70 text-xs">Mode</span>
 						<select class="select select-sm select-bordered" bind:value={mode} data-testid="jobs-mode-input">
 							{#each modes as m (m)}
 								<option value={m}>{m}</option>
@@ -214,8 +235,9 @@
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Recent tasks ({list.length})</h2>
 				{#if list.length === 0}
-					<p class="opacity-40 text-xs" data-testid="jobs-list-empty">
-						No tasks yet. Enqueue one above.
+					<p class="text-base-content/70 text-xs" data-testid="jobs-list-empty">
+						No tasks yet. Enqueue one above - try a 10s duration so you have
+						time to press Force takeover while it runs.
 					</p>
 				{:else}
 					<ul class="space-y-2 max-h-96 overflow-y-auto pr-1">
@@ -230,7 +252,8 @@
 									<div class="text-xs flex items-baseline gap-2 flex-wrap">
 										<span class="font-mono opacity-50 text-[10px] truncate">{job.id.slice(0, 8)}</span>
 										<span class="opacity-80">{summarizeInput(job.input)}</span>
-										<span class="opacity-50 text-[10px]">attempt {job.attempts}</span>
+										<!-- The attempt counter is signal, not chrome. -->
+										<span class="text-xs">attempt {job.attempts}</span>
 										<span class="opacity-40 text-[10px] ml-auto">{fmtTime(job.updatedAt)}</span>
 									</div>
 									{#if job.status === 'committed' && job.result}
@@ -243,10 +266,15 @@
 											{job.error.message ?? JSON.stringify(job.error)}
 										</div>
 									{/if}
+									{#if rowErrors[job.id]}
+										<div class="text-[11px] text-error mt-0.5" data-testid="jobs-row-takeover-error">
+											{rowErrors[job.id]}
+										</div>
+									{/if}
 								</div>
 								{#if job.status === 'running'}
 									<button
-										class="btn btn-xs btn-warning"
+										class="btn btn-sm btn-warning pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 										onclick={() => handleForceTakeover(job.id)}
 										data-testid="jobs-row-takeover"
 									>

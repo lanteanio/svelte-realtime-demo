@@ -72,7 +72,7 @@
 </script>
 
 <div class="flex items-center gap-2">
-	<span class="text-xs opacity-50">{users.length} online</span>
+	<span class="text-xs opacity-50">{users.length} on this board</span>
 	<div class="avatar-group -space-x-3">
 		{#each visible as user (user.id)}
 			<div class="tooltip" data-tip={user.name}>

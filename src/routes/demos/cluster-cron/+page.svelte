@@ -107,8 +107,8 @@
 		</div>
 	</div>
 
-	<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-		<div class="card bg-base-100 border border-base-300 lg:col-span-2" data-testid="cluster-cron-ticks">
+	<div class="grid grid-cols-1 @5xl:grid-cols-3 gap-4">
+		<div class="card bg-base-100 border border-base-300 @5xl:col-span-2" data-testid="cluster-cron-ticks">
 			<div class="card-body py-3 space-y-2">
 				<div class="flex justify-between items-baseline">
 					<h2 class="card-title text-sm">Recent ticks (newest first)</h2>

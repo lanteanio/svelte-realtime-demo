@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test'
+import { confirmAndClick } from './helpers.js'
 
 export async function openKanban(page, url = '/demos/kanban') {
 	await page.goto(url)
@@ -48,6 +49,8 @@ export async function waitInColumn(page, id, column) {
 
 export async function renameCard(page, id, title) {
 	await cardTitle(page, id).fill(title)
+	// Renames commit on blur/Enter so remote edits cannot clobber the caret.
+	await cardTitle(page, id).press('Enter')
 	await expect(cardTitle(page, id)).toHaveValue(title)
 }
 
@@ -58,7 +61,7 @@ export async function moveCard(page, id, direction, destination) {
 
 export async function deleteCard(page, id) {
 	if (await card(page, id).count() === 0) return
-	await page.getByTestId(`kb-delete-${id}`).click()
+	await confirmAndClick(page.getByTestId(`kb-delete-${id}`))
 	await expect(card(page, id)).toHaveCount(0, { timeout: 10_000 })
 }
 

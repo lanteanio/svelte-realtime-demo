@@ -88,7 +88,7 @@ test.describe('/demos/denials', () => {
 		await page.route('**/api/demos/set-org', (route) => route.fulfill({ status: 503, body: 'unavailable' }))
 
 		await page.getByTestId('switch-globex').click()
-		await expect(page.getByTestId('append-error')).toHaveText('Switch failed: HTTP 503')
+		await expect(page.getByTestId('switch-error')).toHaveText('Switch failed: HTTP 503')
 		await expect(page.getByTestId('my-org')).toHaveText('acme')
 		await expect(page.getByTestId('switch-acme')).toBeEnabled()
 		await expect(page.getByTestId('switch-acme')).toHaveAttribute('aria-pressed', 'true')

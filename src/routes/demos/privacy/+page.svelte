@@ -129,7 +129,7 @@
 	</section>
 
 	<!-- Raw vs protected -->
-	<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+	<div class="grid grid-cols-1 @2xl:grid-cols-2 gap-4">
 		<section class="card bg-base-100 border border-base-300" data-testid="pv-raw-card">
 			<div class="card-body py-3 space-y-1">
 				<div class="flex justify-between items-baseline">

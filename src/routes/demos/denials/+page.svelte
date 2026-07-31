@@ -28,8 +28,15 @@
 	let recentDenials = $state([])
 
 	let appendDraft = $state('')
-	let switching = $state(false)
+	// Holds the slug being switched to while the fetch+reload is in flight,
+	// so the pressed button can say so.
+	let switching = $state(/** @type {string | null} */ (null))
 	let appendError = $state(null)
+	let switchError = $state(null)
+
+	const ORG_LABELS = { acme: 'Acme', globex: 'Globex' }
+	const orgLabel = $derived(ORG_LABELS[me.org] ?? me.org)
+	const otherOrg = $derived(me.org === 'acme' ? 'globex' : 'acme')
 
 	function recordDenial(topic, err) {
 		if (!err) return
@@ -70,7 +77,8 @@
 
 	async function switchTo(org) {
 		if (switching || org === me.org) return
-		switching = true
+		switching = org
+		switchError = null
 		try {
 			const r = await fetch('/api/demos/set-org', {
 				method: 'POST',
@@ -80,8 +88,8 @@
 			if (!r.ok) throw new Error(`HTTP ${r.status}`)
 			location.reload()
 		} catch (err) {
-			switching = false
-			appendError = `Switch failed: ${err.message}`
+			switching = null
+			switchError = `Switch failed: ${err.message}`
 		}
 	}
 
@@ -130,44 +138,49 @@
 			<div>
 				<div class="text-xs opacity-60">You are</div>
 				<div data-testid="my-identity">
-					<strong>{me.name ?? '...'}</strong>
-					{#if me.org}
-						-- <span class="badge badge-primary uppercase" data-testid="my-org">{me.org}</span> employee
-					{:else}
-						<span class="badge badge-warning">no org</span>
-					{/if}
+					<strong>{me.name ?? '...'}</strong>{#if me.org}, <span class="badge badge-primary uppercase" data-testid="my-org">{me.org}</span> employee{:else} <span class="badge badge-warning">no org</span>{/if}
 				</div>
 			</div>
-			<div class="flex gap-2" role="group" aria-label="Organization">
-				<!-- A mis-tap costs a full reload: compact on fine pointers,
-				     44px where taps land. -->
-				<button
-					class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-					class:btn-primary={me.org === 'acme'}
-					onclick={() => switchTo('acme')}
-					disabled={switching}
-					aria-pressed={me.org === 'acme'}
-					data-testid="switch-acme"
-				>
-					Acme
-				</button>
-				<button
-					class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-					class:btn-primary={me.org === 'globex'}
-					onclick={() => switchTo('globex')}
-					disabled={switching}
-					aria-pressed={me.org === 'globex'}
-					data-testid="switch-globex"
-				>
-					Globex
-				</button>
+			<div class="flex flex-col items-end gap-1">
+				<div class="flex gap-2" role="group" aria-label="Organization">
+					<!-- A mis-tap costs a full reload: compact on fine pointers,
+					     44px where taps land. -->
+					<button
+						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+						class:btn-primary={me.org === 'acme'}
+						onclick={() => switchTo('acme')}
+						disabled={switching !== null}
+						aria-pressed={me.org === 'acme'}
+						data-testid="switch-acme"
+					>
+						{switching === 'acme' ? 'Switching...' : 'Acme'}
+					</button>
+					<button
+						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+						class:btn-primary={me.org === 'globex'}
+						onclick={() => switchTo('globex')}
+						disabled={switching !== null}
+						aria-pressed={me.org === 'globex'}
+						data-testid="switch-globex"
+					>
+						{switching === 'globex' ? 'Switching...' : 'Globex'}
+					</button>
+				</div>
+				{#if me.org}
+					<p class="text-xs opacity-60">Switch to {ORG_LABELS[otherOrg]} and watch the denial flip sides.</p>
+				{/if}
+				{#if switchError}
+					<p class="text-xs text-error" data-testid="switch-error">{switchError}</p>
+				{/if}
 			</div>
 		</div>
 	</div>
 
-	<div class="grid md:grid-cols-2 gap-4">
+	<div class="grid @3xl:grid-cols-2 gap-4">
 		{#each [{ slug: 'acme', label: 'Acme', entries: acmeEntries, error: acmeError }, { slug: 'globex', label: 'Globex', entries: globexEntries, error: globexError }] as col (col.slug)}
-			<div class="card border border-base-300 min-h-[20rem]" data-testid="card-{col.slug}">
+			<!-- The fixed height only earns its keep beside a sibling column;
+			     stacked cards hug their content. -->
+			<div class="card border border-base-300 @3xl:min-h-[20rem]" data-testid="card-{col.slug}">
 				<div class="card-body py-3">
 					<div class="flex justify-between items-baseline">
 						<h2 class="card-title text-sm">{col.label} audit log</h2>
@@ -204,9 +217,10 @@
 	{#if me.org}
 		<form onsubmit={(e) => { e.preventDefault(); handleAppend() }} class="flex gap-2">
 			<input
-				class="input input-bordered flex-1"
+				class="input input-bordered flex-1 pointer-coarse:min-h-11"
 				bind:value={appendDraft}
-				placeholder="Append to {me.org} audit log..."
+				placeholder="Append to {orgLabel} audit log..."
+				aria-label="Append to {orgLabel} audit log"
 				data-testid="append-input"
 			/>
 			<button
@@ -226,12 +240,12 @@
 	{#if recentDenials.length > 0}
 		<div class="card bg-base-100 border border-base-300">
 			<div class="card-body py-3">
-				<h2 class="card-title text-sm">Recent denials (adapter <code>denials</code> Readable)</h2>
+				<h2 class="card-title text-sm">Recent denials <span class="font-normal">(adapter <code>denials</code> Readable)</span></h2>
 				<ul class="text-xs font-mono space-y-1" data-testid="recent-denials">
 					{#each recentDenials as d, i (i + ':' + d.topic + ':' + d.at)}
 						<li class="flex justify-between gap-3">
 							<span class="opacity-60 shrink-0">{fmtTs(d.at)}</span>
-							<span class="flex-1 truncate">{d.topic}</span>
+							<span class="flex-1 min-w-0 break-all">{d.topic}</span>
 							<span class="badge badge-error badge-xs">{d.reason}</span>
 						</li>
 					{/each}

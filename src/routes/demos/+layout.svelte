@@ -197,6 +197,14 @@
 		min-width: 0;
 		flex: 1 1 0;
 		overflow-x: auto;
+		/*
+		 * The content column is what demo layouts actually get - 208px less
+		 * than the viewport once the sidebar is fixed at >=1024. Making it a
+		 * container lets pages key their multi-column variants (@2xl:, @3xl:,
+		 * @5xl:, ...) on the space the content really has instead of the
+		 * viewport, so no band can force columns into starved tracks.
+		 */
+		container-type: inline-size;
 	}
 	/*
 	 * The closing explainer aside on every demo page is authored text-xs +

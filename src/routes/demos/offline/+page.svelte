@@ -276,7 +276,7 @@
 	<section class="card bg-base-100 border border-base-300 min-h-[16rem]">
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">
-				Entries (<span data-testid="off-entries-count">{entries.length}</span>, newest first, capped at 50)
+				Entries <span class="font-normal">(<span data-testid="off-entries-count">{entries.length}</span>, newest first, capped at 50)</span>
 			</h2>
 			<ul class="space-y-1 text-sm" data-testid="off-entries">
 				{#each entries as entry (entry.id)}

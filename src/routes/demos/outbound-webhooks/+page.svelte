@@ -151,7 +151,7 @@
 	<section class="card bg-base-100 border border-base-300 min-h-[10rem]" data-testid="ow-receipts-card">
 		<div class="card-body py-3 space-y-1">
 			<h2 class="card-title text-sm">
-				Sink receipts (<span data-testid="ow-receipts-count">{receipts.length}</span>)
+				Sink receipts <span class="font-normal">(<span data-testid="ow-receipts-count">{receipts.length}</span>)</span>
 			</h2>
 			<ul class="text-xs font-mono space-y-1" data-testid="ow-receipts">
 				{#each receipts as r, i (r.at + ':' + i)}
@@ -187,7 +187,7 @@
 		<div class="card-body py-3 space-y-1">
 			<div class="flex items-center justify-between">
 				<h2 class="card-title text-sm">
-					Dead-letter queue (<span data-testid="ow-dlq-count">{dlqRows.length}</span>)
+					Dead-letter queue <span class="font-normal">(<span data-testid="ow-dlq-count">{dlqRows.length}</span>)</span>
 				</h2>
 				<button
 					class="btn btn-xs btn-ghost"

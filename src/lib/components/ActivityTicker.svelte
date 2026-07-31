@@ -24,6 +24,7 @@
 		</span>
 	{/each}
 	{#if latest.length === 0}
-		<span class="opacity-40">No activity yet - double-click the canvas to add a note</span>
+		<!-- Right padding keeps the line clear of the FAB's column on phones. -->
+		<span class="opacity-40 pr-20"><span class="pointer-coarse:hidden">No activity yet - double-click the canvas to add a note</span><span class="hidden pointer-coarse:inline">No activity yet - double-tap the canvas to add a note</span></span>
 	{/if}
 </div>

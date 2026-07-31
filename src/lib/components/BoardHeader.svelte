@@ -9,9 +9,9 @@
 -->
 <script>
 	import CountdownTimer from './CountdownTimer.svelte'
-	import { Clock } from 'lucide-svelte'
+	import { Clock, Plus, Undo2, Redo2 } from 'lucide-svelte'
 
-	let { settings, onUpdate, children } = $props()
+	let { settings, onUpdate, children, onAddNote, onUndo, onRedo } = $props()
 	let editingTitle = $state(false)
 
 	const BACKGROUNDS = ['#f5f5f4', '#fefce8', '#ecfdf5', '#eff6ff', '#fdf4ff', '#1e1e2e']
@@ -36,16 +36,34 @@
 		>{settings?.title ?? 'Untitled Board'}</h1>
 	{/if}
 
+	<!-- Keyboard- and touch-reachable note creation; dblclick stays the pointer fast path. -->
+	{#if onAddNote}
+		<button class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={onAddNote} aria-label="Add note" data-testid="board-add-note">
+			<Plus size={14} /> Note
+		</button>
+	{/if}
+	<!-- Undo/redo exist for every input, not just the keyboard chord. -->
+	{#if onUndo}
+		<div class="flex shrink-0">
+			<button class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={onUndo} aria-label="Undo" title="Undo (Ctrl+Z)" data-testid="board-undo"><Undo2 size={14} /></button>
+			<button class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={onRedo} aria-label="Redo" title="Redo (Ctrl+Y)" data-testid="board-redo"><Redo2 size={14} /></button>
+		</div>
+	{/if}
+
 	<!-- Background colors (hidden on mobile to save space) -->
 	<div class="hidden sm:flex gap-1 shrink-0">
 		{#each BACKGROUNDS as bg}
-			<!-- Compact on fine pointers; full 44px circles on coarse ones, flex-wrap absorbs the extra width. -->
+			<!-- Compact on fine pointers; full 44px circles on coarse ones, flex-wrap absorbs
+			     the extra width. A fixed mid-contrast border keeps the light swatches distinct
+			     on the dark theme; the active swatch carries a ring plus a checkmark. -->
+			{@const selected = settings?.background === bg}
 			<button
-				class="w-5 h-5 rounded-full border-2 transition-transform hover:scale-110 pointer-coarse:w-11 pointer-coarse:h-11 {settings?.background === bg ? 'border-primary' : 'border-base-content/30'}"
+				class="w-5 h-5 rounded-full border border-black/20 flex items-center justify-center transition-transform hover:scale-110 pointer-coarse:w-11 pointer-coarse:h-11 {selected ? 'ring-2 ring-primary ring-offset-1 ring-offset-base-100' : ''}"
 				style:background={bg}
 				aria-label="Set background to {bg}"
+				aria-pressed={selected}
 				onclick={() => onUpdate({ background: bg })}
-			></button>
+			>{#if selected}<span class="text-[10px] leading-none" style:color={bg === '#1e1e2e' ? '#ffffffcc' : '#00000099'}>&#10003;</span>{/if}</button>
 		{/each}
 	</div>
 

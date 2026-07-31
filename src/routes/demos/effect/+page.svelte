@@ -139,8 +139,8 @@
 	<section class="card bg-base-200" data-testid="place-section">
 		<div class="card-body py-3 space-y-2">
 			<form onsubmit={(e) => { e.preventDefault(); handlePlace() }} class="flex flex-wrap gap-2 items-end">
-				<label class="form-control flex-1 min-w-[10rem]">
-					<span class="label-text text-xs">Product</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
+					<span class="opacity-70 text-xs">Product</span>
 					<!-- Compact on fine pointers, 44px floor where taps land. -->
 					<select class="select select-bordered select-sm pointer-coarse:min-h-11" bind:value={selectedProduct} disabled={busy} data-testid="place-product">
 						{#each state.products as p (p.name)}
@@ -148,8 +148,8 @@
 						{/each}
 					</select>
 				</label>
-				<label class="form-control flex-1 min-w-[6rem]">
-					<span class="label-text text-xs">Qty</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[6rem]">
+					<span class="opacity-70 text-xs">Qty</span>
 					<input type="number" class="input input-bordered input-sm pointer-coarse:min-h-11" min="1" max="20" step="1" bind:value={qty} disabled={busy} data-testid="place-qty" />
 				</label>
 				<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="place-submit">
@@ -169,7 +169,7 @@
 	</section>
 
 	<!-- Three columns -->
-	<section class="grid md:grid-cols-3 gap-3" data-testid="columns">
+	<section class="grid @3xl:grid-cols-3 gap-3" data-testid="columns">
 		<div class="card bg-base-100 border border-base-300" data-testid="orders-column">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Orders ({ordersList.length})</h2>

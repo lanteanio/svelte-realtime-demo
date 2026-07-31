@@ -25,7 +25,10 @@ async function expectIntegrity(page) {
 	expect(new Set(entries.map((entry) => entry.seq)).size).toBe(entries.length)
 	for (let i = 1; i < entries.length; i++) expect(entries[i - 1].seq).toBeGreaterThan(entries[i].seq)
 	for (const entry of entries.slice(0, 5)) {
-		expect(entry.message).toContain(`#${entry.seq}`)
+		// The seq lives in its own column; the message renders as the bare
+		// phrase with the redundant "#NNNN" suffix stripped.
+		expect(entry.message.length).toBeGreaterThan(0)
+		expect(entry.message).not.toMatch(/#\d+\s*$/)
 		expect(entry.tier).toMatch(/^(live|rehydrate|fromSeq)$/)
 	}
 }

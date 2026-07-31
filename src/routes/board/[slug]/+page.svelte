@@ -64,6 +64,19 @@
 		})
 	}
 
+	// Header "+ Note": the keyboard/touch route to creation. Lands in the
+	// upper-left region with a small scatter so repeated presses don't stack
+	// notes into one invisible pile.
+	function handleAddNote() {
+		const idempotencyKey = crypto.randomUUID()
+		createNote.with({ idempotencyKey })(boardId, {
+			content: '',
+			x: 100 + Math.floor(Math.random() * 160),
+			y: 120 + Math.floor(Math.random() * 120),
+			color: localStorage.getItem('noteColor') || NOTE_COLORS[0]
+		})
+	}
+
 	// --- Drag handling ---
 	// store.mutate applies the optimistic position to the displayed value
 	// immediately and queues the server roundtrip. The server's confirming
@@ -152,6 +165,9 @@
 	<BoardHeader
 		settings={$settingsStore}
 		onUpdate={(fields) => updateSettings(boardId, fields)}
+		onAddNote={handleAddNote}
+		onUndo={() => notesStore.undo()}
+		onRedo={() => notesStore.redo()}
 	>
 		<PresenceBar {boardId} />
 	</BoardHeader>
@@ -185,7 +201,7 @@
 		reveal the action buttons. Blur (or click close) to hide them.
 	-->
 	<div class="fab fab-flower">
-		<div tabindex="0" role="button" class="btn btn-lg btn-circle btn-primary fab-trigger">
+		<div tabindex="0" role="button" class="btn btn-lg btn-circle btn-primary fab-trigger tooltip tooltip-left" data-tip="Arrange board" aria-label="Arrange board">
 			<Sparkles size={22} />
 		</div>
 		<div class="fab-close">

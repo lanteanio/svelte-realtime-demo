@@ -84,8 +84,8 @@
 	<div class="card bg-base-200">
 		<div class="card-body py-3 space-y-3">
 			<div class="flex flex-wrap gap-3 items-end">
-				<label class="form-control">
-					<span class="label-text text-xs">Seed</span>
+				<label class="flex flex-col gap-1">
+					<span class="opacity-70 text-xs">Seed</span>
 					<!-- Compact dress on fine pointers, 44px floor where taps land. -->
 					<input
 						class="input input-bordered input-sm w-32 font-mono pointer-coarse:min-h-11"
@@ -94,8 +94,8 @@
 						data-testid="seed-input"
 					/>
 				</label>
-				<label class="form-control flex-1 min-w-[12rem]">
-					<span class="label-text text-xs">Drop rate ({(dropRate * 100).toFixed(0)}%)</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[12rem]">
+					<span class="opacity-70 text-xs">Drop rate ({(dropRate * 100).toFixed(0)}%)</span>
 					<input
 						type="range"
 						class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"

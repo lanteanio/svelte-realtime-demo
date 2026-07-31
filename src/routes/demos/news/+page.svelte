@@ -138,7 +138,7 @@
 	</header>
 
 	<div class="card bg-base-200" data-testid="news-stats-strip">
-		<div class="card-body py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+		<div class="card-body py-3 grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-sm">
 			<div>
 				<div class="text-xs opacity-60">Stories</div>
 				<div class="font-mono text-lg" data-testid="stat-totalStories">{stats.totalStories}</div>
@@ -162,8 +162,8 @@
 	<div class="card bg-base-200">
 		<div class="card-body py-3 space-y-2">
 			<div class="flex flex-wrap gap-3 items-end">
-				<label class="form-control flex-1 min-w-[12rem]">
-					<span class="label-text text-xs">View firehose ({speedVal} events/sec)</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[12rem]">
+					<span class="opacity-70 text-xs">View firehose ({speedVal} events/sec)</span>
 					<input
 						type="range"
 						class="range range-sm"
@@ -177,9 +177,9 @@
 		</div>
 	</div>
 
-	<!-- xl, not lg: the demos rail reappears at 1024, so a three-up row that
-	     switches at lg gets ~59px for the story name in the 1024-1279 band. -->
-	<div class="grid grid-cols-1 xl:grid-cols-3 gap-4" data-testid="news-trending-grid">
+	<!-- Keyed on the content column, so three-up only ever renders with a
+	     full 1024px of real space regardless of the demos rail. -->
+	<div class="grid grid-cols-1 @5xl:grid-cols-3 gap-4" data-testid="news-trending-grid">
 		{#each TRENDING_PANELS as panel (panel.key)}
 			{@const data = panel.key === 'last30s' ? last30s : panel.key === 'thisMinute' ? thisMinute : lifetime}
 			<div class="card bg-base-100 border border-base-300" data-testid={panel.testid}>
@@ -210,16 +210,16 @@
 		{/each}
 	</div>
 
-	<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-		<form class="card bg-base-100 border border-base-300 lg:col-span-1" onsubmit={handlePublish} data-testid="news-publish-form">
+	<div class="grid grid-cols-1 @5xl:grid-cols-3 gap-4">
+		<form class="card bg-base-100 border border-base-300 @5xl:col-span-1" onsubmit={handlePublish} data-testid="news-publish-form">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Publish via webhook</h2>
 				<p class="text-xs opacity-60 leading-snug">
 					Server signs the payload, page POSTs it to <code>/api/demos/news/webhook</code>.
 					HMAC verified at the bridge, then published to every subscriber.
 				</p>
-				<label class="form-control">
-					<span class="label-text text-xs">Headline</span>
+				<label class="flex flex-col gap-1">
+					<span class="opacity-70 text-xs">Headline</span>
 					<input
 						class="input input-sm input-bordered"
 						bind:value={headline}
@@ -228,8 +228,8 @@
 						data-testid="news-headline-input"
 					/>
 				</label>
-				<label class="form-control">
-					<span class="label-text text-xs">Summary (optional)</span>
+				<label class="flex flex-col gap-1">
+					<span class="opacity-70 text-xs">Summary (optional)</span>
 					<textarea
 						class="textarea textarea-sm textarea-bordered text-xs"
 						bind:value={summary}
@@ -256,7 +256,7 @@
 			</div>
 		</form>
 
-		<div class="card bg-base-100 border border-base-300 lg:col-span-2" data-testid="news-stories">
+		<div class="card bg-base-100 border border-base-300 @5xl:col-span-2" data-testid="news-stories">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Stories ({sortedStories.length})</h2>
 				{#if sortedStories.length === 0}

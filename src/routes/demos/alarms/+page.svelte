@@ -134,12 +134,12 @@
 				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleSchedule(30)} disabled={busy} data-testid="al-schedule-30">+30s</button>
 				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleSchedule(120)} disabled={busy} data-testid="al-schedule-120">+2min</button>
 				<form onsubmit={(e) => { e.preventDefault(); handleSchedule(Number(customSeconds)) }} class="flex gap-2 items-end">
-					<label class="form-control w-28">
-						<span class="label-text text-xs">Custom (2-600s)</span>
+					<label class="flex flex-col gap-1 w-28">
+						<span class="opacity-70 text-xs">Custom (2-600s)</span>
 						<input
 							type="number"
 							class="input input-bordered input-sm pointer-coarse:min-h-11"
-							min="2" max="600" step="1"
+							min="2" max="600" step="1" required
 							bind:value={customSeconds}
 							disabled={busy}
 							data-testid="al-custom-seconds"
@@ -147,7 +147,7 @@
 					</label>
 					<button type="submit" class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="al-schedule-custom">Schedule</button>
 				</form>
-				<button class="btn btn-sm btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleCancel} disabled={busy} data-testid="al-cancel">Cancel pending</button>
+				<button class="btn btn-sm btn-ghost pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleCancel} disabled={busy || pendingAt === null} data-testid="al-cancel">Cancel pending</button>
 			</div>
 			{#if lastError}
 				<p class="text-xs text-error" data-testid="al-error">{lastError}</p>
@@ -179,7 +179,9 @@
 	<!-- Fired log -->
 	<section class="card bg-base-100 border border-base-300" data-testid="al-log">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Fired alarms (<span data-testid="al-log-count">{entries.length}</span>, newest first)</h2>
+			<!-- One span for the whole parenthetical, so the gapped card-title flex
+			     cannot split "( N ," into fragments or wrap them separately. -->
+			<h2 class="card-title text-sm">Fired alarms <span class="font-normal">(<span data-testid="al-log-count">{entries.length}</span>, newest first)</span></h2>
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="al-log-empty">Nothing has fired yet. Schedule one above.</p>
 			{:else}

@@ -264,11 +264,15 @@ test.describe('/demos/topk', () => {
 			// The `top` compute sorts by count descending - the rendered order
 			// must match, not just contain the right items.
 			expect(counts).toEqual([...counts].sort((x, y) => y - x))
-			expect(snapshot.map((r) => r.rank)).toEqual(snapshot.map((_, i) => i + 1))
+			// Competition-style tie ranks: equal counts share a rank (1, 1, 3, ...).
+			const expectedRanks = counts.map((c, i) => counts.indexOf(c) + 1)
+			expect(snapshot.map((r) => r.rank)).toEqual(expectedRanks)
+			// Bars encode share of the shown counts, not distance to the leader.
+			const totalCount = counts.reduce((sum, c) => sum + c, 0)
 			for (const row of snapshot) {
 				expect(row.progress).toBeGreaterThanOrEqual(0)
 				expect(row.progress).toBeLessThanOrEqual(100)
-				expect(row.progress).toBeCloseTo((row.count / counts[0]) * 100, 4)
+				expect(row.progress).toBeCloseTo((row.count / totalCount) * 100, 4)
 			}
 			// Valid aggregate rows always carry positive counts (asserted above),
 			// so leaderCount is positive whenever a bar exists. The markup's

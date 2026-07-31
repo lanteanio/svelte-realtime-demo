@@ -16,10 +16,13 @@ test.describe('/demos/alarms', () => {
 	test('renders every schedule control, the pending card, fired log, identity, and source link', async ({ page }) => {
 		await openAlarms(page)
 		await expect(page.getByRole('heading', { name: 'Durable alarms: one-shot timers that survive restarts' })).toBeVisible()
-		for (const id of ['al-schedule-10', 'al-schedule-30', 'al-schedule-120', 'al-schedule-custom', 'al-cancel']) {
+		for (const id of ['al-schedule-10', 'al-schedule-30', 'al-schedule-120', 'al-schedule-custom']) {
 			await expect(page.getByTestId(id)).toBeVisible()
 			await expect(page.getByTestId(id)).toBeEnabled()
 		}
+		// Cancel is honestly disabled while the pending card says nothing is pending.
+		await expect(page.getByTestId('al-cancel')).toBeVisible()
+		await expect(page.getByTestId('al-cancel')).toBeDisabled()
 		const custom = page.getByTestId('al-custom-seconds')
 		await expect(custom).toHaveValue('10')
 		await expect(custom).toHaveAttribute('min', '2')

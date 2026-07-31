@@ -192,7 +192,7 @@
 	<!-- An auto track sizes to the SVG's 300px replaced-element fallback
 	     (the svg has only a viewBox), so w-full/max-w never engage; fr
 	     tracks give the world view a definite width to fill. -->
-	<div class="grid gap-4 lg:grid-cols-[3fr_2fr]">
+	<div class="grid gap-4 @5xl:grid-cols-[3fr_2fr]">
 		<div class="card bg-base-200">
 			<div class="card-body p-3 space-y-2">
 				<svg
@@ -240,7 +240,7 @@
 				</svg>
 				<div class="flex flex-wrap items-center gap-3 text-xs">
 					<label class="label cursor-pointer gap-2 py-0">
-						<span class="label-text text-xs">Spectate</span>
+						<span class="opacity-70 text-xs">Spectate</span>
 						<input
 							type="checkbox"
 							class="toggle toggle-sm"

@@ -92,6 +92,22 @@
 		e.stopPropagation()
 	}
 
+	// Keyboard: a focused note nudges with the arrow keys - the non-pointer
+	// counterpart to dragging. Skipped while the textarea is editing.
+	function onNoteKeyDown(e) {
+		if (editing) return
+		const step = e.shiftKey ? 40 : 10
+		let dx = 0, dy = 0
+		if (e.key === 'ArrowLeft') dx = -step
+		else if (e.key === 'ArrowRight') dx = step
+		else if (e.key === 'ArrowUp') dy = -step
+		else if (e.key === 'ArrowDown') dy = step
+		else return
+		e.preventDefault()
+		onMove(Math.max(0, note.x + dx), Math.max(0, note.y + dy))
+		onMoveEnd?.()
+	}
+
 	// Close the color picker when clicking anywhere else.
 	$effect(() => {
 		if (!showColors) return
@@ -110,9 +126,13 @@
 	style:background={note.color}
 	style:cursor={editing ? 'auto' : dragging ? 'grabbing' : 'grab'}
 	style:z-index={dragging ? 999 : zIndex}
+	tabindex="0"
+	role="group"
+	aria-label="Sticky note"
 	onpointerdown={onPointerDown}
 	onpointermove={onPointerMove}
 	onpointerup={onPointerUp}
+	onkeydown={onNoteKeyDown}
 	ondblclick={(e) => { e.stopPropagation(); startEditing() }}
 >
 	<!-- Content area -->

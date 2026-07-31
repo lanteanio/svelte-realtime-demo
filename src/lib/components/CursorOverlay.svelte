@@ -100,22 +100,45 @@
 			canvas.height = h * dpr
 		}
 
+		// The canvas is pinned to the scroll container's visible box (see the
+		// scroll handler below); cursor data is in content coordinates, so
+		// subtract the scroll offset at draw time.
+		const parent = canvas.parentElement
+		const sx = parent?.scrollLeft ?? 0
+		const sy = parent?.scrollTop ?? 0
+
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 		ctx.clearRect(0, 0, w, h)
 
 		for (const [, { user, data }] of cursors) {
 			// Draw the colored arrow at the cursor position
 			ctx.save()
-			ctx.translate(data.x, data.y)
+			ctx.translate(data.x - sx, data.y - sy)
 			ctx.fillStyle = user.color
 			ctx.fill(ARROW)
 			ctx.restore()
 
 			// Blit the pre-rendered name label
 			const label = getLabel(user.name, user.color)
-			ctx.drawImage(label.canvas, data.x + 14, data.y + 4, label.width, label.height)
+			ctx.drawImage(label.canvas, data.x - sx + 14, data.y - sy + 4, label.width, label.height)
 		}
 	}
+
+	// An absolute inset-0 canvas is anchored at the CONTENT origin of the
+	// scrolling board, so a scrolled viewer would leave the overlay behind.
+	// Translate it along with the scroll so it always covers the visible box,
+	// and repaint with the matching offset.
+	$effect(() => {
+		if (!canvas) return
+		const parent = canvas.parentElement
+		if (!parent) return
+		const onScroll = () => {
+			canvas.style.transform = `translate(${parent.scrollLeft}px, ${parent.scrollTop}px)`
+			if (!raf) raf = requestAnimationFrame(draw)
+		}
+		parent.addEventListener('scroll', onScroll, { passive: true })
+		return () => parent.removeEventListener('scroll', onScroll)
+	})
 
 	// Schedule a repaint whenever the cursor data changes.
 	// Only one rAF is scheduled at a time - if cursors update faster

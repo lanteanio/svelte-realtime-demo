@@ -270,7 +270,7 @@
 		</section>
 	{/snippet}
 
-	<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+	<div class="grid grid-cols-1 @5xl:grid-cols-2 gap-4">
 		{@render panel('offset', 'Offset selections (drift)', offsetView, 'collab-offset')}
 		{@render panel('crdt', 'CRDT selections (glued)', crdtView, 'collab-crdt')}
 	</div>

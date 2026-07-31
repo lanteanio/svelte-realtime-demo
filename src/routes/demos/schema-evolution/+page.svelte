@@ -128,7 +128,7 @@
 	</header>
 
 	<!-- Two panels side by side -->
-	<section class="grid sm:grid-cols-2 gap-4" data-testid="panels">
+	<section class="grid @2xl:grid-cols-2 gap-4" data-testid="panels">
 		<div class="card bg-base-100 border border-base-300" data-testid="v2-panel">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Live (v2): subscribed normally</h2>

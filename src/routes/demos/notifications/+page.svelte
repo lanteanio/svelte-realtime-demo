@@ -269,8 +269,8 @@
 		<div class="card-body py-3 space-y-3">
 			<h2 class="card-title text-sm">Send a notification</h2>
 			<div class="flex flex-wrap gap-2 items-end">
-				<label class="form-control flex-1 min-w-[14rem]">
-					<span class="label-text text-xs">Recipient</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[14rem]">
+					<span class="opacity-70 text-xs">Recipient</span>
 					<select
 						class="select select-bordered select-sm"
 						bind:value={selectedRecipientId}
@@ -286,8 +286,8 @@
 						{/if}
 					</select>
 				</label>
-				<label class="form-control flex-1 min-w-[10rem]">
-					<span class="label-text text-xs">Schedule ({scheduleSec}s)</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
+					<span class="opacity-70 text-xs">Schedule ({scheduleSec}s)</span>
 					<!-- Compact dress on fine pointers, 44px floor where taps land.
 					     ~10px per stop is untappable; steppers give exact-second control on coarse pointers. -->
 					<div class="flex items-center gap-2">

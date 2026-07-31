@@ -48,8 +48,24 @@
 		return items.find((it) => it.id === id)?.name ?? id
 	}
 
+	// Label updates live during the drag; commits are throttled mid-drag and
+	// the release handler always sends the final value.
+	let speedSendTimer = null
+	function handleSpeedInput(e) {
+		speedVal = Number(e.target.value)
+		if (!speedSendTimer) {
+			speedSendTimer = setTimeout(() => {
+				speedSendTimer = null
+				setSpeed(speedVal)
+			}, 250)
+		}
+	}
 	async function handleSpeedChange(e) {
 		speedVal = Number(e.target.value)
+		if (speedSendTimer) {
+			clearTimeout(speedSendTimer)
+			speedSendTimer = null
+		}
 		await setSpeed(speedVal)
 	}
 
@@ -80,20 +96,25 @@
 	<div class="card bg-base-200">
 		<div class="card-body py-3 space-y-3">
 			<div class="flex flex-wrap gap-3 items-end">
-				<label class="form-control flex-1 min-w-[12rem]">
-					<span class="label-text text-xs">Firehose ({speedVal} events/sec)</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[12rem]">
+					<span class="opacity-70 text-xs">Firehose ({speedVal} events/sec)</span>
 					<!-- Compact on fine pointers, 44px where taps land. -->
 					<input
 						type="range"
 						class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
 						min="0" max="50" step="1"
 						value={speedVal}
+						oninput={handleSpeedInput}
 						onchange={handleSpeedChange}
 						data-testid="speed-input"
 					/>
+					<div class="flex justify-between text-[10px] opacity-60">
+						<span>0 = pause</span>
+						<span>50</span>
+					</div>
 				</label>
 				<div class="flex flex-col gap-1">
-					<span class="label-text text-xs">Bias</span>
+					<span class="opacity-70 text-xs">Bias</span>
 					<div class="join">
 						{#each BIASES as b (b.id)}
 							<button
@@ -107,12 +128,15 @@
 							</button>
 						{/each}
 					</div>
+					<span class="text-xs opacity-60" data-testid="bias-hint">
+						{BIASES.find((b) => b.id === biasVal)?.hint}
+					</span>
 				</div>
 			</div>
 		</div>
 	</div>
 
-	<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+	<div class="grid grid-cols-1 @2xl:grid-cols-2 gap-4">
 		{#each [
 			{ key: 'last10s',    title: 'Last 10 seconds',  subtitle: 'sliding window, 1s hops',  data: last10s,    testid: 'lb-last10s' },
 			{ key: 'last1min',   title: 'Last minute',      subtitle: 'sliding window, 5s hops',  data: last1min,   testid: 'lb-last1min' },
@@ -123,20 +147,25 @@
 				<div class="card-body py-3 space-y-2">
 					<div class="flex justify-between items-baseline">
 						<h2 class="card-title text-sm">{panel.title}</h2>
-						<span class="text-xs opacity-50">{panel.subtitle}</span>
+						<span class="text-xs opacity-50">{panel.subtitle} &middot; bars: share of shown</span>
 					</div>
 					{#if !panel.data?.top?.length}
-						<p class="opacity-40 text-xs py-3" data-testid="{panel.testid}-empty">Waiting for first events...</p>
+						<p class="text-base-content/70 text-xs py-3" data-testid="{panel.testid}-empty">Connecting to firehose...</p>
 					{:else}
-						{@const leaderCount = panel.data.top[0].count}
+						{@const totalCount = panel.data.top.reduce((sum, e) => sum + e.count, 0)}
 						<ol class="space-y-1" data-testid="{panel.testid}-rows">
 							{#each panel.data.top as entry, idx (entry.itemId)}
+								<!-- Competition-style tie ranks: equal counts share a rank (1, 1, 3, ...). -->
+								{@const rank = panel.data.top.findIndex((e) => e.count === entry.count) + 1}
 								<li class="flex items-center gap-2 text-sm" data-testid="{panel.testid}-row">
-									<span class="opacity-50 font-mono w-4 shrink-0">{idx + 1}</span>
+									<span class="opacity-50 font-mono w-4 shrink-0">{rank}</span>
 									<span class="flex-1 min-w-24 truncate" data-testid="{panel.testid}-name">{nameById(entry.itemId)}</span>
-									<span class="font-mono text-xs opacity-60 w-12 shrink-0 text-right" data-testid="{panel.testid}-count">{entry.count}</span>
-									<div class="w-16 min-w-0 shrink h-2 bg-base-200 rounded overflow-hidden" data-testid="{panel.testid}-bar">
-										<div class="h-full bg-primary" style:width="{leaderCount > 0 ? (entry.count / leaderCount) * 100 : 0}%"></div>
+									<span class="font-mono text-xs opacity-60 shrink-0 text-right tabular-nums" data-testid="{panel.testid}-count">{entry.count}</span>
+									<!-- Share-of-shown normalization keeps the encoding honest (a leader bar
+									     is not always full); the bar yields entirely below the narrow rung
+									     before the name ever truncates. -->
+									<div class="w-16 min-w-0 shrink h-2 bg-base-200 rounded overflow-hidden hidden @xl:block" data-testid="{panel.testid}-bar">
+										<div class="h-full bg-primary" style:width="{totalCount > 0 ? (entry.count / totalCount) * 100 : 0}%"></div>
 									</div>
 								</li>
 							{/each}

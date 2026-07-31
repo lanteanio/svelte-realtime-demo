@@ -121,7 +121,7 @@
 					</span>
 				</div>
 			</div>
-			<dl class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mt-1">
+			<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-xs mt-1">
 				<div>
 					<dt class="opacity-60">connections</dt>
 					<dd class="font-bold tabular-nums text-lg" data-testid="ops-connections">{snap?.transport?.connections ?? 0}</dd>
@@ -160,12 +160,12 @@
 		</div>
 	</section>
 
-	<div class="grid md:grid-cols-2 gap-4">
+	<div class="grid @3xl:grid-cols-2 gap-4">
 		<!-- Handlers -->
 		<section class="card bg-base-100 border border-base-300" data-testid="ops-handlers-card">
 			<div class="card-body py-3 space-y-1">
 				<h2 class="card-title text-sm">
-					Handlers (<span data-testid="ops-handlers-total">{snap?.handlers?.total ?? 0}</span>)
+					Handlers <span class="font-normal">(<span data-testid="ops-handlers-total">{snap?.handlers?.total ?? 0}</span>)</span>
 				</h2>
 				{#if byKind}
 					<ul class="text-xs font-mono space-y-0.5" data-testid="ops-handlers-kinds">
@@ -243,7 +243,7 @@
 						protection: <span class="font-mono" data-testid="ops-protection">{snap?.transport?.protection ?? '-'}</span>
 					</span>
 				</div>
-				<dl class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+				<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-2 text-xs">
 					<div>
 						<dt class="opacity-60">publish/s</dt>
 						<dd class="font-bold tabular-nums" data-testid="ops-publish-rate">{(pressure.publishRate ?? 0).toFixed(0)}</dd>
@@ -290,7 +290,7 @@
 	<section class="card bg-base-100 border border-base-300" data-testid="ops-dlq-card">
 		<div class="card-body py-3 space-y-1">
 			<h2 class="card-title text-sm">
-				Outbound-webhook DLQ (<span data-testid="ops-dlq-total">{dlq?.total ?? 0}</span>)
+				Outbound-webhook DLQ <span class="font-normal">(<span data-testid="ops-dlq-total">{dlq?.total ?? 0}</span>)</span>
 			</h2>
 			{#if dlq === null}
 				<p class="text-xs opacity-40" data-testid="ops-dlq-off">No dead-letter store configured.</p>

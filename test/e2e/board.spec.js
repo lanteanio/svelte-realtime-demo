@@ -30,7 +30,7 @@ test.describe('/board/[slug]', () => {
 		await expect(page.locator('h1')).toHaveText(title)
 		await expectOnline(page, 1)
 		await expect(boardNotes(page)).toHaveCount(0)
-		await expect(page.getByText('Double-click anywhere to add a note')).toBeVisible()
+		await expect(page.getByText(/Double-(click|tap) anywhere to add a note/)).toBeVisible()
 		await expect(activityTicker(page)).toContainText('No activity yet')
 		await expect(page.getByLabel(/Set background to #/)).toHaveCount(6)
 		await expect(page.locator('.fab-trigger')).toBeVisible()

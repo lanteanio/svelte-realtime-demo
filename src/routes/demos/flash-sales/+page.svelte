@@ -113,26 +113,27 @@
 	async function handleStress() {
 		if (stressBusy) return
 		stressBusy = true
-		stressResult = null
 		const target = stressTarget
 		const n = Math.max(1, Math.min(200, Math.floor(stressCount)))
+		// Live tally: each settlement bumps its counter immediately, so the
+		// FIFO drain is visible WHILE the burst runs instead of only after
+		// every promise settles.
+		stressResult = { ok: 0, soldOut: 0, lockTimeout: 0, other: 0 }
 		// `.fresh` bypasses the client SDK's microtask dedup so each call
 		// in this batch actually fires its own RPC. Single-buy uses the
 		// default coalescing path so an accidental double-click doesn't
 		// double-spend stock; the stress button explicitly opts out.
-		const results = await Promise.allSettled(Array.from({ length: n }, () => buyProduct.fresh(target)))
-		const tally = { ok: 0, soldOut: 0, lockTimeout: 0, other: 0 }
-		for (const r of results) {
-			if (r.status === 'fulfilled') {
-				tally.ok++
-			} else {
-				const code = r.reason?.code ?? ''
-				if (code === 'SOLD_OUT') tally.soldOut++
-				else if (code === 'LOCK_TIMEOUT') tally.lockTimeout++
-				else tally.other++
-			}
-		}
-		stressResult = tally
+		await Promise.allSettled(Array.from({ length: n }, () =>
+			buyProduct.fresh(target).then(
+				() => { stressResult = { ...stressResult, ok: stressResult.ok + 1 } },
+				(err) => {
+					const code = err?.code ?? ''
+					if (code === 'SOLD_OUT') stressResult = { ...stressResult, soldOut: stressResult.soldOut + 1 }
+					else if (code === 'LOCK_TIMEOUT') stressResult = { ...stressResult, lockTimeout: stressResult.lockTimeout + 1 }
+					else stressResult = { ...stressResult, other: stressResult.other + 1 }
+				}
+			)
+		))
 		stressBusy = false
 	}
 
@@ -144,13 +145,17 @@
 		if (couponBusy) return
 		couponBusy = true
 		try {
-			const before = state.alreadyClaimed
+			const poolBefore = state.couponPoolRemaining
 			const result = await claimCoupon()
 			// `live.idempotent` returns the cached first response for the
 			// same userId; the second call resolves with the same shape.
-			// The page disambiguates "fresh ok" from "duplicate" via the
-			// page-state flag flipped on first success.
-			couponResult = before
+			// A FRESH claim decrements the pool below what this tab already
+			// saw; a cached replay carries a pool value at or above it. That
+			// holds across tabs (a tab opened after the claim seeds the
+			// decremented pool), where a per-tab claimed flag would mislabel
+			// the duplicate as fresh.
+			const duplicate = state.alreadyClaimed || result.poolRemaining >= poolBefore
+			couponResult = duplicate
 				? { kind: 'duplicate', code: result.code, poolRemaining: result.poolRemaining }
 				: { kind: 'ok', code: result.code, poolRemaining: result.poolRemaining }
 			state = { ...state, alreadyClaimed: true, couponPoolRemaining: result.poolRemaining }
@@ -265,7 +270,7 @@
 	</section>
 
 	<!-- Product cards -->
-	<section class="grid sm:grid-cols-3 gap-3" data-testid="products-section">
+	<section class="grid @3xl:grid-cols-3 gap-3" data-testid="products-section">
 		{#each productsList as p (p.id)}
 			<div class="card bg-base-100 border border-base-300" data-testid={'product-card-' + p.id}>
 				<div class="card-body py-3 space-y-2">
@@ -297,18 +302,31 @@
 				</div>
 			</div>
 		{:else}
-			<p class="opacity-40 text-sm sm:col-span-3">loading...</p>
+			<!-- Skeletons hold the grid's shape until the product stream lands. -->
+			{#each Array(3) as _, i (i)}
+				<div class="card bg-base-100 border border-base-300" data-testid="product-skeleton">
+					<div class="card-body py-3 space-y-2">
+						<div class="skeleton h-4 w-2/3"></div>
+						<div class="skeleton h-6 w-1/3"></div>
+						<div class="skeleton h-2 w-full"></div>
+						<div class="skeleton h-8 w-full"></div>
+					</div>
+				</div>
+			{/each}
 		{/each}
 	</section>
 
-	{#if lastOutcome}
-		<div class="alert {outcomeAlert(lastOutcome.kind)} py-2" data-testid="buy-outcome">
-			<span class="text-sm">
-				<strong data-testid="buy-outcome-kind">{outcomeLabel(lastOutcome.kind)}</strong>
-				{#if lastOutcome.detail} - {lastOutcome.detail}{/if}
-			</span>
-		</div>
-	{/if}
+	<!-- Fixed-height slot: the outcome appearing must not shove the page. -->
+	<div class="min-h-10">
+		{#if lastOutcome}
+			<div class="alert {outcomeAlert(lastOutcome.kind)} py-2" data-testid="buy-outcome">
+				<span class="text-sm">
+					<strong data-testid="buy-outcome-kind">{outcomeLabel(lastOutcome.kind)}</strong>
+					{#if lastOutcome.detail} - {lastOutcome.detail}{/if}
+				</span>
+			</div>
+		{/if}
+	</div>
 
 	<!-- Stress test -->
 	<section class="card bg-base-200" data-testid="stress-section">
@@ -321,23 +339,24 @@
 				is {state.perBuyDelayMs}ms.
 			</p>
 			<div class="flex flex-wrap gap-2 items-end">
-				<label class="form-control flex-1 min-w-[10rem]">
-					<span class="label-text text-xs">Target product</span>
-					<select class="select select-bordered select-sm" bind:value={stressTarget} disabled={stressBusy} data-testid="stress-target">
+				<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
+					<span class="opacity-70 text-xs">Target product</span>
+					<select class="select select-bordered select-sm" bind:value={stressTarget} disabled={stressBusy || productsList.length === 0} data-testid="stress-target">
 						{#each productsList as p (p.id)}
 							<option value={p.id}>{p.name}</option>
 						{/each}
 					</select>
 				</label>
-				<label class="form-control flex-1 min-w-[8rem]">
-					<span class="label-text text-xs">Count ({stressCount})</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[8rem]">
+					<span class="opacity-70 text-xs">Count ({stressCount})</span>
 					<input type="range" class="range range-sm" min="1" max="50" step="1" bind:value={stressCount} disabled={stressBusy} data-testid="stress-count" />
 				</label>
-				<button class="btn btn-sm btn-warning" onclick={handleStress} disabled={stressBusy} data-testid="stress-go">
+				<button class="btn btn-sm btn-warning" onclick={handleStress} disabled={stressBusy || productsList.length === 0} data-testid="stress-go">
 					{stressBusy ? 'Running...' : `Spam ${stressCount} buys`}
 				</button>
-				<button class="btn btn-sm btn-outline btn-error" onclick={handleReset} disabled={resetting} data-testid="reset">
-					Reset sale
+				<!-- Page-scoped reset, so its label owns its real blast radius. -->
+				<button class="btn btn-sm btn-outline btn-error ml-auto" onclick={handleReset} disabled={resetting} data-testid="reset">
+					Reset demo (stock + coupons)
 				</button>
 			</div>
 			{#if stressResult}

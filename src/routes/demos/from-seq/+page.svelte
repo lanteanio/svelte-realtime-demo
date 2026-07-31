@@ -19,6 +19,7 @@
 <script>
 	import { onMount, untrack } from 'svelte'
 	import { SvelteSet } from 'svelte/reactivity'
+	import { status } from 'svelte-adapter-uws/client'
 	import {
 		myFromSeqState,
 		eventStream,
@@ -191,6 +192,21 @@
 	function timeOf(ts) {
 		return new Date(ts).toLocaleTimeString()
 	}
+
+	// The rows carry their seq in a dedicated column; the message repeats it
+	// on the wire, so strip the suffix for display only.
+	function messageKind(m) {
+		return String(m ?? '').replace(/\s#\d+$/, '')
+	}
+
+	// "subscribed" is only claimed when the connection is up and data has
+	// actually arrived; a client-side toggle alone proves nothing offline.
+	const displayStatus = $derived(
+		!subscribed ? 'paused'
+		: $status === 'open' || $status === 'suspended'
+			? (entries.length === 0 ? 'subscribing...' : 'subscribed')
+			: 'reconnecting'
+	)
 </script>
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
@@ -198,16 +214,10 @@
 
 		<h1 class="text-2xl font-bold mt-2">Reconnect: three-tier gap fill via delta.fromSeq</h1>
 		<p class="text-sm opacity-70 mt-1">
-			A 1Hz <code>live.cron</code> publishes events tagged
-			<code>live</code>. The loader returns the recent window tagged
-			<code>rehydrate</code>. <code>delta.fromSeq(sinceSeq)</code>
-			reads from the same durable store and tags <code>fromSeq</code>
-			on every event it returns. Pause the subscription, wait, resume:
-			the framework's bounded replay buffer covers short gaps (events
-			arrive with their original <code>live</code> tag, transparent
-			to the page); for longer gaps past the buffer size,
-			<code>delta.fromSeq</code> fills the rest tagged
-			<code>fromSeq</code>.
+			A 1Hz <code>live.cron</code> publishes numbered events and each row's
+			badge names the path that delivered it. Pause, wait, then resume:
+			short gaps fill from the replay buffer, longer ones through the
+			<code>delta.fromSeq</code> durable bridge.
 		</p>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
@@ -223,8 +233,9 @@
 	<section class="card bg-base-200" data-testid="controls-section">
 		<div class="card-body py-3 space-y-2">
 			<div class="flex flex-wrap items-center gap-2">
+				<!-- Neutral action hues: success/info/warning stay reserved for tier semantics. -->
 				<button
-					class="btn btn-sm {subscribed ? 'btn-warning' : 'btn-success'}"
+					class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11 {subscribed ? 'btn-outline btn-primary' : 'btn-primary'}"
 					onclick={togglePause}
 					disabled={fastPath && subscribed && !fastPathReady}
 					data-testid="toggle-subscribe"
@@ -232,7 +243,7 @@
 					{subscribed ? 'Pause subscription' : `Resume subscription`}
 				</button>
 				<button
-					class="btn btn-sm {fastPath ? 'btn-primary' : 'btn-outline'}"
+					class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11 {fastPath ? 'btn-primary' : 'btn-outline'}"
 					onclick={toggleFastPath}
 					disabled={!subscribed}
 					aria-pressed={fastPath}
@@ -241,18 +252,25 @@
 					{fastPath ? 'Fast fromSeq armed' : 'Arm fast fromSeq'}
 				</button>
 				<span class="text-xs opacity-60" data-testid="status">
-					status: <strong>{subscribed ? 'subscribed' : 'paused'}</strong>
+					status: <strong>{displayStatus}</strong>
 					{#if !subscribed}<span class="font-mono ml-2">({pausedFor()}s)</span>{/if}
 				</span>
-				<span class="ml-auto flex gap-2">
-					<span class="badge badge-success badge-sm" data-testid="tier-live">live: {tierCounts.live}</span>
-					<span class="badge badge-info badge-sm" data-testid="tier-rehydrate">rehydrate: {tierCounts.rehydrate}</span>
-					<span class="badge badge-warning badge-sm" data-testid="tier-fromseq">fromSeq: {tierCounts.fromSeq}</span>
+				<span class="ml-auto flex flex-wrap justify-end gap-2">
+					<span class="badge badge-success badge-sm whitespace-nowrap" data-testid="tier-live">live: {tierCounts.live}</span>
+					<span class="badge badge-info badge-sm whitespace-nowrap" data-testid="tier-rehydrate">rehydrate: {tierCounts.rehydrate}</span>
+					<span class="badge badge-warning badge-sm whitespace-nowrap" data-testid="tier-fromseq">fromSeq: {tierCounts.fromSeq}</span>
 					{#if replayFillSeqs.size > 0}
-						<span class="badge badge-secondary badge-sm" data-testid="tier-replay">replay: {replayFillSeqs.size}</span>
+						<span class="badge badge-secondary badge-sm whitespace-nowrap" data-testid="tier-replay">replay: {replayFillSeqs.size}</span>
 					{/if}
 				</span>
 			</div>
+			<!-- One visible mapping from delivery path to on-row tag, in rest state. -->
+			<p class="text-xs opacity-70" data-testid="tier-legend">
+				replay buffer &rarr; <span class="badge badge-success badge-xs">live</span>
+				+ <span class="badge badge-secondary badge-xs">replay</span> badge;
+				durable bridge &rarr; <span class="badge badge-warning badge-xs">fromSeq</span>;
+				loader &rarr; <span class="badge badge-info badge-xs">rehydrate</span>
+			</p>
 			{#if fastPath}
 				<p class="text-xs opacity-70" data-testid="fromseq-fast-hint">
 					{#if !fastPathReady && subscribed}
@@ -291,7 +309,7 @@
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="events-empty">no events yet</p>
 			{:else}
-				<ul class="space-y-1 text-xs font-mono max-h-96 overflow-y-auto" data-testid="events-list">
+				<ul class="space-y-1 text-xs font-mono max-h-96 overflow-y-auto overscroll-contain" data-testid="events-list">
 					{#each entries as e (e.id)}
 						<li class="flex items-center gap-2" data-testid="event-row">
 							<span class="opacity-50 w-20">{timeOf(e.ts)}</span>
@@ -300,7 +318,7 @@
 							{#if replayFillSeqs.has(e.seq)}
 								<span class="badge badge-xs badge-secondary" data-testid={'event-replay-' + e.id}>replay</span>
 							{/if}
-							<span class="flex-1 truncate" data-testid="event-message">{e.message}</span>
+							<span class="flex-1 truncate" data-testid="event-message">{messageKind(e.message)}</span>
 						</li>
 					{/each}
 				</ul>

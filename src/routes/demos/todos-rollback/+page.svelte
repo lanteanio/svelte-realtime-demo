@@ -128,7 +128,7 @@
 				/>
 				<!-- daisyUI 5 .label sets white-space: nowrap; without the
 				     override this caption clips mid-word below 640px. -->
-				<span class="label-text whitespace-normal">
+				<span class="opacity-70 whitespace-normal">
 					<strong>Force fail</strong> - when on, every mutate
 					rejects with <code>LiveError('FORCED')</code>.
 				</span>

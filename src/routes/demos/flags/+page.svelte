@@ -46,6 +46,10 @@
 			await setFlag(name, value)
 		} catch (err) {
 			opError = `${err?.code ?? 'ERROR'}: ${err?.message ?? err}`
+			// A failed commit produces no push, so the optimistic draft would
+			// keep showing state the server rejected; resync from the store.
+			if (name === 'banner' && $banner) bannerDraft = { ...$banner }
+			if (name === 'dark-launch' && $darkLaunch) darkDraft = { ...$darkLaunch }
 		}
 	}
 
@@ -124,8 +128,8 @@
 					/>
 					<span class="text-sm">Promo banner</span>
 				</label>
-				<label class="form-control flex-1 min-w-[14rem]">
-					<span class="label-text text-xs">Banner text (commits on blur / Enter)</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[14rem]">
+					<span class="opacity-70 text-xs">Banner text (commits on blur / Enter)</span>
 					<input
 						class="input input-bordered input-sm pointer-coarse:min-h-11"
 						value={bannerDraft.text}
@@ -149,8 +153,8 @@
 					/>
 					<span class="text-sm">Dark-launch: new checkout</span>
 				</label>
-				<label class="form-control flex-1 min-w-[14rem]">
-					<span class="label-text text-xs">
+				<label class="flex flex-col gap-1 flex-1 min-w-[14rem]">
+					<span class="opacity-70 text-xs">
 						Rollout: <span class="font-mono" data-testid="fl-rollout-value">{darkDraft.rolloutPct}%</span>
 					</span>
 					<!-- A finger cannot land a 1% stop on the track; steppers give exact-value control on coarse pointers. -->
@@ -216,7 +220,7 @@
 			{/if}
 
 			<div
-				class="rounded border p-4 flex items-center justify-between gap-4"
+				class="rounded border p-4 flex flex-wrap items-center justify-between gap-4"
 				class:border-primary={showNewCheckout}
 				class:border-base-300={!showNewCheckout}
 				data-testid="fl-checkout-tile"
@@ -231,8 +235,8 @@
 					{/if}
 				</div>
 				<div class="text-right text-xs opacity-50">
-					<div>your bucket: <span class="font-mono" data-testid="fl-bucket">{bucket}</span> / 99</div>
-					<div>rollout: <span class="font-mono">{$darkLaunch?.rolloutPct ?? 0}%</span> {$darkLaunch?.enabled ? '' : '(off)'}</div>
+					<div class="whitespace-nowrap">your bucket: <span class="font-mono" data-testid="fl-bucket">{bucket}</span> (of 0-99)</div>
+					<div class="whitespace-nowrap">rollout: <span class="font-mono">{$darkLaunch?.rolloutPct ?? 0}%</span> {$darkLaunch?.enabled ? '' : '(off)'}</div>
 				</div>
 			</div>
 			<p class="text-xs opacity-50">

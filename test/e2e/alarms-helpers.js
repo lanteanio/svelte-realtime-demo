@@ -8,7 +8,11 @@ export async function openAlarms(page, target = '/demos/alarms') {
 }
 
 export async function cancelPending(page) {
-	await page.getByTestId('al-cancel').click()
+	// Cancel is honestly disabled when nothing is pending; only click when
+	// there is something to cancel.
+	if (await page.getByTestId('al-cancel').isEnabled()) {
+		await page.getByTestId('al-cancel').click()
+	}
 	await expect(page.getByTestId('al-pending-empty')).toBeVisible({ timeout: 5_000 })
 }
 

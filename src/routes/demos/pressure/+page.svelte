@@ -28,6 +28,10 @@
 	let busyCount = $state(/** @type {number | null} */ (null))
 	let lastBurst = $state(/** @type {{ count: number, ts: number } | null} */ (null))
 	let lastError = $state('')
+	// Timer-driven so the confirmation actually expires; a render-time age
+	// check only re-evaluates when the burst changes and never hides itself.
+	let burstFresh = $state(false)
+	let burstTimer
 
 	onMount(() => {
 		const offTick = pressureSnapshot.subscribe((v) => {
@@ -49,6 +53,9 @@
 		try {
 			const r = await generateLoad(n)
 			lastBurst = { count: r?.generated ?? n, ts: Date.now() }
+			burstFresh = true
+			clearTimeout(burstTimer)
+			burstTimer = setTimeout(() => { burstFresh = false }, 4000)
 		} catch (err) {
 			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 		} finally {
@@ -86,15 +93,16 @@
 		</p>
 	</header>
 
-	<div class="grid md:grid-cols-2 gap-4">
+	<div class="grid @3xl:grid-cols-2 gap-4">
 		<div class="card bg-base-200">
 			<div class="card-body py-3">
 				<h2 class="card-title text-sm">Current pressure</h2>
-				<div class="flex items-center gap-3">
+				<div class="flex items-center gap-3 flex-wrap">
 					<span class="badge {snap ? reasonClass(snap.reason) : 'badge-ghost'}" data-testid="reason">
 						{snap?.reason ?? '...'}
 					</span>
 					<!-- 0.6: the composite 0..1 pressure scalar behind the reason enum -->
+					<span class="text-xs opacity-70">pressure</span>
 					<progress
 						class="progress progress-warning w-24"
 						value={snap?.value ?? 0}
@@ -102,14 +110,15 @@
 						data-testid="pressure-value"
 						title="composite pressure scalar (0..1)"
 					></progress>
+					<span class="text-xs font-mono tabular-nums" data-testid="pressure-scalar">{(snap?.value ?? 0).toFixed(2)} / 1.00</span>
 					<span class="text-xs opacity-60">
 						WS: <span class="font-mono">{$status}</span>
 					</span>
 				</div>
-				<!-- Four fixed columns fuse their labels once the md: two-card
-				     row lands this card in ~230px at 768; two columns until the
-				     xl band keeps every label separated. -->
-				<dl class="grid grid-cols-2 xl:grid-cols-4 gap-2 text-xs mt-2">
+				<!-- Four fixed columns fuse their labels when this card gets too
+				     narrow; keyed on the content column, four-up waits until the
+				     two-card row gives each stat real room. -->
+				<dl class="grid grid-cols-2 @5xl:grid-cols-4 gap-2 text-xs mt-2">
 					<div>
 						<dt class="opacity-60">subs/conn</dt>
 						<dd class="font-bold tabular-nums" data-testid="subscriber-ratio">{(snap?.subscriberRatio ?? 0).toFixed(2)}</dd>
@@ -155,6 +164,11 @@
 						</div>
 					{/if}
 				</dl>
+				<p class="text-xs opacity-60 mt-1">
+					pressure is the composite scalar behind the reason badge - admission
+					sheds background work as it reaches 1.00. backpressured counts
+					connections with unsent outbound bytes.
+				</p>
 			</div>
 		</div>
 
@@ -166,9 +180,10 @@
 				</h2>
 				<div class="flex items-end h-16 gap-px" data-testid="sparkline">
 					{#each history as v, i (i + ':' + v)}
+						<!-- Zero samples stay a 1px baseline hairline; only real ticks get bars. -->
 						<div
 							class="flex-1 bg-primary"
-							style:height="{Math.max(2, (v / sparkMax) * 64)}px"
+							style:height="{v === 0 ? 1 : Math.max(2, (v / sparkMax) * 64)}px"
 							style:opacity={0.5 + (i / Math.max(history.length, 1)) * 0.5}
 						></div>
 					{:else}
@@ -176,7 +191,7 @@
 					{/each}
 				</div>
 				<div class="text-xs opacity-60">
-					peak: {sparkMax.toFixed(0)} pub/s
+					peak: {(history.length ? Math.max(...history) : 0).toFixed(0)} pub/s
 				</div>
 			</div>
 		</div>
@@ -186,29 +201,25 @@
 		<div class="card-body py-3">
 			<h2 class="card-title text-sm">Load generator</h2>
 			<div class="flex flex-wrap gap-2 items-center">
-				<button class="btn btn-sm btn-primary" onclick={() => handleLoad(100)} disabled={busy} data-testid="load-100">
+				<!-- One action family, one hue - magnitude rides on the label; the
+				     warning color stays reserved for Simulate shed. -->
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleLoad(100)} disabled={busy} data-testid="load-100">
 					{busyCount === 100 ? 'sending +100...' : '+100'}
 				</button>
-				<button class="btn btn-sm btn-secondary" onclick={() => handleLoad(1000)} disabled={busy} data-testid="load-1000">
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleLoad(1000)} disabled={busy} data-testid="load-1000">
 					{busyCount === 1000 ? 'sending +1000...' : '+1000'}
 				</button>
-				<button class="btn btn-sm btn-accent" onclick={() => handleLoad(5000)} disabled={busy} data-testid="load-5000">
+				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleLoad(5000)} disabled={busy} data-testid="load-5000">
 					{busyCount === 5000 ? 'sending +5000...' : '+5000 (cap)'}
 				</button>
-				<button class="btn btn-sm btn-warning" onclick={handleSimulate} data-testid="simulate-shed">
+				<button class="btn btn-sm btn-warning pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleSimulate} data-testid="simulate-shed">
 					Simulate shed
 				</button>
-				<button class="btn btn-sm btn-outline btn-error ml-auto" onclick={handleClear} data-testid="clear-shed">
-					Clear shed log
-				</button>
 			</div>
-			{#if lastBurst}
-				{@const ageMs = Date.now() - lastBurst.ts}
-				{#if ageMs < 4000}
-					<p class="text-xs text-success" data-testid="last-burst">
-						sent +{lastBurst.count} events at {fmtTs(lastBurst.ts)}
-					</p>
-				{/if}
+			{#if lastBurst && burstFresh}
+				<p class="text-xs text-success" data-testid="last-burst">
+					sent +{lastBurst.count} events at {fmtTs(lastBurst.ts)}
+				</p>
 			{/if}
 			{#if lastError}
 				<p class="text-xs text-error" data-testid="load-error">{lastError}</p>
@@ -230,7 +241,13 @@
 
 	<div class="card bg-base-100 border border-base-300 min-h-[12rem]">
 		<div class="card-body py-3">
-			<h2 class="card-title text-sm">Shed log ({shedRows.length})</h2>
+			<!-- The clear control lives with the log it clears. -->
+			<div class="flex items-center justify-between gap-2">
+				<h2 class="card-title text-sm">Shed log ({shedRows.length})</h2>
+				<button class="btn btn-sm btn-outline btn-error" onclick={handleClear} disabled={shedRows.length === 0} data-testid="clear-shed">
+					Clear shed log
+				</button>
+			</div>
 			<!-- Rows are a fixed 39rem grid; without a scroll container the
 			     reason column - the payload the intro promises - clips off
 			     phone viewports with no cue that it exists. -->
@@ -253,7 +270,7 @@
 						<span><span class="badge badge-ghost badge-xs">{e.source}</span></span>
 					</li>
 				{:else}
-					<li class="opacity-40 text-center py-4">No shed decisions yet.</li>
+					<li class="text-base-content/70 text-center py-4">No shed decisions yet - fire +1000 or press Simulate shed above.</li>
 				{/each}
 			</ul>
 		</div>

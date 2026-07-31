@@ -193,7 +193,17 @@
 		const lot = activeLotForCard(card)
 		const top = lot ? topBid(lot) : null
 		const floor = top ? top.amount + 1 : card.startingPrice
-		if (!Number.isFinite(amount) || amount < floor) return
+		if (!Number.isFinite(amount) || amount < floor) {
+			// A rival bid can raise the floor between reading and pressing
+			// Enter; a silent no-op strands the user. Say so and re-arm the
+			// draft at the new floor.
+			card.draftAmount = floor
+			card.floorNotice = top
+				? `outbid - top is now $${top.amount}, bid at least $${floor}`
+				: `bid at least $${floor}`
+			return
+		}
+		card.floorNotice = ''
 		card.resolve({
 			amount,
 			bidderName: me?.name ?? '(unknown)',
@@ -225,6 +235,18 @@
 	let formError = $state('')
 
 	const myActiveCount = $derived(activeList.filter((l) => l.sellerId === me?.id).length)
+	// The first unmet listing rule, said out loud instead of a mute disable.
+	const listHint = $derived.by(() => {
+		if (listing) return ''
+		if (item.trim().length === 0) return 'Name the item to list it.'
+		if (!Number.isFinite(startingPrice)) return 'Set a starting price.'
+		if (!Number.isFinite(reservePrice) || reservePrice < startingPrice) return 'Reserve must be at least the starting price.'
+		if (myActiveCount >= (caps.maxActivePerSeller ?? 3)) return `You are at the ${caps.maxActivePerSeller ?? 3}-lot limit; wait for one to close.`
+		return ''
+	})
+	// With nothing live, the creation affordance leads on small rungs so the
+	// first viewport is not two empty cards.
+	const nothingLive = $derived(inbox.length === 0 && activeList.length === 0)
 	const canList = $derived(
 		!listing
 			&& item.trim().length > 0
@@ -309,8 +331,8 @@
 	}
 </script>
 
-<div class="max-w-4xl mx-auto p-8 space-y-4">
-	<header>
+<div class="max-w-4xl mx-auto p-8 flex flex-col gap-4">
+	<header class="order-first">
 
 		<h1 class="text-2xl font-bold mt-2">Auctions: deadline-bounded bid race</h1>
 		<p class="text-sm opacity-70 mt-1">
@@ -329,7 +351,7 @@
 				{#if otherUsers.length === 0}
 					<span class="ml-2 badge badge-warning badge-sm" data-testid="alone-badge">alone here</span>
 				{:else}
-					<span class="ml-2 badge badge-success badge-sm">{otherUsers.length} potential bidder{otherUsers.length === 1 ? '' : 's'}</span>
+					<span class="ml-2 badge badge-success badge-outline badge-sm">{otherUsers.length} potential bidder{otherUsers.length === 1 ? '' : 's'}</span>
 				{/if}
 				{#if pushReady}
 					<span data-testid="push-ready" hidden></span>
@@ -403,6 +425,9 @@
 									>
 										Pass
 									</button>
+									{#if card.floorNotice}
+										<span class="text-xs text-warning" data-testid="inbox-card-floor-note">{card.floorNotice}</span>
+									{/if}
 								</form>
 							{:else if card.state === 'submitted'}
 								<p class="text-xs" data-testid="inbox-card-submitted">
@@ -460,7 +485,7 @@
 					to every connected tab.
 				</p>
 			{:else}
-				<ul class="grid gap-3 sm:grid-cols-2" data-testid="active-list">
+				<ul class="grid gap-3 @2xl:grid-cols-2" data-testid="active-list">
 					{#each activeList as lot (lot.id)}
 						{@const top = topBid(lot)}
 						{@const left = secondsLeft(lot.deadlineAt)}
@@ -473,7 +498,8 @@
 									<strong class="text-sm flex-1 truncate" data-testid="active-card-item">{lot.item}</strong>
 									<span class="badge badge-sm badge-outline font-mono">{left}s</span>
 								</div>
-								<progress class="progress progress-primary w-full" value={elapsed} max="1"></progress>
+								<!-- Drains toward zero, matching the countdown badge's direction. -->
+								<progress class="progress progress-primary w-full" value={1 - elapsed} max="1"></progress>
 								<div class="flex items-center gap-2 text-xs opacity-70 flex-wrap">
 									<span>by {lot.sellerName}</span>
 									<span>start <strong>${lot.startingPrice}</strong></span>
@@ -511,13 +537,13 @@
 	</section>
 
 	<!-- List a Lot form -->
-	<section class="card bg-base-200" data-testid="list-section">
+	<section class="card bg-base-200 {nothingLive ? 'order-first @2xl:order-none' : ''}" data-testid="list-section">
 		<div class="card-body py-3 space-y-3">
 			<h2 class="card-title text-sm">List a lot</h2>
 			<form onsubmit={(e) => { e.preventDefault(); handleList() }} class="space-y-2">
 				<div class="flex flex-wrap gap-2">
-					<label class="form-control flex-1 min-w-[14rem]">
-						<span class="label-text text-xs">Item</span>
+					<label class="flex flex-col gap-1 flex-1 min-w-0 @2xl:min-w-[14rem]">
+						<span class="opacity-70 text-xs">Item</span>
 						<input
 							class="input input-bordered input-sm pointer-coarse:min-h-11"
 							bind:value={item}
@@ -528,8 +554,8 @@
 					</label>
 				</div>
 				<div class="flex flex-wrap gap-2">
-					<label class="form-control flex-1 min-w-[8rem]">
-						<span class="label-text text-xs">Starting price ($)</span>
+					<label class="flex flex-col gap-1 flex-1 min-w-[8rem]">
+						<span class="opacity-70 text-xs">Starting price ($)</span>
 						<input
 							type="number"
 							class="input input-bordered input-sm pointer-coarse:min-h-11"
@@ -538,8 +564,8 @@
 							data-testid="list-start-input"
 						/>
 					</label>
-					<label class="form-control flex-1 min-w-[8rem]">
-						<span class="label-text text-xs">Reserve price ($)</span>
+					<label class="flex flex-col gap-1 flex-1 min-w-[8rem]">
+						<span class="opacity-70 text-xs">Reserve price ($)</span>
 						<input
 							type="number"
 							class="input input-bordered input-sm pointer-coarse:min-h-11"
@@ -547,9 +573,12 @@
 							bind:value={reservePrice}
 							data-testid="list-reserve-input"
 						/>
+						{#if Number.isFinite(reservePrice) && Number.isFinite(startingPrice) && reservePrice < startingPrice}
+							<span class="text-xs text-error" data-testid="list-reserve-note">Reserve must be at least the starting price.</span>
+						{/if}
 					</label>
-					<label class="form-control flex-1 min-w-[10rem]">
-						<span class="label-text text-xs">Duration ({durationSec}s)</span>
+					<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
+						<span class="opacity-70 text-xs">Duration ({durationSec}s)</span>
 						<input
 							type="range"
 							class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
@@ -571,6 +600,9 @@
 					<span class="text-xs opacity-60">
 						You have {myActiveCount}/{caps.maxActivePerSeller} active lots.
 					</span>
+					{#if listHint}
+						<span class="text-xs opacity-70" data-testid="list-hint">{listHint}</span>
+					{/if}
 					{#if formError}
 						<span class="text-xs text-error" data-testid="list-error">{formError}</span>
 					{/if}

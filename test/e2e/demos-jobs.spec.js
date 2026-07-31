@@ -53,7 +53,7 @@ test.describe('/demos/jobs', () => {
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Jobs: durable task runner with fence + retry + force-takeover')
 		await expect(page.getByTestId('jobs-stats-strip')).toBeVisible()
 		await expect(page.getByTestId('jobs-list')).toBeVisible()
-		await expect(page.getByTestId('jobs-list-empty')).toHaveText('No tasks yet. Enqueue one above.')
+		await expect(page.getByTestId('jobs-list-empty')).toContainText('No tasks yet. Enqueue one above - try a 10s duration')
 
 		const slider = page.getByTestId('jobs-duration-input')
 		await expect(slider).toHaveAttribute('min', '0.4')

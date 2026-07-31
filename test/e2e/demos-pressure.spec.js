@@ -12,7 +12,10 @@ async function open(page) {
 }
 
 async function clear(page) {
-	await confirmAndClick(page.getByTestId('clear-shed'))
+	// The clear control is honestly disabled when the log is already empty.
+	if (await page.getByTestId('shed-row').count() > 0) {
+		await confirmAndClick(page.getByTestId('clear-shed'))
+	}
 	await expect(page.getByTestId('shed-log')).toContainText('No shed decisions yet')
 	await expect(page.getByTestId('shed-row')).toHaveCount(0)
 }

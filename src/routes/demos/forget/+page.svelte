@@ -18,6 +18,9 @@
 	let audit = $state(/** @type {{ appLog: number } | null} */ (null))
 	let forgetResult = $state(/** @type {{ ok: boolean, at: number, rowsAffected: number, surfaces: Record<string, number> } | null} */ (null))
 	let lastError = $state('')
+	// Which step's handler produced lastError, so the message renders in
+	// the card that caused it instead of always in step 3.
+	let errorStep = $state('')
 	let busyLeave = $state(false)
 	let busyAudit = $state(false)
 	let busyForget = $state(false)
@@ -35,6 +38,7 @@
 			}
 		} catch (err) {
 			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			errorStep = 'traces'
 		} finally {
 			busyLeave = false
 		}
@@ -47,7 +51,8 @@
 		try {
 			audit = await auditTraces()
 		} catch (err) {
-			lastError = err?.message ?? String(err)
+			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			errorStep = 'audit'
 		} finally {
 			busyAudit = false
 		}
@@ -65,6 +70,7 @@
 			await handleAudit()
 		} catch (err) {
 			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			errorStep = 'forget'
 		} finally {
 			busyForget = false
 		}
@@ -123,6 +129,9 @@
 					<li class="opacity-60">push registry: live registration (from the layout)</li>
 				</ul>
 			{/if}
+			{#if lastError && errorStep === 'traces'}
+				<p class="text-xs text-error" data-testid="fg-error-traces">{lastError}</p>
+			{/if}
 		</div>
 	</section>
 
@@ -145,6 +154,9 @@
 					</span>
 				{/if}
 			</div>
+			{#if lastError && errorStep === 'audit'}
+				<p class="text-xs text-error" data-testid="fg-error-audit">{lastError}</p>
+			{/if}
 		</div>
 	</section>
 
@@ -152,6 +164,11 @@
 	<section class="card bg-base-100 border border-base-300" data-testid="fg-forget-section">
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">3. Forget me</h2>
+			<p class="text-sm opacity-70" data-testid="fg-consequence">
+				Your notes, presence traces, uploads, and log entries are permanently
+				erased from every shared surface on every replica. The connection
+				survives; the data does not.
+			</p>
 			<div>
 				<button class="btn btn-sm btn-outline btn-error pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleForget} disabled={busyForget} data-testid="fg-forget">
 					{busyForget ? 'Erasing...' : 'Forget me'}
@@ -160,7 +177,8 @@
 			{#if forgetResult}
 				<div class="space-y-2" data-testid="fg-forget-result" data-at={forgetResult.at}>
 					<p class="text-sm font-mono">
-						ok: <strong data-testid="fg-forget-ok">{String(forgetResult.ok)}</strong>,
+						ok: <strong data-testid="fg-forget-ok">{String(forgetResult.ok)}</strong>
+						{#if forgetResult.at}at <span data-testid="fg-forget-at">{new Date(forgetResult.at).toLocaleTimeString()}</span>{/if},
 						rows affected: <strong data-testid="fg-forget-rows">{forgetResult.rowsAffected}</strong>
 					</p>
 					<table class="table table-xs" data-testid="fg-surfaces-table">
@@ -185,7 +203,7 @@
 					</p>
 				</div>
 			{/if}
-			{#if lastError}
+			{#if lastError && errorStep === 'forget'}
 				<p class="text-xs text-error" data-testid="fg-error">{lastError}</p>
 			{/if}
 		</div>

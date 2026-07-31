@@ -165,16 +165,16 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Append a new entry (lands at the bottom of the visible list)</h2>
 			<form onsubmit={(e) => { e.preventDefault(); handleAppend() }} class="flex flex-wrap gap-2 items-end">
-				<label class="form-control flex-1 min-w-[8rem]">
-					<span class="label-text text-xs">Severity</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[8rem]">
+					<span class="opacity-70 text-xs">Severity</span>
 					<select class="select select-bordered select-sm" bind:value={appendSeverity} disabled={appending} data-testid="append-severity">
 						{#each state.severities as s (s)}
 							<option value={s}>{s}</option>
 						{/each}
 					</select>
 				</label>
-				<label class="form-control flex-1 min-w-[14rem]">
-					<span class="label-text text-xs">Message</span>
+				<label class="flex flex-col gap-1 flex-1 min-w-[14rem]">
+					<span class="opacity-70 text-xs">Message</span>
 					<input class="input input-bordered input-sm" bind:value={appendMessage} maxlength="200" disabled={appending} data-testid="append-message" />
 				</label>
 				<button type="submit" class="btn btn-sm btn-primary" disabled={appending} data-testid="append-submit">
@@ -187,7 +187,7 @@
 	<!-- Log entries -->
 	<section class="card bg-base-100 border border-base-300" data-testid="entries-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Entries (<span data-testid="entries-count">{entries.length}</span>)</h2>
+			<h2 class="card-title text-sm">Entries <span class="font-normal">(<span data-testid="entries-count">{entries.length}</span>)</span></h2>
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="entries-empty">loading...</p>
 			{:else}

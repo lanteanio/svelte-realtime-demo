@@ -21,6 +21,7 @@
 	import { onPush } from 'svelte-realtime/client'
 	import { configureApp } from '$lib/configure-app'
 	import { confirmDestructive } from '$lib/confirm-destructive'
+	import DemoLede from '$lib/components/DemoLede.svelte'
 	import { status as wsStatus } from 'svelte-adapter-uws/client'
 	import {
 		uploadedFiles,
@@ -127,7 +128,7 @@
 	async function uploadOne(file) {
 		if (uploading) return
 		if (file.size > maxFileBytes) {
-			lastError = `file too large (max ${maxFileBytes} bytes)`
+			lastError = `file too large (max ${fmtBytes(maxFileBytes)})`
 			return
 		}
 		uploading = true
@@ -199,13 +200,13 @@
 	<header>
 
 		<h1 class="text-2xl font-bold mt-2">Upload: streaming uploads with content-addressed dedup</h1>
-		<p class="text-sm opacity-70 mt-1">
+		<DemoLede>
 			Pick a file. The page hands it to <code>live.upload</code>; the framework streams it to the
 			server as binary chunks, hashes each chunk SHA-256 server-side, and short-circuits via
 			<code>redis/idempotency</code> when the hash is already cached. Re-uploading the same file
 			stores zero new bytes. On stream end <code>live.notify(&#123; userId &#125;)</code> sends a
 			fire-and-forget push to that user's most recently connected tab, locally or across workers.
-		</p>
+		</DemoLede>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1" data-testid="me">
 				Uploading as
@@ -217,7 +218,7 @@
 	</header>
 
 	<div class="card bg-base-200" data-testid="upload-stats-strip">
-		<div class="card-body py-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+		<div class="card-body py-3 grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-sm">
 			<div>
 				<div class="text-xs opacity-60">Files</div>
 				<div class="font-mono text-lg" data-testid="stat-files">{stats.fileCount}</div>
@@ -253,16 +254,17 @@
 				<!-- Compact dress on fine pointers, 44px floor where taps land. -->
 				<input
 					type="file"
-					class="file-input file-input-bordered file-input-sm flex-1 min-w-[16rem] pointer-coarse:min-h-11"
+					class="file-input file-input-bordered file-input-sm flex-1 min-w-0 w-full @2xl:w-auto @2xl:min-w-[16rem] pointer-coarse:min-h-11"
 					onchange={handleFile}
 					disabled={uploading}
+					aria-label="Pick a file to upload"
 					data-testid="file-input"
 				/>
 				<button
 					type="button"
 					class="btn btn-outline btn-error btn-sm pointer-coarse:min-h-11"
 					onclick={handleClear}
-					disabled={uploading}
+					disabled={uploading || files.length === 0}
 					data-testid="clear-button"
 				>
 					Clear all
@@ -327,7 +329,7 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Recent files ({files.length})</h2>
 			{#if sortedFiles.length === 0}
-				<p class="opacity-40 text-xs" data-testid="files-list-empty">
+				<p class="text-base-content/70 text-xs" data-testid="files-list-empty">
 					No files yet. Pick one above.
 				</p>
 			{:else}

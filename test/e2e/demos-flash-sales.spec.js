@@ -45,7 +45,10 @@ async function setStress(page, product, count) {
 
 async function runStress(page) {
 	await page.getByTestId('stress-go').click()
+	// The tally renders live during the burst; completion is the button
+	// returning from "Running..." to its rest label.
 	await expect(page.getByTestId('stress-result')).toBeVisible({ timeout: 20_000 })
+	await expect(page.getByTestId('stress-go')).not.toHaveText('Running...', { timeout: 30_000 })
 }
 
 test.describe('/demos/flash-sales', () => {
