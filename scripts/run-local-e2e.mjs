@@ -34,9 +34,23 @@ for (const signal of ['SIGINT', 'SIGTERM']) {
 }
 
 try {
-	if (selectedProjects.some((project) => project === 'stress' || project === 'destroyer')) {
-		await ensureProductionBuild()
-	}
+	// Every tier runs the production build, not `vite dev`.
+	//
+	// The dev server transforms and serves the module graph on demand, and a
+	// page load can intermittently fail to hydrate: the SSR HTML renders, Vite's
+	// own HMR socket connects, and the app bundle never boots. The page is then
+	// wedged with no app socket, no pending retry, and a connection status still
+	// on its initial value, so it never recovers at any timeout. Measured at
+	// roughly one open in 900 while cycling routes, and zero in 80 opens of a
+	// single warm route, which is why re-running a victim in isolation always
+	// "passed" and cleared code that was never at fault.
+	//
+	// That put a false-failure rate on the merge gate, which is worse than the
+	// one dead test: it trains readers to wave through a single failure as the
+	// flake, and that is how a real regression gets merged. A pre-built bundle
+	// cannot fail this way, and it has the larger benefit of making the gate
+	// test the artifact that actually ships.
+	await ensureProductionBuild()
 	await provisionDependencies()
 
 	for (const project of selectedProjects) {
@@ -48,12 +62,10 @@ try {
 
 			const targetPort = await freePort()
 			let instanceB
+			await startApp(targetPort)
 			if (project === 'cluster') {
 				instanceB = await freePort()
-				await startApp(targetPort)
 				await startApp(instanceB)
-			} else {
-				await startApp(targetPort, project === 'stress' || project === 'destroyer')
 			}
 
 			await waitForCronWarmup()
@@ -170,20 +182,20 @@ async function resetState() {
 	await runChecked('migrations', process.execPath, ['scripts/migrate.mjs'], commonEnvironment())
 }
 
-async function startApp(port, production = false) {
-	const args = production
-		? ['build/index.js']
-		: ['node_modules/vite/bin/vite.js', 'dev', '--host', '127.0.0.1', '--port', String(port), '--strictPort']
-	const child = spawn(process.execPath, args, {
+async function startApp(port) {
+	// Production build only. The dev-server path this used to take is what
+	// made the gate flaky; see the ensureProductionBuild call above for the
+	// mechanism. Debugging against `vite dev` is still available by running
+	// `npm run dev` and pointing playwright at it through BASE_URL, which
+	// keeps that option without letting the gate reach for it by accident.
+	const child = spawn(process.execPath, ['build/index.js'], {
 		env: {
 			...commonEnvironment(),
 			HOST: '127.0.0.1',
 			PORT: String(port),
-			...(production ? {
-				NODE_ENV: 'production',
-				ORIGIN: `http://127.0.0.1:${port}`,
-				CLUSTER_WORKERS: ''
-			} : {})
+			NODE_ENV: 'production',
+			ORIGIN: `http://127.0.0.1:${port}`,
+			CLUSTER_WORKERS: ''
 		},
 		stdio: 'inherit'
 	})
