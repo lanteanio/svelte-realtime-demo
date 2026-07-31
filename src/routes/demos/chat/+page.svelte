@@ -42,4 +42,24 @@
 			</li>
 		{/each}
 	</ul>
+
+	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
+		<p>
+			Server: <code>chat = live.room(&#123; topic, init, presence
+			&#125;)</code> - one declaration bundles the durable message
+			stream and the live user-presence roster per room. The separate
+			<code>sendMessage</code> RPC is wrapped in
+			<code>live.idempotent</code>, so a retried call (reconnect,
+			double-click) lands exactly one message. See
+			<a class="link" href="https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/chat.js">chat.js</a>.
+		</p>
+		<p>
+			The members-only room is denied at the wire: the app's
+			<code>subscribe</code> hook in <code>hooks.ws.js</code> returns
+			<code>FORBIDDEN</code> for its topics, the client's per-stream
+			<code>error</code> readable renders the banner, and no message
+			ever reaches the socket - the denial happens before any data is
+			sent, not by filtering afterwards.
+		</p>
+	</aside>
 </div>

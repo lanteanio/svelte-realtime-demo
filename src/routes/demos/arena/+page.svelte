@@ -94,7 +94,11 @@
 	// once, needing ~150 taps to cross the 900-unit viewport.
 	function pressDirection(e, direction) {
 		e.preventDefault()
-		e.currentTarget.setPointerCapture?.(e.pointerId)
+		// Capture is best-effort: it keeps the release event on the button
+		// when a finger slides off, but setPointerCapture THROWS for a
+		// pointerId with no active pointer (synthetic events, some stale
+		// cancel paths) - and a throw here would swallow the held.add below.
+		try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* no active pointer */ }
 		held.add(direction)
 	}
 
