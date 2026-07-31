@@ -76,6 +76,9 @@ test.describe('Theme Toggle', () => {
 
 	test('clicking theme toggle switches to dark mode', async ({ page }) => {
 		await page.goto('/');
+		// The toggle is JS-driven now: it writes data-theme and persists the
+		// choice, so it needs hydration. Before, the swap was pure daisyUI CSS.
+		await waitForWS(page);
 
 		const bgBefore = await page.evaluate(() =>
 			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
@@ -95,6 +98,9 @@ test.describe('Theme Toggle', () => {
 
 	test('dark mode changes visual appearance', async ({ page }) => {
 		await page.goto('/');
+		// The toggle is JS-driven now: it writes data-theme and persists the
+		// choice, so it needs hydration. Before, the swap was pure daisyUI CSS.
+		await waitForWS(page);
 
 		const bgBefore = await page.evaluate(() =>
 			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
@@ -112,6 +118,7 @@ test.describe('Theme Toggle', () => {
 
 	test('toggling back restores light mode', async ({ page }) => {
 		await page.goto('/');
+		await waitForWS(page);
 
 		const bgOriginal = await page.evaluate(() =>
 			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor

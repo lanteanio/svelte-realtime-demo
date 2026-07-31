@@ -138,22 +138,33 @@
 	</header>
 
 	<div class="card bg-base-200" data-testid="news-stats-strip">
-		<div class="card-body py-3 grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-sm">
-			<div>
-				<div class="text-xs opacity-60">Stories</div>
-				<div class="font-mono text-lg" data-testid="stat-totalStories">{stats.totalStories}</div>
+		<div class="card-body py-3 space-y-2">
+			<!-- Each widget names the primitive it demonstrates; without the
+			     tag only the publish form said what it was showing. -->
+			<div class="flex flex-wrap items-baseline gap-x-2">
+				<h2 class="card-title text-sm">Live stats</h2>
+				<span class="badge badge-xs badge-ghost font-mono">live.derived</span>
 			</div>
-			<div>
-				<div class="text-xs opacity-60">Total views</div>
-				<div class="font-mono text-lg" data-testid="stat-totalViews">{stats.totalViews}</div>
-			</div>
-			<div class="col-span-2">
-				<div class="text-xs opacity-60">Newest headline</div>
-				<div class="truncate" data-testid="stat-newestHeadline">
-					{stats.newestHeadline ?? '-'}
-					{#if stats.newestPublishedAt}
-						<span class="text-xs opacity-50 ml-2">{fmtTime(stats.newestPublishedAt)}</span>
-					{/if}
+			<div class="grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-sm">
+				<div>
+					<div class="text-xs opacity-60">Stories</div>
+					<div class="font-mono text-lg" data-testid="stat-totalStories">{stats.totalStories}</div>
+				</div>
+				<div>
+					<div class="text-xs opacity-60">Total views</div>
+					<div class="font-mono text-lg" data-testid="stat-totalViews">{stats.totalViews}</div>
+				</div>
+				<div class="col-span-2 min-w-0">
+					<div class="text-xs opacity-60">Newest headline</div>
+					<!-- The time is a shrink-0 sibling of the truncating headline,
+					     not a child of it: inside the truncating flow it was the
+					     first thing the ellipsis ate. -->
+					<div class="flex items-baseline gap-2 min-w-0">
+						<span class="truncate" data-testid="stat-newestHeadline">{stats.newestHeadline ?? '-'}</span>
+						{#if stats.newestPublishedAt}
+							<span class="text-xs opacity-70 shrink-0" data-testid="stat-newestTime">{fmtTime(stats.newestPublishedAt)}</span>
+						{/if}
+					</div>
 				</div>
 			</div>
 		</div>
@@ -163,18 +174,34 @@
 		<div class="card-body py-3 space-y-2">
 			<div class="flex flex-wrap gap-3 items-end">
 				<label class="flex flex-col gap-1 flex-1 min-w-[12rem]">
-					<span class="opacity-70 text-xs">View firehose ({speedVal} events/sec)</span>
+					<span class="opacity-70 text-xs">
+						Firehose rate:
+						<span class="font-mono" data-testid="news-speed-label">{speedVal === 0 ? 'paused' : `${speedVal} view events/sec`}</span>
+						<span class="badge badge-xs badge-ghost font-mono ms-1">live.cron</span>
+					</span>
+					<!-- oninput keeps the readout honest during the drag; the RPC
+					     stays on change so a drag is one call, not fifty. -->
 					<input
 						type="range"
-						class="range range-sm"
+						class="range range-sm pointer-coarse:min-h-11"
 						min="0" max="50" step="1"
 						value={speedVal}
+						oninput={(event) => (speedVal = Number(event.currentTarget.value))}
 						onchange={handleSpeedChange}
 						data-testid="news-speed-input"
 					/>
+					<div class="flex justify-between text-[0.65rem] opacity-70 font-mono" aria-hidden="true">
+						<span>0</span>
+						<span>50</span>
+					</div>
 				</label>
 			</div>
 		</div>
+	</div>
+
+	<div class="flex flex-wrap items-baseline gap-x-2">
+		<h2 class="card-title text-sm">Trending</h2>
+		<span class="badge badge-xs badge-ghost font-mono">live.aggregate</span>
 	</div>
 
 	<!-- Keyed on the content column, so three-up only ever renders with a
@@ -184,10 +211,13 @@
 			{@const data = panel.key === 'last30s' ? last30s : panel.key === 'thisMinute' ? thisMinute : lifetime}
 			<div class="card bg-base-100 border border-base-300" data-testid={panel.testid}>
 				<div class="card-body py-3 space-y-2">
-					<div class="flex justify-between items-baseline">
+					<!-- gap + wrap so the subtitle drops to its own line instead of
+					     butting into the title at narrow rungs. -->
+					<div class="flex flex-wrap justify-between items-baseline gap-x-2">
 						<h2 class="card-title text-sm">{panel.title}</h2>
-						<span class="text-xs opacity-50">{panel.subtitle}</span>
+						<span class="text-xs opacity-70">{panel.subtitle}</span>
 					</div>
+					<p class="text-[0.65rem] opacity-70">bars relative to this panel's leader</p>
 					{#if !data?.top?.length}
 						<p class="opacity-40 text-xs py-3" data-testid="{panel.testid}-empty">Waiting for first events...</p>
 					{:else}
@@ -219,29 +249,42 @@
 					HMAC verified at the bridge, then published to every subscriber.
 				</p>
 				<label class="flex flex-col gap-1">
-					<span class="opacity-70 text-xs">Headline</span>
+					<span class="opacity-70 text-xs">
+						Headline <span class="text-error" aria-hidden="true">*</span>
+						<span class="sr-only">(required)</span>
+					</span>
 					<input
-						class="input input-sm input-bordered"
+						class="input input-sm input-bordered pointer-coarse:min-h-11"
 						bind:value={headline}
 						maxlength={maxHeadlineLen}
+						required
 						placeholder="What just happened?"
 						data-testid="news-headline-input"
 					/>
+					<span class="text-[0.65rem] opacity-70 font-mono self-end" data-testid="news-headline-count">
+						{headline.length} / {maxHeadlineLen}
+					</span>
 				</label>
 				<label class="flex flex-col gap-1">
 					<span class="opacity-70 text-xs">Summary (optional)</span>
 					<textarea
-						class="textarea textarea-sm textarea-bordered text-xs"
+						class="textarea textarea-sm textarea-bordered text-xs pointer-coarse:min-h-11"
 						bind:value={summary}
 						maxlength={maxSummaryLen}
 						rows="2"
 						placeholder="One sentence the wire could pick up."
 						data-testid="news-summary-input"
 					></textarea>
+					<span class="text-[0.65rem] opacity-70 font-mono self-end" data-testid="news-summary-count">
+						{summary.length} / {maxSummaryLen}
+					</span>
 				</label>
+				<!-- The button stays gated rather than enabled-and-validated: the
+				     suite's shared idiom is an honest disabled control, and the
+				     gate pre-empts the server's own headline-required error. -->
 				<button
 					type="submit"
-					class="btn btn-primary btn-sm"
+					class="btn btn-primary btn-sm pointer-coarse:min-h-11"
 					disabled={publishing || headline.trim().length === 0}
 					data-testid="news-publish-button"
 				>
@@ -262,24 +305,31 @@
 				{#if sortedStories.length === 0}
 					<p class="opacity-40 text-xs" data-testid="news-stories-empty">No stories yet.</p>
 				{:else}
-					<ul class="space-y-2 max-h-80 overflow-y-auto pr-1">
-						{#each sortedStories as story (story.id)}
-							<li class="border-b border-base-200 pb-2 last:border-0" data-testid="news-story">
-								<div class="flex justify-between gap-2 items-baseline">
-									<span class="font-medium text-sm" data-testid="news-story-headline">{story.headline}</span>
-									<span class="text-xs opacity-50 shrink-0">{fmtTime(story.publishedAt)}</span>
-								</div>
-								{#if story.summary}
-									<p class="text-xs opacity-70 mt-0.5" data-testid="news-story-summary">{story.summary}</p>
-								{/if}
-								{#if story.source === 'webhook'}
-									<span class="badge badge-xs badge-primary mt-1">webhook</span>
-								{:else}
-									<span class="badge badge-xs badge-ghost mt-1">seed</span>
-								{/if}
-							</li>
-						{/each}
-					</ul>
+					<!-- The scroll box used to slice the next story mid-line at its
+					     bottom edge, reading as a rendering fault. A fade ends the
+					     box deliberately; the stable gutter stops the list shifting
+					     when the scrollbar appears. -->
+					<div class="relative">
+						<ul class="space-y-2 max-h-80 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+							{#each sortedStories as story (story.id)}
+								<li class="border-b border-base-200 pb-2 last:border-0" data-testid="news-story">
+									<div class="flex justify-between gap-2 items-baseline">
+										<span class="font-medium text-sm" data-testid="news-story-headline">{story.headline}</span>
+										<span class="text-xs opacity-70 shrink-0">{fmtTime(story.publishedAt)}</span>
+									</div>
+									{#if story.summary}
+										<p class="text-xs opacity-70 mt-0.5" data-testid="news-story-summary">{story.summary}</p>
+									{/if}
+									{#if story.source === 'webhook'}
+										<span class="badge badge-xs badge-primary mt-1">webhook</span>
+									{:else}
+										<span class="badge badge-xs badge-ghost mt-1">seed</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+						<div class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-base-100 to-transparent"></div>
+					</div>
 				{/if}
 			</div>
 		</div>

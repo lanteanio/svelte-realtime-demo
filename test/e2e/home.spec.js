@@ -83,6 +83,75 @@ test.describe('home + gallery', () => {
 		await navigateHome(page)
 	})
 
+	test('product framing names the family and links the repos in text, not only as an icon', async ({ page }) => {
+		await openHome(page)
+		const realtime = page.getByTestId('framing-link-realtime')
+		const adapter = page.getByTestId('framing-link-adapter')
+		// Textual destinations, not a bare icon: the finding's requirement is
+		// that a first-time visitor has a readable path off the page.
+		await expect(realtime).toHaveText('svelte-realtime')
+		await expect(realtime).toHaveAttribute('href', 'https://github.com/lanteanio/svelte-realtime')
+		await expect(adapter).toHaveText('svelte-adapter-uws')
+		await expect(adapter).toHaveAttribute('href', 'https://github.com/lanteanio/svelte-adapter-uws')
+		for (const link of [realtime, adapter]) {
+			await expect(link).toHaveAttribute('rel', 'noopener')
+			await expect(link).toBeVisible()
+		}
+	})
+
+	test('theme choice survives reload and new tabs, and falls back to the OS preference', async ({ browser }) => {
+		const context = await browser.newContext()
+		try {
+			const page = await context.newPage()
+			await openHome(page)
+			await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+			// Toggling must STORE the choice, not merely apply it in place.
+			await page.locator('label.swap').click()
+			await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+			await expect.poll(() => page.evaluate(() => localStorage.getItem('theme'))).toBe('dark')
+
+			// Capture the theme at the moment the document becomes interactive -
+			// that is after the head bootstrap but before hydration, so it proves
+			// the restore happens pre-paint rather than in the Svelte component.
+			await page.addInitScript(() => {
+				window.__themeAtInteractive = null
+				document.addEventListener('readystatechange', () => {
+					if (document.readyState === 'interactive' && window.__themeAtInteractive === null) {
+						window.__themeAtInteractive = document.documentElement.dataset.theme ?? null
+					}
+				})
+			})
+			await page.reload()
+			await waitForWS(page)
+			expect(await page.evaluate(() => window.__themeAtInteractive)).toBe('dark')
+			await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+			await expect(page.locator('.theme-controller')).toBeChecked()
+
+			// A second tab on the same origin restores the same choice.
+			const secondTab = await context.newPage()
+			await openHome(secondTab)
+			await expect(secondTab.locator('html')).toHaveAttribute('data-theme', 'dark')
+			await expect(secondTab.locator('.theme-controller')).toBeChecked()
+			await secondTab.close()
+		} finally {
+			await context.close()
+		}
+
+		// With nothing stored, the OS preference decides - in both directions.
+		for (const scheme of ['dark', 'light']) {
+			const fresh = await browser.newContext({ colorScheme: scheme })
+			try {
+				const page = await fresh.newPage()
+				await openHome(page)
+				expect(await page.evaluate(() => localStorage.getItem('theme'))).toBeNull()
+				await expect(page.locator('html')).toHaveAttribute('data-theme', scheme)
+			} finally {
+				await fresh.close()
+			}
+		}
+	})
+
 	test('create form enforces the 100-character cap and ignores whitespace-only Enter submission', async ({ page }) => {
 		await openHome(page)
 		const createInput = page.getByPlaceholder('New board name...')
@@ -95,14 +164,16 @@ test.describe('home + gallery', () => {
 
 	test('gallery inventory, version badges, descriptions, filter results, and empty state are exact', async ({ page }) => {
 		await openHome(page)
-		await expect(page.getByTestId('demos-list').locator(':scope > li')).toHaveCount(DEMO_SLUGS.length)
+		// Counted by tile rather than by list child: the unfiltered catalog
+		// interleaves section headings with the tiles.
+		await expect(page.getByTestId('demos-list').locator('a[data-testid^="demos-tile-"]')).toHaveCount(DEMO_SLUGS.length)
 		await expect(page.getByTestId('demos-filter')).toHaveAttribute('autocomplete', 'off')
 		for (const slug of DEMO_SLUGS) {
 			const tile = demoTile(page, slug)
 			await expect(tile).toHaveAttribute('href', `/demos/${slug}`)
 			await expect(tile.locator('[data-testid="tile-version"]')).toHaveText(VERSION_06_SLUGS.has(slug) ? '^0.6' : '^0.5')
 			await expect(tile.locator('.font-semibold')).not.toHaveText('')
-			await expect(tile.locator('.text-xs.opacity-60')).not.toHaveText('')
+			await expect(tile.locator('[data-testid="tile-desc"]')).not.toHaveText('')
 		}
 
 		const filter = page.getByTestId('demos-filter')
@@ -150,8 +221,14 @@ test.describe('home + gallery', () => {
 			await boardCard(a, firstPath).click()
 			await a.waitForURL(firstPath)
 			await expectBoardPresence(observer, firstPath, 1)
-			const ordered = await observer.locator('a.card[href^="/board/"]').evaluateAll((cards) => cards.map((card) => card.getAttribute('href')))
-			expect(ordered.indexOf(firstPath)).toBeLessThan(ordered.indexOf(secondPath))
+			// The presence badge updates live but the sort key is deliberately
+			// settled (see the debounce in src/routes/+page.svelte) so rows do
+			// not jump out from under an aiming cursor. Poll for the order
+			// instead of reading it the instant the badge lands.
+			await expect.poll(async () => {
+				const ordered = await observer.locator('a.card[href^="/board/"]').evaluateAll((cards) => cards.map((card) => card.getAttribute('href')))
+				return ordered.indexOf(firstPath) < ordered.indexOf(secondPath)
+			}).toBe(true)
 
 			joiner = await ctxJoiner.newPage()
 			await joiner.goto(firstPath)

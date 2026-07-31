@@ -33,15 +33,18 @@
 	const minutes = $derived(Math.floor(remaining / 60000))
 	const seconds = $derived(Math.floor((remaining % 60000) / 1000))
 
+	// The resting tint is a theme token at an opacity that clears the
+	// contrast floor in BOTH themes; at /50 the digits disappeared into
+	// the card background in dark.
 	const urgency = $derived(
 		remaining === 0 ? 'text-error' :
 		minutes < 5 ? 'text-error animate-pulse' :
 		minutes < 10 ? 'text-warning' :
-		'text-base-content/50'
+		'text-base-content/70'
 	)
 </script>
 
-<span class="countdown font-mono text-xs {urgency}">
+<span class="countdown font-mono text-xs shrink-0 whitespace-nowrap {urgency}">
 	<span style="--value:{minutes};" aria-live="polite" aria-label={String(minutes)}>{minutes}</span>
 	:
 	<span style="--value:{seconds}; --digits: 2;" aria-live="polite" aria-label={String(seconds)}>{seconds}</span>

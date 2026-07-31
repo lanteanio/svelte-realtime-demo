@@ -2,12 +2,14 @@ import { test, expect } from '@playwright/test';
 import { createBoard, getCanvas, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 test.describe('Input Validation', () => {
+	// Create is now gated rather than silently no-op: an empty or whitespace
+	// name disables the button, so the guard is asserted on the control itself
+	// instead of by clicking and watching nothing happen.
 	test('empty board title does not create a board', async ({ page }) => {
 		await page.goto('/');
 
 		await page.getByPlaceholder('New board name...').fill('');
-		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForTimeout(1000);
+		await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();
 
 		expect(page.url()).not.toContain('/board/');
 	});
@@ -16,10 +18,8 @@ test.describe('Input Validation', () => {
 		await page.goto('/');
 
 		await page.getByPlaceholder('New board name...').fill('   ');
-		await page.getByRole('button', { name: 'Create' }).click();
-		await page.waitForTimeout(1000);
+		await expect(page.getByRole('button', { name: 'Create' })).toBeDisabled();
 
-		// Should stay on home page (may have ? from native form submit)
 		expect(page.url()).not.toContain('/board/');
 	});
 

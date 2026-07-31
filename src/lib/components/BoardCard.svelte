@@ -43,7 +43,10 @@
 				<CountdownTimer lastActivity={board.last_activity} />
 			{/if}
 			{#if users.length > 0}
-				<span class="badge badge-sm badge-primary">{users.length} here</span>
+				<!-- nowrap is load-bearing: a daisyUI badge has a fixed height,
+				     so when a long title squeezed this row the label wrapped and
+				     "here" rendered outside the pill. -->
+				<span class="badge badge-sm badge-primary shrink-0 whitespace-nowrap">{users.length} here</span>
 			{/if}
 		</div>
 	</div>

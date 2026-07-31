@@ -13,21 +13,37 @@
 <script>
 	import { boards, createBoard } from '$live/boards'
 	import { goto } from '$app/navigation'
+	import { flip } from 'svelte/animate'
 	import BoardCard from '$lib/components/BoardCard.svelte'
 
 	let newTitle = $state('')
+	let creating = $state(false)
 
 	// Track presence count per board. Each BoardCard reports its
 	// count back here via the onpresence callback. We use this
 	// to sort boards by activity (most users first).
 	let presenceCounts = $state({})
 
+	// The sort key is a settled copy of the live counts. Sorting straight
+	// off presence let a row jump out from under an aiming cursor the
+	// instant someone else joined; the delay collects a burst of arrivals
+	// into one move, and the flip animation below makes that move
+	// readable as motion rather than a teleport.
+	let settledCounts = $state({})
+	let settleTimer
+	$effect(() => {
+		const snapshot = { ...presenceCounts }
+		clearTimeout(settleTimer)
+		settleTimer = setTimeout(() => (settledCounts = snapshot), 400)
+		return () => clearTimeout(settleTimer)
+	})
+
 	const sortedBoards = $derived.by(() => {
 		const list = $boards
 		if (!list) return undefined
 		return [...list].sort((a, b) => {
-			const countA = presenceCounts[a.board_id] || 0
-			const countB = presenceCounts[b.board_id] || 0
+			const countA = settledCounts[a.board_id] || 0
+			const countB = settledCounts[b.board_id] || 0
 			if (countA !== countB) return countB - countA
 			const timeA = new Date(a.last_activity).getTime() || 0
 			const timeB = new Date(b.last_activity).getTime() || 0
@@ -35,15 +51,22 @@
 		})
 	})
 
+	const canCreate = $derived(newTitle.trim().length > 0 && !creating)
+
 	async function handleCreate(e) {
 		e.preventDefault()
-		if (!newTitle.trim()) return
+		if (!canCreate) return
 		// idempotencyKey: a double-click or flaky-reconnect retry with the
 		// same key returns the same board instead of creating duplicates.
 		const idempotencyKey = crypto.randomUUID()
-		const board = await createBoard.with({ idempotencyKey })(newTitle)
-		newTitle = ''
-		goto(`/board/${board.slug}`)
+		creating = true
+		try {
+			const board = await createBoard.with({ idempotencyKey })(newTitle)
+			newTitle = ''
+			goto(`/board/${board.slug}`)
+		} finally {
+			creating = false
+		}
 	}
 
 	// Demos catalog. Iterated below and filtered live by the search
@@ -86,6 +109,42 @@
 		{ slug: 'phases',            title: 'Phases: attach lifecycle + atomic publish batch', desc: 'Drive a stream\'s attach machine by hand - <code>attach()</code> holds it open with no UI subscriber, <code>detach()</code> means done - with the <code>phase</code> badge live. Then prove <code>ctx.batch(fn)</code> drops every buffered publish on a throw, even across an await boundary.', since: '^0.6' }
 	]
 
+	// Browsing-mode chunking. The filter already serves visitors who can
+	// name the capability they want; these clusters serve the ones who
+	// cannot yet, and give the 34-tile column some sectioning structure.
+	const GROUPS = [
+		{
+			name: 'Fundamentals',
+			slugs: ['checkout', 'counter-resume', 'chat', 'todos-rollback', 'denials', 'pagination', 'from-seq', 'schema-evolution', 'effect', 'phases']
+		},
+		{
+			name: 'Coordination and scheduling',
+			slugs: ['pressure', 'chaos', 'notifications', 'jobs', 'cluster-cron', 'flash-sales', 'auctions', 'alarms', 'lobbies', 'flags', 'upload']
+		},
+		{
+			name: 'CRDT and multiplayer',
+			slugs: ['collab-editor', 'multiplayer', 'kanban', 'offline', 'arena', 'shooter']
+		},
+		{
+			name: 'Aggregates, ops, and compliance',
+			slugs: ['topk', 'news', 'privacy', 'forget', 'ops', 'outbound-webhooks', 'tenants']
+		}
+	]
+
+	// A demo missing from every group would otherwise disappear from the
+	// catalog entirely, so anything unclaimed lands in a trailing section
+	// rather than going unlisted.
+	const groupedDemos = $derived.by(() => {
+		const claimed = new Set(GROUPS.flatMap((g) => g.slugs))
+		const sections = GROUPS.map((g) => ({
+			name: g.name,
+			demos: g.slugs.map((slug) => DEMOS.find((d) => d.slug === slug)).filter(Boolean)
+		}))
+		const rest = DEMOS.filter((d) => !claimed.has(d.slug))
+		if (rest.length > 0) sections.push({ name: 'More', demos: rest })
+		return sections.filter((section) => section.demos.length > 0)
+	})
+
 	let demoFilter = $state('')
 
 	function stripTags(s) {
@@ -102,34 +161,63 @@
 	})
 </script>
 
-<div class="max-w-xl mx-auto p-8">
-	<h1 class="text-2xl font-bold mb-2">Boards</h1>
-	<p class="text-sm opacity-50 mb-6">Pick a board or create a new one. No login needed. Boards expire after 1 hour of inactivity.</p>
+<div class="max-w-xl 2xl:max-w-5xl mx-auto p-8">
+	<header class="mb-10 2xl:max-w-xl 2xl:mx-auto">
+		<h1 class="text-2xl font-bold mb-2">Realtime for SvelteKit, running live</h1>
+		<p class="text-sm text-base-content/70">
+			A working playground for
+			<a class="link" href="https://github.com/lanteanio/svelte-realtime" target="_blank" rel="noopener" data-testid="framing-link-realtime">svelte-realtime</a>
+			and
+			<a class="link" href="https://github.com/lanteanio/svelte-adapter-uws" target="_blank" rel="noopener" data-testid="framing-link-adapter">svelte-adapter-uws</a>:
+			one shared sticky-note board, plus {DEMOS.length} focused reproducers that each isolate a
+			single primitive. Everything here syncs over WebSocket between every open tab. No login.
+		</p>
+	</header>
 
-	<form onsubmit={handleCreate} class="flex gap-2 mb-6">
-		<input
-			class="input flex-1"
-			bind:value={newTitle}
-			placeholder="New board name..."
-			maxlength="100"
-		/>
-		<button type="submit" class="btn btn-primary">Create</button>
-	</form>
+	<!-- The board list keeps the original narrow measure even where the
+	     page widens for the two-column catalog; a row of title + meta has
+	     nothing to gain from 900px of track. -->
+	<div class="2xl:max-w-xl 2xl:mx-auto">
+		<h2 class="text-xl font-bold mb-2">Boards</h2>
+		<p class="text-sm text-base-content/70 mb-6">Pick a board or create a new one. Boards expire after 1 hour of inactivity.</p>
 
-	{#if sortedBoards === undefined}
-		<div class="flex justify-center py-8">
-			<span class="loading loading-spinner"></span>
-		</div>
-	{:else}
-		<div class="grid gap-3">
-			{#each sortedBoards as board (board.board_id)}
-				<BoardCard {board} onpresence={(count) => presenceCounts[board.board_id] = count} />
-			{/each}
-			{#if sortedBoards.length === 0}
-				<p class="text-center opacity-40 py-8">No boards yet. Create the first one.</p>
-			{/if}
-		</div>
-	{/if}
+		<form onsubmit={handleCreate} class="flex gap-2 mb-6">
+			<label class="sr-only" for="new-board-name">New board name</label>
+			<input
+				id="new-board-name"
+				class="input flex-1"
+				bind:value={newTitle}
+				placeholder="New board name..."
+				maxlength="100"
+			/>
+			<button type="submit" class="btn btn-primary" disabled={!canCreate} data-testid="create-board">
+				{#if creating}
+					<span class="loading loading-spinner loading-xs"></span>
+				{/if}
+				Create
+			</button>
+		</form>
+
+		{#if sortedBoards === undefined}
+			<div class="flex justify-center py-8">
+				<span class="loading loading-spinner"></span>
+			</div>
+		{:else}
+			<div class="grid gap-3">
+				{#each sortedBoards as board (board.board_id)}
+					<!-- min-w-0 rides on the animation wrapper because it, not the
+					     card, is now the grid item; without it the track sizes to
+					     the title's intrinsic width and truncation never engages. -->
+					<div class="min-w-0" animate:flip={{ duration: 220 }}>
+						<BoardCard {board} onpresence={(count) => presenceCounts[board.board_id] = count} />
+					</div>
+				{/each}
+				{#if sortedBoards.length === 0}
+					<p class="text-center text-base-content/70 py-8">No boards yet. Create the first one.</p>
+				{/if}
+			</div>
+		{/if}
+	</div>
 
 	<section class="mt-12">
 		<h2 class="text-lg font-bold mb-1">Demos</h2>
@@ -147,22 +235,39 @@
 				{filteredDemos.length} / {DEMOS.length}
 			</span>
 		</div>
-		<ul class="grid gap-2" data-testid="demos-list">
-			{#each filteredDemos as d (d.slug)}
-				<li>
-					<a href="/demos/{d.slug}" class="card card-compact bg-base-200 hover:bg-base-300 transition-colors relative" data-testid="demos-tile-{d.slug}">
-						<div class="card-body">
-							<span class="badge badge-xs badge-outline absolute top-2 right-2 normal-case font-mono" data-testid="tile-version">{d.since ?? '^0.5'}</span>
-							<div class="font-semibold">{d.title}</div>
-							<div class="text-xs opacity-60">{@html d.desc}</div>
-						</div>
-					</a>
-				</li>
+		{#snippet tile(d)}
+			<li class="min-w-0">
+				<a href="/demos/{d.slug}" class="card card-compact bg-base-200 hover:bg-base-300 transition-colors relative h-full" data-testid="demos-tile-{d.slug}">
+					<div class="card-body">
+						<span class="badge badge-xs badge-outline absolute top-2 right-2 normal-case font-mono" data-testid="tile-version">{d.since ?? '^0.5'}</span>
+						<div class="font-semibold pr-12">{d.title}</div>
+						<div class="text-xs text-base-content/70" data-testid="tile-desc">{@html d.desc}</div>
+					</div>
+				</a>
+			</li>
+		{/snippet}
+
+		<!-- Filtering flattens the sections: a query already names the
+		     capability, so the clusters would only fragment the results. -->
+		<ul class="grid gap-2 2xl:grid-cols-2" data-testid="demos-list">
+			{#if demoFilter.trim()}
+				{#each filteredDemos as d (d.slug)}
+					{@render tile(d)}
+				{:else}
+					<li class="text-base-content/70 text-sm text-center py-6 2xl:col-span-2" data-testid="demos-empty">
+						No demos match "{demoFilter}".
+					</li>
+				{/each}
 			{:else}
-				<li class="opacity-50 text-sm text-center py-6" data-testid="demos-empty">
-					No demos match "{demoFilter}".
-				</li>
-			{/each}
+				{#each groupedDemos as section (section.name)}
+					<li class="2xl:col-span-2 mt-3 first:mt-0">
+						<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">{section.name}</h3>
+					</li>
+					{#each section.demos as d (d.slug)}
+						{@render tile(d)}
+					{/each}
+				{/each}
+			{/if}
 		</ul>
 	</section>
 </div>

@@ -19,6 +19,7 @@
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
 	import { health } from 'svelte-realtime/client'
 	import { configureApp } from '$lib/configure-app'
+	import { browser } from '$app/environment'
 	import { Wifi, WifiOff, Sun, Moon, User, Globe, Github, AlertTriangle } from 'lucide-svelte'
 
 	// The app-wide options (resume grace, protocol version) and their
@@ -29,16 +30,47 @@
 	const identity = $derived(data.identity)
 
 	// --- Default note color ---
-	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
+	// Named so each swatch can carry its own accessible label; color alone
+	// cannot distinguish them for a screen reader.
+	const NOTE_COLORS = [
+		{ value: '#fef08a', name: 'yellow' },
+		{ value: '#bbf7d0', name: 'green' },
+		{ value: '#bfdbfe', name: 'blue' },
+		{ value: '#fbcfe8', name: 'pink' },
+		{ value: '#fed7aa', name: 'orange' },
+		{ value: '#e9d5ff', name: 'purple' }
+	]
 
 	let noteColor = $state(
-		(typeof localStorage !== 'undefined' && localStorage.getItem('noteColor')) || NOTE_COLORS[0]
+		(typeof localStorage !== 'undefined' && localStorage.getItem('noteColor')) || NOTE_COLORS[0].value
 	)
 
 	function setNoteColor(color) {
 		noteColor = color
 		localStorage.setItem('noteColor', color)
 	}
+
+	// --- Theme ---
+	// The inline script in src/app.html has already applied the stored
+	// choice to <html data-theme> before paint; we read it back rather
+	// than re-deriving it, so the toggle starts in the state on screen.
+	let isDark = $state(browser && document.documentElement.dataset.theme === 'dark')
+
+	function setTheme(dark) {
+		isDark = dark
+		const theme = dark ? 'dark' : 'light'
+		document.documentElement.dataset.theme = theme
+		try {
+			localStorage.setItem('theme', theme)
+		} catch (error) {
+			// Private mode: the choice still applies for this session.
+		}
+	}
+
+	// The connection reason lives in a tooltip, which does not exist on
+	// touch. Tapping the status pins it open so phone users can read why
+	// a connection is down.
+	let statusPinned = $state(false)
 
 	// --- Global presence ---
 	const globalPresence = presence('global', { maxAge: 90000 })
@@ -96,9 +128,17 @@
 			{/if}
 
 			<!-- Connection status -->
-			<div class="tooltip tooltip-bottom" data-tip={statusTooltip}>
+			<button
+				type="button"
+				class="tooltip tooltip-bottom btn btn-ghost btn-sm btn-square hover:bg-base-300"
+				class:tooltip-open={statusPinned}
+				data-tip={statusTooltip}
+				aria-label="Connection status: {statusTooltip}"
+				onclick={() => (statusPinned = !statusPinned)}
+				onblur={() => (statusPinned = false)}
+			>
 				<StatusIcon size={16} class="{statusColor} {statusOpacity}" />
-			</div>
+			</button>
 
 			<!-- Identity -->
 			{#if identity}
@@ -112,24 +152,34 @@
 					{#each NOTE_COLORS as color}
 						<button
 							class="w-6 h-6 shrink-0 rounded-full border-2 transition-transform hover:scale-110"
-							class:border-primary={noteColor === color}
-							class:border-base-300={noteColor !== color}
-							style:background={color}
-							aria-label="Set default note color"
-							onclick={() => setNoteColor(color)}
+							class:border-primary={noteColor === color.value}
+							class:border-base-300={noteColor !== color.value}
+							style:background={color.value}
+							aria-label="Set default note color: {color.name}"
+							aria-pressed={noteColor === color.value}
+							onclick={() => setNoteColor(color.value)}
 						></button>
 					{/each}
 				</div>
 			{/if}
 
 			<!-- GitHub -->
-			<a href="https://github.com/lanteanio/svelte-realtime-demo" target="_blank" rel="noopener" class="btn btn-ghost btn-sm btn-square hover:bg-base-300">
+			<a href="https://github.com/lanteanio/svelte-realtime-demo" target="_blank" rel="noopener" class="btn btn-ghost btn-sm btn-square hover:bg-base-300" aria-label="GitHub repository">
 				<Github size={16} />
 			</a>
 
-			<!-- Theme toggle -->
+			<!-- Theme toggle. The theme-controller class keeps daisyUI's own
+			     instant swap; the change handler is what makes the choice
+			     outlive the tab (see the bootstrap in src/app.html). -->
 			<label class="swap btn btn-ghost btn-sm btn-square hover:bg-base-300">
-				<input type="checkbox" class="theme-controller" value="dark" />
+				<input
+					type="checkbox"
+					class="theme-controller"
+					value="dark"
+					checked={isDark}
+					aria-label="Toggle dark mode"
+					onchange={(event) => setTheme(event.currentTarget.checked)}
+				/>
 				<Sun size={16} class="swap-off" />
 				<Moon size={16} class="swap-on" />
 			</label>
