@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { openTouchPage } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -39,6 +40,48 @@ async function open(page) {
 }
 
 test.describe('/demos/from-seq', () => {
+	// The events list may only become a nested scroller where it cannot capture
+	// a page-scroll gesture. Both halves are asserted independently, because a
+	// width-only or pointer-only rule would satisfy one case and still trap the
+	// other. Read the COMPUTED style rather than the class attribute: the class
+	// list would confirm what was typed, not what the browser resolved.
+	async function scrollBox(page) {
+		return page.getByTestId('events-list').evaluate((node) => {
+			const style = getComputedStyle(node)
+			return { maxHeight: style.maxHeight, overflowY: style.overflowY }
+		})
+	}
+
+	test('the events list never becomes a scroll trap: unbounded when narrow or on touch', async ({ page, browser }) => {
+		// Narrow + fine pointer: the reported case. The page must own scrolling.
+		await page.setViewportSize({ width: 390, height: 844 })
+		await open(page)
+		expect(await scrollBox(page), 'narrow viewport must not bound the list').toEqual({
+			maxHeight: 'none',
+			overflowY: 'visible'
+		})
+
+		// Wide + fine pointer: a desktop window, where a bounded region is
+		// correct and keeps an unbounded event list from running away.
+		await page.setViewportSize({ width: 1440, height: 900 })
+		await expect.poll(async () => (await scrollBox(page)).maxHeight).toBe('384px')
+		expect(await scrollBox(page)).toEqual({ maxHeight: '384px', overflowY: 'auto' })
+
+		// Wide + COARSE pointer: same width that just bounded the list, so a pass
+		// here can only come from the pointer condition. openTouchPage asserts
+		// the emulated pointer really is coarse, so this cannot pass vacuously.
+		const { context, page: touch } = await openTouchPage(browser, { width: 1440, height: 900 })
+		try {
+			await open(touch)
+			expect(await scrollBox(touch), 'a touch tablet is wide and still must not trap').toEqual({
+				maxHeight: 'none',
+				overflowY: 'visible'
+			})
+		} finally {
+			await context.close()
+		}
+	})
+
 	test('renders the complete subscribed state with conserved tier counters and valid event rows', async ({ page }) => {
 		await open(page)
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Reconnect: three-tier gap fill via delta.fromSeq')

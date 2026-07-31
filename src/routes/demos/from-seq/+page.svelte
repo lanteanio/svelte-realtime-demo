@@ -309,7 +309,20 @@
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="events-empty">no events yet</p>
 			{:else}
-				<ul class="space-y-1 text-xs font-mono max-h-96 overflow-y-auto overscroll-contain" data-testid="events-list">
+				<!--
+					The bounded scroller only exists where it cannot capture a page
+					scroll: a wide container AND a fine pointer. overscroll-contain
+					alone was not enough - it stops the scroll chaining to the page
+					but leaves a swipe over the list scrolling history instead of the
+					page, with nothing on screen saying so.
+
+					Both conditions matter. Narrow is the reported case, but a touch
+					tablet is wide and still traps the swipe, so the pointer test is
+					what actually removes the trap; the width test is what keeps a
+					desktop window from growing an unbounded list. Where neither
+					holds, the list flows and the page owns scrolling.
+				-->
+				<ul class="space-y-1 text-xs font-mono @2xl:pointer-fine:max-h-96 @2xl:pointer-fine:overflow-y-auto @2xl:pointer-fine:overscroll-contain" data-testid="events-list">
 					{#each entries as e (e.id)}
 						<li class="flex items-center gap-2" data-testid="event-row">
 							<span class="opacity-50 w-20">{timeOf(e.ts)}</span>
