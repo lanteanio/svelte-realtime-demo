@@ -2,12 +2,16 @@ import { test, expect } from '@playwright/test'
 import {
 	addCard,
 	assertColumnCount,
+	cancelDeleteCard,
 	card,
 	cardTitle,
+	columnCardIds,
 	deleteCard,
 	moveCard,
 	openKanban,
 	renameCard,
+	undoDeleteCard,
+	undoToast,
 	waitForCard,
 	waitInColumn
 } from './kanban-helpers.js'
@@ -90,6 +94,66 @@ test.describe('/demos/kanban', () => {
 		} finally {
 			for (const id of ids) await deleteCard(page, id)
 		}
+	})
+
+	test('cancelling the delete confirmation keeps the card and offers no undo', async ({ page }) => {
+		await openKanban(page)
+		const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+		let id = ''
+		try {
+			id = await addCard(page, 'todo', `e2e-cancel-${stamp}`)
+			await cancelDeleteCard(page, id)
+			// Nothing was destroyed, so there must be nothing to take back.
+			await expect(page.getByTestId('kb-undo-toast')).toHaveCount(0)
+			await expect(cardTitle(page, id)).toHaveValue(`e2e-cancel-${stamp}`)
+		} finally {
+			if (id) await deleteCard(page, id)
+		}
+	})
+
+	test('undo restores a deleted card to its original column and position, body intact', async ({ page }) => {
+		await openKanban(page)
+		const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+		const ids = []
+		try {
+			// Three in one column so the restore has a real position to get
+			// wrong: re-inserting at the end would still satisfy a count check.
+			ids.push(await addCard(page, 'doing', `e2e-undo-a-${stamp}`))
+			ids.push(await addCard(page, 'doing', `e2e-undo-b-${stamp}`))
+			ids.push(await addCard(page, 'doing', `e2e-undo-c-${stamp}`))
+			const before = await columnCardIds(page, 'doing')
+			const middle = ids[1]
+
+			await deleteCard(page, middle)
+			await expect(undoToast(page, middle)).toBeVisible()
+			await undoDeleteCard(page, middle)
+
+			await waitInColumn(page, middle, 'doing')
+			expect(await columnCardIds(page, 'doing')).toEqual(before)
+			await expect(cardTitle(page, middle)).toHaveValue(`e2e-undo-b-${stamp}`)
+			// The window is spent once used; a second undo must not double-insert.
+			await expect(undoToast(page, middle)).toHaveCount(0)
+			await assertColumnCount(page, 'doing')
+		} finally {
+			for (const id of ids) await deleteCard(page, id)
+		}
+	})
+
+	test('an unused undo window expires and the delete becomes permanent', async ({ page }) => {
+		await openKanban(page)
+		const stamp = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+		const id = await addCard(page, 'todo', `e2e-expiry-${stamp}`)
+
+		await deleteCard(page, id)
+		await expect(undoToast(page, id)).toBeVisible()
+		// Poll it away rather than sleeping the window: this fails both if the
+		// toast never expires and if it never appeared in the first place.
+		await expect(undoToast(page, id)).toHaveCount(0, { timeout: 20_000 })
+		await expect(card(page, id)).toHaveCount(0)
+
+		await page.reload()
+		await expect(page.getByTestId('kb-synced-badge')).toBeVisible({ timeout: 15_000 })
+		await expect(card(page, id)).toHaveCount(0)
 	})
 
 	test('two identities concurrently move and rename different cards without index-shift loss', async ({ browser }) => {

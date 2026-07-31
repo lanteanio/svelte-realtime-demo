@@ -44,7 +44,13 @@
 		doing: board.array('order-doing'),
 		done: board.array('order-done')
 	}
-	$effect(() => () => board.destroy())
+	$effect(() => () => {
+		// Pending undo timers outlive the component otherwise, and their
+		// callback writes to state this page no longer owns.
+		for (const timer of undoTimers.values()) clearTimeout(timer)
+		undoTimers.clear()
+		board.destroy()
+	})
 
 	const COLUMN_IDS = ['todo', 'doing', 'done']
 	const COLUMN_LABELS = { todo: 'Todo', doing: 'Doing', done: 'Done' }
@@ -102,12 +108,56 @@
 		})
 	}
 
+	// A delete lands on every visitor's board at once, so it gets both halves
+	// of Nielsen's pair: the confirm prevents the stray tap, and this window
+	// repairs the deliberate one. The snapshot carries the card body, its
+	// column and its index, which is what lets a restore land back where the
+	// card was instead of at the end of some column.
+	const UNDO_WINDOW_MS = 8000
+	let pendingUndos = $state([])
+	const undoTimers = new Map()
+
+	function forgetUndo(token) {
+		const timer = undoTimers.get(token)
+		if (timer !== undefined) {
+			clearTimeout(timer)
+			undoTimers.delete(token)
+		}
+		pendingUndos = pendingUndos.filter((entry) => entry.token !== token)
+	}
+
 	function deleteCard(colId, index, id) {
-		if (!confirmDestructive('Delete this card from the shared board?')) return
+		if (!confirmDestructive('Delete this card from the shared board?', { undoable: true })) return
+		// Read the body BEFORE the transaction; afterwards the map no longer
+		// has it, and an undo with no record would restore an empty card.
+		const record = cards.get(id)
 		tryEdit(() => {
 			board.transact(() => {
 				orders[colId].delete(index)
 				cards.delete(id)
+			})
+			if (record === undefined) return
+			const token = crypto.randomUUID()
+			pendingUndos = [...pendingUndos, { token, id, record, colId, index }]
+			undoTimers.set(token, setTimeout(() => forgetUndo(token), UNDO_WINDOW_MS))
+		})
+	}
+
+	function undoDelete(token) {
+		const entry = pendingUndos.find((item) => item.token === token)
+		if (entry === undefined) return
+		forgetUndo(entry.token)
+		markLocal(entry.id)
+		tryEdit(() => {
+			const order = orders[entry.colId]
+			// Peers keep editing during the undo window. Every element carries
+			// its own CRDT identity, so the saved index is a position hint and
+			// not a promise: clamp it to the column as it stands now, and never
+			// add a second copy if the id is somehow already back.
+			if (order.toArray().includes(entry.id)) return
+			board.transact(() => {
+				cards.set(entry.id, entry.record)
+				order.insert(Math.min(entry.index, order.length), entry.id)
 			})
 		})
 	}
@@ -180,6 +230,27 @@
 		})
 	}
 </script>
+
+<!-- The live region stays mounted and only its contents toggle: assistive tech
+     binds a region when it enters the DOM and announces SUBSEQUENT mutations,
+     so inserting the region and its text together announces unreliably. Same
+     reasoning as /demos/pagination. pointer-events-none stops a lingering
+     toast from swallowing clicks aimed at the board underneath it; the button
+     takes its own events back. -->
+<div class="toast toast-end z-50 pointer-events-none" role="status" aria-live="polite">
+	{#each pendingUndos as undo (undo.token)}
+		<div class="alert alert-warning py-2 px-3 text-sm shadow-lg gap-2" data-testid="kb-undo-toast">
+			<span class="truncate max-w-[12rem]">Deleted "{undo.record.title}"</span>
+			<button
+				class="btn btn-xs pointer-events-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+				onclick={() => undoDelete(undo.token)}
+				data-testid="kb-undo-{undo.id}"
+			>
+				Undo
+			</button>
+		</div>
+	{/each}
+</div>
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>

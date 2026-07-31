@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { confirmAndClick } from './helpers.js'
+import { confirmAndClick, dismissConfirmation } from './helpers.js'
 
 export async function openKanban(page, url = '/demos/kanban') {
 	await page.goto(url)
@@ -61,8 +61,31 @@ export async function moveCard(page, id, direction, destination) {
 
 export async function deleteCard(page, id) {
 	if (await card(page, id).count() === 0) return
-	await confirmAndClick(page.getByTestId(`kb-delete-${id}`))
+	await confirmAndClick(page.getByTestId(`kb-delete-${id}`), undefined, { undoable: true })
 	await expect(card(page, id)).toHaveCount(0, { timeout: 10_000 })
+}
+
+/** Cancel a delete at the confirmation gate; the card must survive. */
+export async function cancelDeleteCard(page, id) {
+	await dismissConfirmation(page.getByTestId(`kb-delete-${id}`), undefined, { undoable: true })
+	await expect(card(page, id)).toHaveCount(1)
+}
+
+export function undoToast(page, id) {
+	return page.getByTestId(`kb-undo-${id}`)
+}
+
+/** Take back a delete inside its window and wait for the card to come back. */
+export async function undoDeleteCard(page, id) {
+	await undoToast(page, id).click()
+	await expect(card(page, id)).toHaveCount(1, { timeout: 10_000 })
+}
+
+/** The column's card ids in render order - the oracle for a positional restore. */
+export function columnCardIds(page, column) {
+	return page.getByTestId(`kb-cards-${column}`).locator('[data-testid^="kb-card-"]').evaluateAll(
+		(nodes) => nodes.map((node) => node.getAttribute('data-testid')?.slice('kb-card-'.length) ?? '')
+	)
 }
 
 export async function assertColumnCount(page, column) {

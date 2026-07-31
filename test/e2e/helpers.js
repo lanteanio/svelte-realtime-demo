@@ -11,7 +11,7 @@ export async function waitForWS(page) {
 	await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
 }
 
-async function answerDestructiveConfirmation(locator, accept, clickOptions) {
+async function answerDestructiveConfirmation(locator, accept, clickOptions, { undoable = false } = {}) {
 	const page = locator.page();
 	const dialogPromise = page.waitForEvent('dialog');
 	// A click on a confirm-gated control cannot settle until the dialog is
@@ -30,9 +30,14 @@ async function answerDestructiveConfirmation(locator, accept, clickOptions) {
 		);
 	}
 	const message = dialog.message();
+	// The consequence clause is asserted in BOTH directions: a surface that
+	// offers an undo must not claim the change is permanent, and the far more
+	// common permanent surface must not quietly soften its wording. Checking
+	// only the shared prefix would let either one drift unnoticed.
+	const consequence = undoable ? 'You can undo it for a few seconds' : 'cannot be undone';
 	const valid = dialog.type() === 'confirm'
 		&& message.includes('shared demo state for everyone')
-		&& message.includes('cannot be undone');
+		&& message.includes(consequence);
 	if (accept) await dialog.accept();
 	else await dialog.dismiss();
 	await clickPromise;
@@ -41,14 +46,17 @@ async function answerDestructiveConfirmation(locator, accept, clickOptions) {
 	return message;
 }
 
-/** Click a destructive control and accept its shared-state confirmation. */
-export function confirmAndClick(locator, clickOptions) {
-	return answerDestructiveConfirmation(locator, true, clickOptions);
+/**
+ * Click a destructive control and accept its shared-state confirmation.
+ * Pass `{ undoable: true }` for a surface whose gate promises an undo.
+ */
+export function confirmAndClick(locator, clickOptions, options) {
+	return answerDestructiveConfirmation(locator, true, clickOptions, options);
 }
 
 /** Click a destructive control and cancel its shared-state confirmation. */
-export function dismissConfirmation(locator, clickOptions) {
-	return answerDestructiveConfirmation(locator, false, clickOptions);
+export function dismissConfirmation(locator, clickOptions, options) {
+	return answerDestructiveConfirmation(locator, false, clickOptions, options);
 }
 
 /**
