@@ -71,8 +71,22 @@ export const bus = createPubSubBus(redis, { breaker })
 /**
  * Per-user rate limiter: 100 RPC calls per 10 seconds.
  * Throttled RPCs (cursor moves, note drags) are excluded in hooks.ws.js.
+ *
+ * keyBy: the default 'ip' mode would hand every visitor behind one NAT a
+ * single shared budget (and locally, every test context shares 127.0.0.1,
+ * which surfaced as spurious RATE_LIMITED denials in serial e2e runs).
+ * Every connection carries a session identity from the upgrade hook, so
+ * key on it; the address stands in only for the pre-identity edge case.
  */
-export const limiter = createRateLimit(redis, { points: 100, interval: 10000, breaker })
+export const limiter = createRateLimit(redis, {
+	points: 100,
+	interval: 10000,
+	breaker,
+	keyBy: (ws) => {
+		const ud = typeof ws.getUserData === 'function' ? ws.getUserData() : null
+		return String(ud?.id ?? ud?.remoteAddress ?? 'unknown')
+	}
+})
 
 /**
  * Presence tracker - who's online globally and per-board.
