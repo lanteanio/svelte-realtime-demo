@@ -105,13 +105,10 @@ test.describe('cluster: /demos/pagination cross-replica', () => {
 	})
 
 	test('live event + paginated catch-up of the same entry coexist on replica B without a crash', async ({ browser }) => {
-		// KNOWN-BROKEN upstream: the svelte-realtime client applies loadMore
-		// slices by blind concat with no id-dedupe, so the final slice
-		// re-serving the live-received entry duplicates its key and Svelte's
-		// keyed each throws each_key_duplicate. This guard is EXPECTED to fail
-		// until the upstream fix lands; it then reports 'passed unexpectedly' -
-		// remove this test.fail() at that point.
-		test.fail(true, 'upstream svelte-realtime: loadMore applies slices by blind concat with no id-dedupe, so paginating past a live-received entry throws each_key_duplicate')
+		// Regression guard for the upstream loadMore keyed upsert (svelte-realtime
+		// next.90): the final slice re-serving the live-received entry must
+		// dedupe against the stream's key index instead of duplicating the key
+		// and making Svelte's keyed each throw each_key_duplicate.
 		test.setTimeout(90_000)
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })

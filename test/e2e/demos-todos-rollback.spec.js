@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { confirmAndClick, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/todos-rollback - optimistic mutate
 // with concurrent-failure rollback. Drives add / toggle / remove / clear /
@@ -27,7 +27,9 @@ async function clearAll(page) {
 	await expect(page.getByTestId('todos')).toHaveAttribute('data-hydrated', 'true', { timeout: 10_000 })
 	const clear = page.getByTestId('clear-button')
 	if (await clear.isVisible().catch(() => false)) {
-		await clear.click()
+		// Clear-all is confirm-gated (shared demo state); a bare click's
+		// dialog is auto-dismissed by Playwright and the RPC never fires.
+		await confirmAndClick(clear)
 		await expect(page.getByTestId('todos')).toContainText(/No todos yet/i, { timeout: 10_000 })
 	}
 }
@@ -129,7 +131,7 @@ test.describe('/demos/todos-rollback', () => {
 			await page.getByTestId('add-button').click()
 			await expect(page.getByTestId('todos').locator('li', { hasText: t })).toHaveCount(1, { timeout: 10_000 })
 		}
-		await page.getByTestId('clear-button').click()
+		await confirmAndClick(page.getByTestId('clear-button'))
 		await expect(page.getByTestId('todos')).toContainText(/No todos yet/i, { timeout: 10_000 })
 	})
 

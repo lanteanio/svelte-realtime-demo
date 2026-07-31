@@ -36,9 +36,11 @@ test.describe('cluster: /demos/arena', () => {
 		const b = await ctxB.newPage()
 		try {
 			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
+			// Poll like the denominator test below: the interest snapshot
+			// arrives via the smooth sync after the page settles, so a single
+			// read straight after open races the relay on a fresh replica.
 			for (const page of [a, b]) {
-				const values = await hud(page)
-				expect(values.receiving).toBeGreaterThan(0)
+				await expect.poll(async () => (await hud(page)).receiving, { timeout: 15_000 }).toBeGreaterThan(0)
 			}
 			const beforeA = await x(a)
 			const beforeB = await x(b)

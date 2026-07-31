@@ -133,10 +133,18 @@ test.describe('/demos/arena', () => {
 		await pad.getByTestId('arena-move-up').dispatchEvent('pointerdown')
 		await expect.poll(async () => (await position(page)).y).toBeLessThan(before.y)
 		await pad.getByTestId('arena-move-up').dispatchEvent('pointerup')
-		// Releasing stops movement: the held set must not latch.
-		const settled = await position(page)
-		await page.waitForTimeout(300)
-		expect((await position(page)).y).toBe(settled.y)
+		// Releasing stops movement: the held set must not latch. Commands
+		// already in flight (and the server reconcile of the predicted dot)
+		// may nudge the position for a moment after pointerup, so wait for
+		// two consecutive samples 300ms apart to agree - a latched key keeps
+		// moving at ~180 units/sec and can never satisfy that, so the poll
+		// times out instead of a single too-early sample passing or failing
+		// on the reconcile tail.
+		await expect.poll(async () => {
+			const a = (await position(page)).y
+			await page.waitForTimeout(300)
+			return (await position(page)).y - a
+		}, { timeout: 10_000 }).toBe(0)
 	})
 
 	test('Spectate exposes all pan controls with clamped 160-unit steps and suppresses player movement', async ({ page }) => {

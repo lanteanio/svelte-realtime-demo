@@ -10,7 +10,11 @@ export const EXPECTED_SURFACES = [
 	'smooth',
 	'webhookDeadLetter',
 	'aggregateCohorts',
-	'durable'
+	'durable',
+	// Announcement count, not erased rows: how many cluster-wide room-owner
+	// hand-offs the erasure committed and published on ':owner' streams.
+	// Present since the forget store was built with its Redis option.
+	'ownerSuccessions'
 ]
 
 export async function openForget(page, target = '/demos/forget') {
@@ -89,7 +93,10 @@ export async function forget(page, expectedAppLog) {
 		expect(count).toBeGreaterThanOrEqual(0)
 	}
 	const rowsAffected = Number(await page.getByTestId('fg-forget-rows').textContent())
-	expect(rowsAffected).toBe(Object.values(counts).reduce((sum, count) => sum + count, 0))
+	// ownerSuccessions counts published hand-off announcements, not erased
+	// rows, so the framework deliberately leaves it out of rowsAffected.
+	const { ownerSuccessions: _announcements, ...rowCounts } = counts
+	expect(rowsAffected).toBe(Object.values(rowCounts).reduce((sum, count) => sum + count, 0))
 	return { counts, rowsAffected }
 }
 

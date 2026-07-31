@@ -65,11 +65,11 @@ test.describe('/demos/pagination', () => {
 		await page.getByTestId('load-more').click()
 		await expect(page.getByTestId('entry-row')).toHaveCount(2 * PAGE_SIZE, { timeout: 8_000 })
 
-		// Seqs must now be exactly 1..50: the client concatenates loadMore
-		// slices as-is, so a loader that re-served page 1 would duplicate ids
-		// (failing the keyed render and the count) and a wrong slice would
-		// break contiguity. This proves the cursor was stamped and honored,
-		// not merely that more rows appeared.
+		// Seqs must now be exactly 1..50: the client upserts loadMore rows by
+		// key (realtime next.90), so a loader that re-served page 1 would
+		// leave the count stuck at PAGE_SIZE and a wrong slice would break
+		// contiguity. This proves the cursor was stamped and honored, not
+		// merely that more rows appeared.
 		expectContiguousFromOne(await seqsOf(page), 2 * PAGE_SIZE)
 		await expect(page.getByTestId('entries-count')).toHaveText(String(2 * PAGE_SIZE))
 		await expect(page.getByTestId('has-more-state')).toContainText('hasMore: true')
@@ -177,18 +177,15 @@ test.describe('/demos/pagination', () => {
 		}
 	})
 
-	// KNOWN-BROKEN upstream: the svelte-realtime client applies loadMore
-	// slices by blind concat with no id-dedupe. An entry received LIVE while
-	// only page 1 is loaded is re-served by the final loadMore slice, and the
-	// duplicated key makes Svelte's keyed each throw each_key_duplicate -
-	// single-instance is the primary repro (the cluster sibling covers the
-	// cross-replica shape). The throw happens BEFORE the DOM commit, so
-	// locator assertions alone would pass against the stale pre-crash render;
-	// only the pageerror channel can observe it. EXPECTED to fail until the
-	// upstream fix lands; it then reports 'passed unexpectedly' - remove the
-	// test.fail() at that point.
+	// Regression guard for the upstream loadMore keyed upsert (svelte-realtime
+	// next.90): an entry received LIVE while only page 1 is loaded is
+	// re-served by the final loadMore slice, and the page row must dedupe
+	// against the stream's key index instead of concatenating into a
+	// duplicated key that makes Svelte's keyed each throw each_key_duplicate.
+	// The throw happens BEFORE the DOM commit, so locator assertions alone
+	// would pass against the stale pre-crash render; only the pageerror
+	// channel can observe it.
 	test('a live-received entry survives paging through the full history (crash guard)', async ({ page }) => {
-		test.fail(true, 'upstream svelte-realtime: loadMore applies slices by blind concat with no id-dedupe, so paginating past a live-received entry throws each_key_duplicate')
 		test.setTimeout(90_000)
 		const pageErrors = []
 		page.on('pageerror', (err) => pageErrors.push(String(err)))

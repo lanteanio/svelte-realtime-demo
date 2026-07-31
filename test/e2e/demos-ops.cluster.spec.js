@@ -41,7 +41,21 @@ test.describe('cluster: /demos/ops', () => {
 				await expect(page.getByTestId('ops-replica-note')).toContainText("one worker's local counts")
 			}
 			expect(await integer(pair.a, 'ops-handlers-total')).toBe(await integer(pair.b, 'ops-handlers-total'))
-			expect(await handlerKinds(pair.a)).toEqual(await handlerKinds(pair.b))
+			// Per-kind counts are NOT equal across replicas by construction: a
+			// handler reports 'lazy' until its module first loads on that
+			// worker, and traffic skew resolves the pools unevenly. The real
+			// shared-registry invariant is: same total (above), same kind
+			// vocabulary, and every kind's cross-replica shortfall covered by
+			// the other replica's unresolved lazy pool - a replica exposing a
+			// handler the other could never resolve to still fails.
+			const kindsA = await handlerKinds(pair.a)
+			const kindsB = await handlerKinds(pair.b)
+			expect(Object.keys(kindsA).sort()).toEqual(Object.keys(kindsB).sort())
+			for (const kind of Object.keys(kindsA)) {
+				if (kind === 'lazy') continue
+				expect(kindsA[kind], `${kind} beyond B's lazy slack`).toBeLessThanOrEqual(kindsB[kind] + (kindsB.lazy ?? 0))
+				expect(kindsB[kind], `${kind} beyond A's lazy slack`).toBeLessThanOrEqual(kindsA[kind] + (kindsA.lazy ?? 0))
+			}
 			expect(await expectDlqConsistent(pair.a)).toEqual(await expectDlqConsistent(pair.b))
 		} finally {
 			await Promise.allSettled([pair.ctxA.close(), pair.ctxB.close()])
