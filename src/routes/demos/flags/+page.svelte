@@ -68,6 +68,11 @@
 		commit('dark-launch', { ...darkDraft })
 	}
 
+	function stepRollout(delta) {
+		darkDraft.rolloutPct = Math.min(100, Math.max(0, darkDraft.rolloutPct + delta))
+		commitRollout()
+	}
+
 	// Stable per-identity bucket in 0-99 (FNV-1a over the identity id).
 	// CLIENT-side demo logic: the server pushes the flag value, the
 	// client decides which cohort this identity falls into.
@@ -148,17 +153,36 @@
 					<span class="label-text text-xs">
 						Rollout: <span class="font-mono" data-testid="fl-rollout-value">{darkDraft.rolloutPct}%</span>
 					</span>
-					<input
-						type="range"
-						class="range range-primary range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
-						min="0"
-						max="100"
-						step="1"
-						bind:value={darkDraft.rolloutPct}
-						disabled={!ready}
-						onchange={commitRollout}
-						data-testid="fl-rollout"
-					/>
+					<!-- A finger cannot land a 1% stop on the track; steppers give exact-value control on coarse pointers. -->
+					<div class="flex items-center gap-2">
+						<button
+							type="button"
+							class="btn btn-outline btn-sm hidden pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+							aria-label="Decrease rollout by one percent"
+							disabled={!ready || darkDraft.rolloutPct <= 0}
+							onclick={() => stepRollout(-1)}
+							data-testid="fl-rollout-dec"
+						>-</button>
+						<input
+							type="range"
+							class="range range-primary range-sm flex-1 pointer-coarse:range-lg pointer-coarse:min-h-11"
+							min="0"
+							max="100"
+							step="1"
+							bind:value={darkDraft.rolloutPct}
+							disabled={!ready}
+							onchange={commitRollout}
+							data-testid="fl-rollout"
+						/>
+						<button
+							type="button"
+							class="btn btn-outline btn-sm hidden pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+							aria-label="Increase rollout by one percent"
+							disabled={!ready || darkDraft.rolloutPct >= 100}
+							onclick={() => stepRollout(1)}
+							data-testid="fl-rollout-inc"
+						>+</button>
+					</div>
 				</label>
 			</div>
 

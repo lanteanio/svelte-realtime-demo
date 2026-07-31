@@ -300,6 +300,20 @@ test.describe('/demos/flags', () => {
 			await expectTouchTarget(page.getByTestId('fl-dark-toggle').locator('..'))
 			await expectTouchTarget(page.getByTestId('fl-banner-text'), { minWidth: 0 })
 			await expectTouchTarget(page.getByTestId('fl-rollout'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('fl-rollout-dec'))
+			await expectTouchTarget(page.getByTestId('fl-rollout-inc'))
+			// Exact-value precision: one stepper tap moves the rollout by exactly
+			// one percent, and the committed value echoes back from the server.
+			const value = page.getByTestId('fl-rollout-value')
+			const before = parseInt(await value.textContent(), 10)
+			const up = before < 100
+			await page.getByTestId(up ? 'fl-rollout-inc' : 'fl-rollout-dec').tap()
+			const stepped = before + (up ? 1 : -1)
+			await expect(value).toHaveText(`${stepped}%`)
+			await expect(page.getByText(`rollout: ${stepped}%`)).toBeVisible()
+			await page.getByTestId(up ? 'fl-rollout-dec' : 'fl-rollout-inc').tap()
+			await expect(value).toHaveText(`${before}%`)
+			await expect(page.getByText(`rollout: ${before}%`)).toBeVisible()
 		} finally {
 			await context.close()
 		}

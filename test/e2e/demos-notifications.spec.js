@@ -323,6 +323,15 @@ test.describe('/demos/notifications', () => {
 			await expectTouchTarget(page.getByTestId('text-input'), { minWidth: 0 })
 			await expectTouchTarget(page.getByTestId('send-button'))
 			await expectTouchTarget(page.getByTestId('schedule-input'), { minWidth: 0 })
+			await expectTouchTarget(page.getByTestId('schedule-dec'))
+			await expectTouchTarget(page.getByTestId('schedule-inc'))
+			// Exact-value precision: stepper taps move the schedule by exactly one
+			// second - asserted off the default so a stale 0 cannot pass vacuously.
+			await page.getByTestId('schedule-inc').tap()
+			await page.getByTestId('schedule-inc').tap()
+			await expect(page.getByTestId('schedule-input')).toHaveValue('2')
+			await page.getByTestId('schedule-dec').tap()
+			await expect(page.getByTestId('schedule-input')).toHaveValue('1')
 		} finally {
 			await context.close()
 		}

@@ -36,6 +36,10 @@
 	let selectedRecipientId = $state('')
 	let text = $state('')
 	let scheduleSec = $state(0)
+
+	function stepSchedule(delta) {
+		scheduleSec = Math.min(30, Math.max(0, scheduleSec + delta))
+	}
 	let busy = $state(false)
 	let outcome = $state(null) // { kind: 'delivered'|'dismissed'|'timeout'|'offline'|'error'|'scheduled', detail?: string }
 
@@ -284,14 +288,33 @@
 				</label>
 				<label class="form-control flex-1 min-w-[10rem]">
 					<span class="label-text text-xs">Schedule ({scheduleSec}s)</span>
-					<!-- Compact dress on fine pointers, 44px floor where taps land. -->
-					<input
-						type="range"
-						class="range range-sm pointer-coarse:range-lg pointer-coarse:min-h-11"
-						min="0" max="30" step="1"
-						bind:value={scheduleSec}
-						data-testid="schedule-input"
-					/>
+					<!-- Compact dress on fine pointers, 44px floor where taps land.
+					     ~10px per stop is untappable; steppers give exact-second control on coarse pointers. -->
+					<div class="flex items-center gap-2">
+						<button
+							type="button"
+							class="btn btn-outline btn-sm hidden pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+							aria-label="Decrease schedule by one second"
+							disabled={scheduleSec <= 0}
+							onclick={() => stepSchedule(-1)}
+							data-testid="schedule-dec"
+						>-</button>
+						<input
+							type="range"
+							class="range range-sm flex-1 pointer-coarse:range-lg pointer-coarse:min-h-11"
+							min="0" max="30" step="1"
+							bind:value={scheduleSec}
+							data-testid="schedule-input"
+						/>
+						<button
+							type="button"
+							class="btn btn-outline btn-sm hidden pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+							aria-label="Increase schedule by one second"
+							disabled={scheduleSec >= 30}
+							onclick={() => stepSchedule(1)}
+							data-testid="schedule-inc"
+						>+</button>
+					</div>
 				</label>
 			</div>
 			<form onsubmit={(e) => { e.preventDefault(); handleSend() }} class="flex gap-2">
