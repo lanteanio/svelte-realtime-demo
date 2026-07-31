@@ -169,7 +169,12 @@
 	</section>
 
 	<!-- Three columns -->
-	<section class="grid @3xl:grid-cols-3 gap-3" data-testid="columns">
+	<!-- @2xl, not @3xl: below 1024 there is no sidebar, so the content container
+	     is the viewport minus padding. Mapping the old md: (768px viewport)
+	     straight to @3xl (768px container) pushed three-up past the 768 rung it
+	     is supposed to engage at. The finding this grid answers was about 640,
+	     where a 672px container still stacks. -->
+	<section class="grid @2xl:grid-cols-3 gap-3" data-testid="columns">
 		<div class="card bg-base-100 border border-base-300" data-testid="orders-column">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Orders ({ordersList.length})</h2>

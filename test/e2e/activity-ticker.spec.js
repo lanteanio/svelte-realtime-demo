@@ -11,7 +11,10 @@ test.describe.serial('Activity Ticker', () => {
 	test('empty board shows "No activity yet" message', async ({ page }) => {
 		await page.goto(boardUrl);
 		await waitForBoardReady(page);
-		await expect(page.getByText('No activity yet')).toBeVisible();
+		// Two copies of this line ship - one per pointer type, switched by CSS -
+		// so the bare substring is ambiguous. Assert the fine-pointer variant,
+		// which is the one this browser context renders.
+		await expect(page.getByText('No activity yet - double-click the canvas to add a note')).toBeVisible();
 	});
 
 	test('activity ticker is fixed at bottom of page', async ({ page }) => {
