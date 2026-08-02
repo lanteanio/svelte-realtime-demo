@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
+import { selectOrphans } from './orphan-sweep.mjs'
 
 const tier = process.argv[2]
 const playwrightArgs = process.argv.slice(3)
@@ -152,6 +153,7 @@ async function ensureProductionBuild() {
 
 async function provisionDependencies() {
 	await runChecked('Docker availability', 'docker', ['info'], process.env, 'ignore')
+	await sweepOrphanedContainers()
 	await runChecked('PostgreSQL container', 'docker', [
 		'run', '--detach', '--name', postgresName,
 		'--publish', `127.0.0.1:${postgresPort}:5432`,
@@ -264,8 +266,44 @@ async function cleanup() {
 	if (cleaning) return
 	cleaning = true
 	await stopApps()
-	await run('docker', ['rm', '--force', postgresName, redisName], process.env, 'ignore').catch(() => {})
+	// --volumes so the container's anonymous volume goes with it. Without it
+	// every run left one behind invisibly; they had reached 677 volumes and
+	// about 16GB of reclaimable space before anyone looked.
+	await run('docker', ['rm', '--force', '--volumes', postgresName, redisName], process.env, 'ignore').catch(() => {})
 }
+
+/**
+ * Remove containers left behind by harness runs that died without cleanup().
+ *
+ * cleanup() covers normal exit and SIGINT/SIGTERM, but a harder kill skips it
+ * and nothing else ever reclaimed the result: containers were found still
+ * running 29 hours later, and a machine carrying several runs' worth of idle
+ * Postgres and Redis is a plausible source of trouble in a suite whose
+ * assertions are this timing-sensitive. Sweeping at STARTUP is the only
+ * placement that survives a kill; any teardown-side fix has the same hole the
+ * current one does.
+ *
+ * Ownership needs no new bookkeeping because the container name already
+ * carries the creating PID. A container whose PID is gone cannot have a live
+ * owner. A PID recycled by an unrelated process reads as alive and its
+ * container is left alone, so the failure mode is leaving a leak in place
+ * rather than deleting a running harness's database - concurrent runs are
+ * legitimate here, which is why this cannot simply remove everything that is
+ * not ours.
+ */
+async function sweepOrphanedContainers() {
+	let listed = ''
+	try {
+		listed = await capture('docker', ['ps', '--all', '--filter', 'name=srd-test-', '--format', '{{.Names}}'])
+	} catch {
+		return
+	}
+	const orphans = selectOrphans(listed.split(/\r?\n/))
+	if (!orphans.length) return
+	console.log(`orphaned containers: removing ${orphans.length} left by dead harness runs`)
+	await run('docker', ['rm', '--force', '--volumes', ...orphans], process.env, 'ignore').catch(() => {})
+}
+
 
 async function stopApps() {
 	const running = apps.splice(0)
