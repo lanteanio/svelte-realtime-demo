@@ -7,6 +7,40 @@
 
 import { test, expect } from '@playwright/test'
 
+/**
+ * Wait until the rehydrate tier stops moving, and report where it stopped.
+ *
+ * Settling is the property the demo actually promises. The absolute count is
+ * a function of cron phase, which no part of the harness controls, so an
+ * equality assertion here is really an assertion about timing dressed up as
+ * one about behaviour.
+ *
+ * The floor is only `> 0`: this is a diagnostic probe, its subject is the
+ * pause and resume further down, and a larger floor would reintroduce exactly
+ * the arbitrary threshold this replaced.
+ */
+async function settleRehydrate(page, { stableSamples = 3, intervalMs = 500, timeout = 20_000 } = {}) {
+	const read = async () => {
+		const text = await page.getByTestId('tier-rehydrate').textContent()
+		const found = /rehydrate:\s*(\d+)/.exec(text ?? '')
+		return found ? Number(found[1]) : null
+	}
+	const deadline = Date.now() + timeout
+	let previous = null
+	let stable = 0
+	while (Date.now() < deadline) {
+		const value = await read()
+		if (value !== null && value > 0 && value === previous) {
+			if (++stable >= stableSamples) return value
+		} else {
+			stable = 0
+		}
+		previous = value
+		await page.waitForTimeout(intervalMs)
+	}
+	throw new Error(`rehydrate count never settled above zero within ${timeout}ms (last read: ${previous})`)
+}
+
 test('from-seq pause+resume captures wire frames', async ({ page }) => {
 	test.setTimeout(60_000)
 
@@ -55,9 +89,17 @@ test('from-seq pause+resume captures wire frames', async ({ page }) => {
 
 	await page.goto('/demos/from-seq')
 
-	// Wait for initial rehydrate (20 events tagged rehydrate)
-	await expect(page.getByTestId('tier-rehydrate')).toContainText(/rehydrate: 20/, { timeout: 15_000 })
-	console.log('[probe] initial rehydrate complete')
+	// Wait for the initial rehydrate to FINISH, which is not the same as it
+	// reaching any particular number. The count is however many events the
+	// replay buffer holds when the page opens, and that depends on how long
+	// the 1Hz cron has been ticking: run-local-e2e gates each tier on the cron
+	// having STARTED, never on it having produced a given number of events.
+	// This previously asserted exactly 20 and a run settled at 16 and held
+	// there, so the probe failed here and never reached the pause and resume
+	// it exists to observe. Four seconds of cron drift was enough to hide the
+	// probe's entire subject.
+	const rehydrated = await settleRehydrate(page)
+	console.log('[probe] initial rehydrate complete at', rehydrated, 'events')
 
 	// Let a few live events flow in
 	await page.waitForTimeout(4000)
