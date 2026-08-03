@@ -69,8 +69,9 @@
 		busy = true
 		lastError = ''
 		try {
-			await placeOrder({ productName: selectedProduct, qty: Math.floor(qty) })
+			receipt = await placeOrder({ productName: selectedProduct, qty: Math.floor(qty) })
 		} catch (err) {
+			receipt = null
 			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 		} finally {
 			busy = false
@@ -83,11 +84,13 @@
 		burstBusy = true
 		lastError = ''
 		try {
-			await Promise.all(Array.from({ length: 5 }, (_, i) => placeOrder.fresh({
+			const orders = await Promise.all(Array.from({ length: 5 }, (_, i) => placeOrder.fresh({
 				productName: state.products[i % state.products.length]?.name ?? selectedProduct,
 				qty: 1 + (i % 3)
 			})))
+			receipt = { burst: orders.length }
 		} catch (err) {
+			receipt = null
 			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 		} finally {
 			burstBusy = false
@@ -101,21 +104,39 @@
 		clearing = true
 		try {
 			await clearFeeds()
+			receipt = null
 		} finally {
 			clearing = false
 		}
+	}
+
+	// On short viewports the three feed cards sit below the fold, so a
+	// successful publish looked like nothing happening. The receipt names
+	// what was just placed and offers the jump, instead of hoping the
+	// visitor scrolls.
+	let receipt = $state(null)
+	let columnsEl = $state(null)
+
+	function jumpToFeeds() {
+		columnsEl?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 	}
 
 	function timeOf(ts) {
 		const d = new Date(ts)
 		return d.toLocaleTimeString()
 	}
+
+	// Audit and notification rows arrive with the orderId they were
+	// caused by; the source order carries the buyer identity. Joining
+	// them here is what lets every downstream row wear its cause.
+	const orderById = $derived(new Map(ordersList.map((o) => [o.id, o])))
+	const refOf = (id) => `#${String(id ?? '').replace(/^ord-/, '')}`
 </script>
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Effects: server-side reactive side effects</h1>
+		<h1 class="text-2xl font-bold mt-2">live.effect: one publish, three streams</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Place an order. The RPC publishes <code>'created'</code> on the
 			orders topic and returns. A separately-registered
@@ -150,20 +171,36 @@
 				</label>
 				<label class="flex flex-col gap-1 flex-1 min-w-[6rem]">
 					<span class="opacity-70 text-xs">Qty</span>
-					<input type="number" class="input input-bordered input-sm pointer-coarse:min-h-11" min="1" max="20" step="1" bind:value={qty} disabled={busy} data-testid="place-qty" />
+					<input type="number" class="input input-bordered input-sm pointer-coarse:min-h-11" min="1" max="20" step="1" required bind:value={qty} disabled={busy} data-testid="place-qty" />
 				</label>
-				<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="place-submit">
-					{busy ? 'Placing...' : 'Place order'}
-				</button>
-				<button type="button" class="btn btn-sm btn-warning pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
-					{burstBusy ? 'Bursting...' : 'Burst (5)'}
-				</button>
-				<button type="button" class="btn btn-sm btn-outline btn-error ml-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={clearing} data-testid="clear">
-					Clear feeds
-				</button>
+				<!-- One wrapping unit for the actions: on a phone the inputs may
+				     reflow, but the two publish buttons never separate and Clear
+				     keeps its distance on the right. -->
+				<div class="flex flex-wrap gap-2 items-end grow">
+					<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="place-submit">
+						{busy ? 'Placing...' : 'Place order'}
+					</button>
+					<button type="button" class="btn btn-sm btn-warning pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
+						{burstBusy ? 'Bursting...' : 'Burst (5)'}
+					</button>
+					<button type="button" class="btn btn-sm btn-outline btn-error ml-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={clearing} data-testid="clear">
+						Clear feeds
+					</button>
+				</div>
 			</form>
 			{#if lastError}
 				<p class="text-xs text-error" data-testid="error">{lastError}</p>
+			{:else if receipt}
+				<p class="text-xs opacity-80" aria-live="polite" data-testid="receipt">
+					{#if receipt.burst}
+						{receipt.burst} orders placed
+					{:else}
+						{receipt.qty}x {receipt.productName} placed
+						<span class="font-mono">{refOf(receipt.id)}</span>
+					{/if}
+					- all three feeds picked it up.
+					<button type="button" class="link" onclick={jumpToFeeds} data-testid="receipt-jump">Jump to the feeds</button>
+				</p>
 			{/if}
 		</div>
 	</section>
@@ -174,21 +211,22 @@
 	     straight to @3xl (768px container) pushed three-up past the 768 rung it
 	     is supposed to engage at. The finding this grid answers was about 640,
 	     where a 672px container still stacks. -->
-	<section class="grid @2xl:grid-cols-3 gap-3" data-testid="columns">
+	<section class="grid @2xl:grid-cols-3 gap-3" data-testid="columns" bind:this={columnsEl}>
 		<div class="card bg-base-100 border border-base-300" data-testid="orders-column">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Orders ({ordersList.length})</h2>
-				<p class="text-xs opacity-50">source topic; the RPC publishes here.</p>
+				<p class="text-xs opacity-70">source topic; the RPC publishes here.</p>
 				<ul class="space-y-1 text-xs" data-testid="orders-list">
 					{#each ordersList as o (o.id)}
 						<li class="flex items-center gap-2" data-testid="orders-row">
 							<span class="opacity-50 w-16">{timeOf(o.ts)}</span>
-							<span class="inline-block w-2 h-2 rounded-full" style:background={o.buyerColor}></span>
+							<span class="inline-block w-2 h-2 rounded-full shrink-0" style:background={o.buyerColor} role="img" aria-label="buyer {o.buyerName}" title={o.buyerName}></span>
+							<span class="font-mono opacity-60" data-testid="orders-ref">{refOf(o.id)}</span>
 							<span class="font-medium" data-testid="orders-product">{o.qty}x {o.productName}</span>
 							<span class="ml-auto font-mono">${o.total}</span>
 						</li>
 					{:else}
-						<li class="opacity-40 text-xs" data-testid="orders-empty">no orders yet</li>
+						<li class="opacity-70 text-xs" data-testid="orders-empty">no orders yet</li>
 					{/each}
 				</ul>
 			</div>
@@ -197,16 +235,21 @@
 		<div class="card bg-base-100 border border-base-300" data-testid="audit-column">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Audit ({auditList.length})</h2>
-				<p class="text-xs opacity-50">populated by the effect handler.</p>
+				<p class="text-xs opacity-70">populated by the effect handler.</p>
 				<ul class="space-y-1 text-xs" data-testid="audit-list">
 					{#each auditList as a (a.id)}
+						{@const cause = orderById.get(a.orderId)}
 						<li class="flex items-center gap-2" data-testid="audit-row">
 							<span class="opacity-50 w-16">{timeOf(a.ts)}</span>
+							{#if cause}
+								<span class="inline-block w-2 h-2 rounded-full shrink-0" style:background={cause.buyerColor} role="img" aria-label="buyer {cause.buyerName}" title={cause.buyerName}></span>
+							{/if}
+							<span class="font-mono opacity-60" data-testid="audit-ref">{refOf(a.orderId)}</span>
 							<span class="badge badge-xs badge-info">{a.level}</span>
 							<span class="flex-1 truncate" data-testid="audit-message">{a.message}</span>
 						</li>
 					{:else}
-						<li class="opacity-40 text-xs" data-testid="audit-empty">no audit entries yet</li>
+						<li class="opacity-70 text-xs" data-testid="audit-empty">no audit entries yet</li>
 					{/each}
 				</ul>
 			</div>
@@ -215,22 +258,27 @@
 		<div class="card bg-base-100 border border-base-300" data-testid="notifications-column">
 			<div class="card-body py-3 space-y-2">
 				<h2 class="card-title text-sm">Notifications ({notifsList.length})</h2>
-				<p class="text-xs opacity-50">populated by the same effect handler.</p>
+				<p class="text-xs opacity-70">populated by the same effect handler.</p>
 				<ul class="space-y-1 text-xs" data-testid="notifications-list">
 					{#each notifsList as n (n.id)}
+						{@const cause = orderById.get(n.orderId)}
 						<li class="flex items-center gap-2" data-testid="notifications-row">
 							<span class="opacity-50 w-16">{timeOf(n.ts)}</span>
+							{#if cause}
+								<span class="inline-block w-2 h-2 rounded-full shrink-0" style:background={cause.buyerColor} role="img" aria-label="buyer {cause.buyerName}" title={cause.buyerName}></span>
+							{/if}
+							<span class="font-mono opacity-60" data-testid="notifications-ref">{refOf(n.orderId)}</span>
 							<span class="flex-1 truncate" data-testid="notifications-message">{n.message}</span>
 						</li>
 					{:else}
-						<li class="opacity-40 text-xs" data-testid="notifications-empty">no notifications yet</li>
+						<li class="opacity-70 text-xs" data-testid="notifications-empty">no notifications yet</li>
 					{/each}
 				</ul>
 			</div>
 		</div>
 	</section>
 
-	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
+	<aside class="text-xs opacity-70 leading-relaxed space-y-2">
 		<p>
 			Server: <code>live.effect([TOPICS.demoEffectOrders], async (event, data, platform) =&gt; &#123; ... &#125;)</code>.
 			The handler runs on every publish to any source topic. It

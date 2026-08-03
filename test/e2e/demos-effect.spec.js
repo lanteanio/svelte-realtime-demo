@@ -52,7 +52,7 @@ async function burst(page) {
 test.describe('/demos/effect', () => {
 	test('renders the full product/quantity surface and hydrated identity', async ({ page }) => {
 		await openEffect(page)
-		await expect(page.getByRole('heading', { name: 'Effects: server-side reactive side effects' })).toBeVisible()
+		await expect(page.getByRole('heading', { name: 'live.effect: one publish, three streams' })).toBeVisible()
 		await expect(page.getByTestId('place-section')).toBeVisible()
 		await expect(page.getByTestId('columns')).toBeVisible()
 		for (const id of ['orders-column', 'audit-column', 'notifications-column']) {
@@ -120,7 +120,7 @@ test.describe('/demos/effect', () => {
 		await clearFeeds(page)
 		const qty = page.getByTestId('place-qty')
 
-		for (const invalid of ['0', '21', '2.5']) {
+		for (const invalid of ['0', '21', '2.5', '']) {
 			await qty.fill(invalid)
 			expect(await qty.evaluate((input) => input.checkValidity())).toBe(false)
 			await page.getByTestId('place-submit').click()
@@ -193,6 +193,67 @@ test.describe('/demos/effect', () => {
 		} finally {
 			await context.close()
 		}
+	})
+
+	test('every downstream row wears the order that caused it', async ({ page }) => {
+		await openEffect(page)
+		await clearFeeds(page)
+		const buyer = (await page.locator('header strong').textContent())?.trim() ?? ''
+		await place(page, 'coffee', 2)
+		await expectCounts(page, 1)
+
+		const orderRef = (await page.getByTestId('orders-ref').textContent())?.trim()
+		expect(orderRef).toMatch(/^#[0-9a-f]{8}$/)
+		await expect(page.getByTestId('audit-ref')).toHaveText(orderRef)
+		await expect(page.getByTestId('notifications-ref')).toHaveText(orderRef)
+		// The buyer dot travels too, so the correlation is visible even
+		// when the ids are not being read - and it names its buyer for
+		// everyone who cannot use the color.
+		for (const row of ['orders-row', 'audit-row', 'notifications-row']) {
+			await expect(page.getByTestId(row).locator(`[title="${buyer}"]`)).toHaveCount(1)
+		}
+	})
+
+	test('a publish on a short viewport leaves a receipt whose jump lands on the feeds', async ({ page }) => {
+		await page.setViewportSize({ width: 844, height: 390 })
+		await openEffect(page)
+		await clearFeeds(page)
+		await page.getByTestId('place-qty').fill('3')
+		await page.getByTestId('place-submit').click()
+
+		const receipt = page.getByTestId('receipt')
+		await expect(receipt).toContainText('3x bagel placed')
+		await expectCounts(page, 1)
+		const orderRef = (await page.getByTestId('orders-ref').textContent())?.trim()
+		await expect(receipt).toContainText(orderRef)
+
+		const columns = page.getByTestId('columns')
+		const columnsTop = async () => (await columns.boundingBox()).y
+		expect(await columnsTop()).toBeGreaterThan(390)
+		await page.getByTestId('receipt-jump').click()
+		await expect.poll(columnsTop, { timeout: 5_000 }).toBeLessThan(200)
+		expect(await columnsTop()).toBeGreaterThanOrEqual(0)
+	})
+
+	test('the three actions stay one group below the inputs on a phone', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 })
+		await openEffect(page)
+		const box = async (id) => await page.getByTestId(id).boundingBox()
+		const [qty, placeBtn, burstBtn, clearBtn] = await Promise.all([
+			box('place-qty'), box('place-submit'), box('burst'), box('clear')
+		])
+		expect(placeBtn.y).toBeGreaterThan(qty.y + qty.height - 1)
+		expect(burstBtn.y).toBeCloseTo(placeBtn.y, 0)
+		expect(clearBtn.y).toBeCloseTo(placeBtn.y, 0)
+	})
+
+	test('the instructive text clears the contrast floor it used to duck under', async ({ page }) => {
+		await openEffect(page)
+		const opacityOf = (locator) => locator.evaluate((el) => getComputedStyle(el).opacity)
+		expect(await opacityOf(page.locator('aside.text-xs'))).toBe('0.7')
+		expect(await opacityOf(page.getByTestId('orders-column').locator('p').first())).toBe('0.7')
+		await clearFeeds(page)
+		expect(await opacityOf(page.getByTestId('orders-empty'))).toBe('0.7')
 	})
 
 	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
