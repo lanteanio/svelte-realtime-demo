@@ -16,23 +16,42 @@ export async function roundState(page) {
 }
 
 /**
- * Wait until the round has room for this test's contributor without reaching k.
+ * Wait for a round that both has room for this test's contributor AND has
+ * enough time left for the test to finish inside it.
  *
- * The contributor set is round-scoped and tumbles every minute, and these specs
- * run serially against one shared cluster, so a test can inherit a round that is
- * already at or above k. Gating the below-k assertions on `if (distinct < k)`
- * hides that: the test goes green having never exercised the withholding the
- * demo exists to show. Waiting out the boundary makes those assertions
- * unconditional. The page refreshes the round every 5s, so poll rather than
- * trusting a single read of resetInSeconds.
+ * Two separate requirements, and only the first used to be enforced.
+ *
+ * Room: the contributor set is round-scoped and these specs run serially
+ * against one shared cluster, so a test can inherit a round already at or above
+ * k. Gating the below-k assertions on `if (distinct < k)` hides that - the test
+ * goes green having never exercised the withholding the demo exists to show.
+ * Waiting out the boundary makes those assertions unconditional.
+ *
+ * Time: the round is a wall-clock minute (`currentMinute()` in
+ * `src/live/demos/privacy.js`), and EVERY round-scoped number resets when it
+ * tumbles - including the raw `n` that `submitMood` asserts must increase. A
+ * caller handed a round with three seconds left straddles the boundary
+ * mid-sequence and sees n go 4 -> 1, which reads as a lost submission and is
+ * really just a new window. This helper read `resetInSeconds` and never used
+ * it; now it waits for a round with real headroom, so callers can assume one
+ * window for their whole sequence and keep asserting monotonic counts.
+ *
+ * The default demands a round that has only JUST tumbled rather than merely
+ * one with some time left. A five-submission sequence costs around 25 seconds
+ * because each submission waits for an aggregate publish, so "20 seconds
+ * remaining" still straddles; the only reliable window is a fresh one. Both
+ * conditions come true together at every tumble - distinct resets to 0 as the
+ * clock resets to 60 - so this waits at most one round. `resetInSeconds` is
+ * refreshed on the page every 5s, hence 50 rather than 60.
  */
-export async function waitForFreshRound(page, timeout = 90_000) {
+export async function waitForFreshRound(page, { timeout = 90_000, minSecondsLeft = 50 } = {}) {
+	const usable = (s) => s.distinct < s.k - 1 && s.resetInSeconds >= minSecondsLeft
 	const state = await roundState(page)
-	if (state.distinct < state.k - 1) return state
-	await expect.poll(async () => (await roundState(page)).distinct, {
+	if (usable(state)) return state
+	await expect.poll(async () => usable(await roundState(page)), {
 		timeout,
 		intervals: [1_000]
-	}).toBeLessThan(state.k - 1)
+	}).toBe(true)
 	return roundState(page)
 }
 
