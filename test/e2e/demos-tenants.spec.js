@@ -23,6 +23,8 @@ async function open(page) {
 	await waitForWsConfirmed(page)
 }
 
+const opacityOf = (locator) => locator.evaluate((el) => Number(getComputedStyle(el).opacity))
+
 async function switchTo(page, tenant) {
 	const id = tenant === 'acme' ? 'tn-set-acme' : tenant === 'globex' ? 'tn-set-globex' : 'tn-clear'
 	await page.getByTestId(id).click()
@@ -56,15 +58,45 @@ test.describe('/demos/tenants', () => {
 		await expect(page.getByTestId('tn-clear')).toHaveAttribute('aria-pressed', 'true')
 		await expect(page.getByTestId('tn-clear')).toHaveClass(/btn-primary/)
 		await expect(page.getByTestId('tn-set-acme')).toHaveAttribute('aria-pressed', 'false')
-		await expect(page.getByTestId('tn-scope-warning')).toContainText('EVERY demo page')
+		// No tenant is active, so the isolation caveat is hypothetical: it says
+		// so, and spends no amber on it.
+		await expect(page.getByTestId('tn-scope-warning')).toContainText('Picking a tenant will isolate EVERY demo page')
+		await expect(page.getByTestId('tn-scope-warning')).not.toHaveClass(/alert-warning/)
+		// The lede points at the action the visitor can take from here.
+		await expect(page.getByTestId('tn-lede')).toContainText('Pick Acme below')
 		const input = page.getByTestId('tn-note-input')
 		await expect(input).toHaveAttribute('maxlength', '200')
-		await expect(input).toHaveAttribute('placeholder', 'Leave a note for everyone in this scope...')
+		await expect(input).toHaveAttribute('placeholder', 'Leave a note...')
+		// The scope clause survives as the accessible name rather than as a
+		// placeholder that is clipped at 320 and gone once the visitor types.
+		await expect(page.getByLabel('Note for this scope')).toBeVisible()
 		await expect(page.getByTestId('tn-note-submit')).toBeDisabled()
 		await input.fill('   ')
 		await expect(page.getByTestId('tn-note-submit')).toBeDisabled()
 		await expect(page.getByTestId('tn-switch-error')).toHaveCount(0)
 		await expect(page.getByTestId('tn-post-error')).toHaveCount(0)
+	})
+
+	/**
+	 * The empty pad is the whole first screen in a scope nobody has written to
+	 * yet, so it has to be readable rather than a metadata whisper. Holding it
+	 * open by dropping only the pad topic keeps the assertion independent of
+	 * what the keyspace happens to hold and of where this file sits in a retry,
+	 * while `whoami` still lands so the page is genuinely hydrated.
+	 */
+	test('the empty pad states its emptiness above the metadata floor', async ({ page }) => {
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((m) => server.send(m))
+			server.onMessage((m) => {
+				if (String(m).includes('demos:tenants:pad')) return
+				ws.send(m)
+			})
+		})
+		await open(page)
+		const empty = page.getByTestId('tn-notes-empty')
+		await expect(empty).toBeVisible()
+		expect(await opacityOf(empty)).toBeGreaterThanOrEqual(0.6)
 	})
 
 	test('public posts trim whitespace, clear the input, and prepend newest-first', async ({ page }) => {
@@ -91,14 +123,19 @@ test.describe('/demos/tenants', () => {
 		await expect(page.getByTestId('tn-set-acme')).toHaveAttribute('aria-pressed', 'true')
 		await expect(page.getByTestId('tn-set-acme')).toHaveClass(/btn-primary/)
 		await expect(page.getByTestId('tn-clear')).toBeEnabled()
-		await expect(page.getByRole('heading', { level: 2 })).toContainText('acme scratchpad')
+		// Isolation is now the live condition: amber, and named in the
+		// switcher's own vocabulary rather than the raw id.
+		await expect(page.getByTestId('tn-scope-warning')).toHaveClass(/alert-warning/)
+		await expect(page.getByTestId('tn-scope-warning')).toContainText('currently isolated to Acme')
+		await expect(page.getByTestId('tn-lede')).toContainText('Acme is active')
+		await expect(page.getByRole('heading', { level: 2 })).toContainText('Acme scratchpad')
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(publicText)
 		await postNote(page, acmeText)
 
 		await switchTo(page, 'globex')
 		await expect(page.getByTestId('tn-set-globex')).toBeEnabled()
 		await expect(page.getByTestId('tn-set-globex')).toHaveAttribute('aria-pressed', 'true')
-		await expect(page.getByRole('heading', { level: 2 })).toContainText('globex scratchpad')
+		await expect(page.getByRole('heading', { level: 2 })).toContainText('Globex scratchpad')
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(acmeText)
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(publicText)
 		await postNote(page, globexText)
@@ -106,6 +143,9 @@ test.describe('/demos/tenants', () => {
 		await switchTo(page, null)
 		await expect(page.getByTestId('tn-clear')).toBeEnabled()
 		await expect(page.getByTestId('tn-clear')).toHaveAttribute('aria-pressed', 'true')
+		// Approached from the isolated side, so this waits for a real
+		// transition rather than reading a state that was never amber.
+		await expect(page.getByTestId('tn-scope-warning')).not.toHaveClass(/alert-warning/)
 		await expect(page.getByTestId('tn-notes-list')).toContainText(publicText)
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(acmeText)
 		await expect(page.getByTestId('tn-notes-list')).not.toContainText(globexText)

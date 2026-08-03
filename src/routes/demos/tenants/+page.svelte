@@ -25,6 +25,12 @@
 	const activeTenant = $derived(
 		wsTenant !== undefined ? wsTenant : (data.identity?.tenant ?? null)
 	)
+	// One vocabulary for the tenant, shared by the switcher, the lede and
+	// the pad title. The badge deliberately keeps the raw id: it reads back
+	// the server-trusted ctx.tenantId, which is not a display string.
+	const TENANT_LABELS = { acme: 'Acme', globex: 'Globex' }
+	const tenantLabel = (id) => TENANT_LABELS[id] ?? id
+
 	const literalPadTopic = 'demos:tenants:pad'
 	const effectivePadTopic = $derived(
 		activeTenant ? `@t/${activeTenant}/${literalPadTopic}` : literalPadTopic
@@ -91,12 +97,20 @@
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Multi-tenancy: strict per-connection isolation</h1>
-		<p class="text-sm opacity-70 mt-1">
-			One scratchpad stream on one literal topic. With Acme active,
-			everything this connection touches lives under
-			<code>@t/acme/...</code> - the Globex tab literally cannot
-			subscribe to it, not even by hand-rolled wire frames. The
-			handlers are byte-identical to a single-tenant app; the
+		<p class="text-sm opacity-70 mt-1" data-testid="tn-lede">
+			One scratchpad stream on one literal topic.
+			{#if activeTenant}
+				<b>{tenantLabel(activeTenant)}</b> is active, so everything this
+				connection touches lives under <code>@t/{activeTenant}/...</code>
+				- the other tenant's tab literally cannot subscribe to it, not
+				even by hand-rolled wire frames.
+			{:else}
+				Pick <b>Acme</b> below and everything this connection touches
+				will live under <code>@t/acme/...</code> - a Globex tab
+				literally cannot subscribe to it, not even by hand-rolled wire
+				frames.
+			{/if}
+			The handlers are byte-identical to a single-tenant app; the
 			framework scopes the topics, the app scopes its own Redis keys
 			via <code>ctx.tenantId</code>.
 		</p>
@@ -130,7 +144,7 @@
 						aria-pressed={activeTenant === 'acme'}
 						data-testid="tn-set-acme"
 					>
-						Acme
+						{TENANT_LABELS.acme}
 					</button>
 					<button
 						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
@@ -140,7 +154,7 @@
 						aria-pressed={activeTenant === 'globex'}
 						data-testid="tn-set-globex"
 					>
-						Globex
+						{TENANT_LABELS.globex}
 					</button>
 					<button
 						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
@@ -158,11 +172,24 @@
 				Switching reloads the page: the tenant resolver runs once per
 				connection at WebSocket upgrade, never mid-connection.
 			</p>
-			<div class="alert alert-warning py-2 text-xs" data-testid="tn-scope-warning">
+			<!-- Site-wide isolation is a live condition, not a standing caveat.
+			     Neutral while it is hypothetical; the amber field is spent on
+			     the state that actually earns it. -->
+			<div
+				class="alert py-2 text-xs"
+				class:alert-warning={activeTenant}
+				data-testid="tn-scope-warning"
+			>
 				<span>
-					While a tenant is active, EVERY demo page on this site is
-					isolated to it - presence counts, boards, chat. Clear the
-					tenant to return to the shared world.
+					{#if activeTenant}
+						EVERY demo page on this site is currently isolated to
+						{tenantLabel(activeTenant)} - presence counts, boards, chat.
+						Clear the tenant to return to the shared world.
+					{:else}
+						Picking a tenant will isolate EVERY demo page on this site
+						to it - presence counts, boards, chat. Clearing it returns
+						you to the shared world.
+					{/if}
 				</span>
 			</div>
 			{#if switchError}
@@ -179,7 +206,7 @@
 		<div class="card-body py-3 space-y-2">
 			<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
 				<h2 class="card-title text-sm">
-					{activeTenant ? `${activeTenant} scratchpad` : 'Public scratchpad'}
+					{activeTenant ? `${tenantLabel(activeTenant)} scratchpad` : 'Public scratchpad'}
 					<span class="text-xs opacity-50 font-normal">last 20 notes, live</span>
 				</h2>
 				<div class="flex min-w-0 max-w-full items-center gap-1 text-xs" aria-label="Effective wire topic">
@@ -197,7 +224,8 @@
 					class="input input-bordered input-sm flex-1 pointer-coarse:min-h-11"
 					bind:value={noteDraft}
 					maxlength="200"
-					placeholder="Leave a note for everyone in this scope..."
+					aria-label="Note for this scope"
+					placeholder="Leave a note..."
 					disabled={posting}
 					data-testid="tn-note-input"
 				/>
@@ -227,7 +255,7 @@
 							<span class="flex-1">{note.text}</span>
 						</li>
 					{:else}
-						<li class="opacity-40 text-center py-4" data-testid="tn-notes-empty">No notes in this scope yet.</li>
+						<li class="opacity-60 text-center py-4" data-testid="tn-notes-empty">No notes in this scope yet.</li>
 					{/each}
 				</ul>
 			{/if}
