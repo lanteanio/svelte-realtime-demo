@@ -86,14 +86,25 @@
 			raf = requestAnimationFrame(loop)
 			if (ts - last < 33) return
 			last = ts
-			if (spectating || held.size === 0) return
+			// The keys that move the entity keep working in spectate - they
+			// pan the camera instead of going silently dead the moment the
+			// mode that most needs navigation begins.
+			if (spectating && held.size === 0 && camReportPending) {
+				camReportPending = false
+				view.reportCenter(camX, camY)
+				return
+			}
+			if (held.size === 0) return
 			let dx = 0
 			let dy = 0
-			if (held.has('left')) dx -= STEP
-			if (held.has('right')) dx += STEP
-			if (held.has('up')) dy -= STEP
-			if (held.has('down')) dy += STEP
-			if (dx !== 0 || dy !== 0) view.command({ type: 'move', dx, dy })
+			const step = spectating ? PAN_KEY_STEP : STEP
+			if (held.has('left')) dx -= step
+			if (held.has('right')) dx += step
+			if (held.has('up')) dy -= step
+			if (held.has('down')) dy += step
+			if (dx === 0 && dy === 0) return
+			if (spectating) panBy(dx, dy)
+			else view.command({ type: 'move', dx, dy })
 		}
 		raf = requestAnimationFrame(loop)
 		return () => cancelAnimationFrame(raf)
@@ -120,6 +131,39 @@
 		camY = Math.max(0, Math.min(WORLD_H, camY + dy))
 		view.reportCenter(camX, camY)
 	}
+
+	// The held-key pan runs at ~30Hz; reporting the center at that rate
+	// would spam the interest pipeline for no visual gain. Report at most
+	// every 100ms while panning, plus one trailing report when the keys
+	// go quiet so the cull settles on the final camera position.
+	const PAN_KEY_STEP = 12
+	let camReportPending = false
+	let lastCamReport = 0
+	function panBy(dx, dy) {
+		camX = Math.max(0, Math.min(WORLD_W, camX + dx))
+		camY = Math.max(0, Math.min(WORLD_H, camY + dy))
+		const now = performance.now()
+		if (now - lastCamReport > 100) {
+			lastCamReport = now
+			view.reportCenter(camX, camY)
+			camReportPending = false
+		} else {
+			camReportPending = true
+		}
+	}
+
+	// World-scale texture: a 300-unit grid gives motion a reference in
+	// empty stretches and makes "2400x1600" legible as distance. Lines
+	// outside the viewBox are clipped by the svg itself.
+	const GRID = 300
+	const gridXs = Array.from({ length: Math.floor((WORLD_W - 1) / GRID) }, (_, i) => (i + 1) * GRID)
+	const gridYs = Array.from({ length: Math.floor((WORLD_H - 1) / GRID) }, (_, i) => (i + 1) * GRID)
+
+	// Minimap scale: 2400x1600 -> 180x120 (uniform 0.075).
+	const MAP_W = 180
+	const MAP_H = 120
+	const mapX = (wx) => (wx * MAP_W) / WORLD_W
+	const mapY = (wy) => (wy * MAP_H) / WORLD_H
 
 	// --- World-to-screen, centered on your dot (or the spectate camera) ---
 	const cam = $derived(spectating ? { x: camX, y: camY } : { x: view.local.x, y: view.local.y })
@@ -180,6 +224,12 @@
 						x={toX(0)} y={toY(0)} width={WORLD_W} height={WORLD_H}
 						class="fill-none stroke-base-content/20" stroke-width="3"
 					/>
+					{#each gridXs as gx (gx)}
+						<line x1={toX(gx)} y1={toY(0)} x2={toX(gx)} y2={toY(WORLD_H)} class="stroke-base-content/10" data-testid="arena-grid-line" />
+					{/each}
+					{#each gridYs as gy (gy)}
+						<line x1={toX(0)} y1={toY(gy)} x2={toX(WORLD_W)} y2={toY(gy)} class="stroke-base-content/10" data-testid="arena-grid-line" />
+					{/each}
 					<!-- Interest geometry is camera-relative, just like server culling. -->
 					<circle
 						cx={VIEW_W / 2} cy={VIEW_H / 2} r={INTEREST_RADIUS}
@@ -210,6 +260,24 @@
 						data-x={Math.round(view.local.x)}
 						data-y={Math.round(view.local.y)}
 					/>
+					<!-- Minimap: the world you KNOW. Interest culling means the
+					     client cannot honestly draw entities it is not receiving,
+					     so the map shows the world frame, the camera window, and
+					     the received set - the dark rest IS the culling. -->
+					<g transform="translate({VIEW_W - MAP_W - 10}, 10)" data-testid="arena-minimap">
+						<rect width={MAP_W} height={MAP_H} rx="3" class="fill-base-100/80 stroke-base-content/30" />
+						{#each [...view.remote] as [key, s] (key)}
+							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={s.npc ? 'fill-secondary' : 'fill-accent'} />
+						{/each}
+						<rect
+							x={Math.max(0, Math.min(MAP_W - mapX(VIEW_W), mapX(cam.x - VIEW_W / 2)))}
+							y={Math.max(0, Math.min(MAP_H - mapY(VIEW_H), mapY(cam.y - VIEW_H / 2)))}
+							width={mapX(VIEW_W)} height={mapY(VIEW_H)}
+							class="fill-none stroke-primary" stroke-width="1.5"
+							data-testid="arena-minimap-view"
+						/>
+						<circle cx={mapX(view.local.x)} cy={mapY(view.local.y)} r="2.5" class="fill-primary" data-testid="arena-minimap-me" />
+					</g>
 				</svg>
 				<div class="flex flex-wrap items-center gap-3 text-xs">
 					<label class="label cursor-pointer gap-2 py-0">
@@ -223,13 +291,17 @@
 						/>
 					</label>
 					{#if spectating}
-						<div class="join">
-							<button class="btn btn-xs join-item" onclick={() => pan(-PAN, 0)} data-testid="arena-pan-left">&larr;</button>
-							<button class="btn btn-xs join-item" onclick={() => pan(0, -PAN)} data-testid="arena-pan-up">&uarr;</button>
-							<button class="btn btn-xs join-item" onclick={() => pan(0, PAN)} data-testid="arena-pan-down">&darr;</button>
-							<button class="btn btn-xs join-item" onclick={() => pan(PAN, 0)} data-testid="arena-pan-right">&rarr;</button>
+						<!-- A real d-pad: up above down, spatial mapping intact. -->
+						<div class="grid grid-cols-3 gap-1 justify-items-center" data-testid="arena-pan-grid">
+							<span></span>
+							<button class="btn btn-sm btn-square pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => pan(0, -PAN)} aria-label="Pan up" data-testid="arena-pan-up">&uarr;</button>
+							<span></span>
+							<button class="btn btn-sm btn-square pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => pan(-PAN, 0)} aria-label="Pan left" data-testid="arena-pan-left">&larr;</button>
+							<button class="btn btn-sm btn-square pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => pan(0, PAN)} aria-label="Pan down" data-testid="arena-pan-down">&darr;</button>
+							<button class="btn btn-sm btn-square pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => pan(PAN, 0)} aria-label="Pan right" data-testid="arena-pan-right">&rarr;</button>
 						</div>
 						<span class="font-mono opacity-60" data-testid="arena-cam">cam {camX}, {camY}</span>
+						<span class="opacity-60">WASD / arrows pan too</span>
 					{:else}
 						<span class="opacity-50">WASD / arrows to move</span>
 					{/if}
@@ -254,6 +326,11 @@
 					receiving {receiving} of {totalRemote} entities ({pctCulled}% culled)
 				</p>
 				<div class="text-xs space-y-1 opacity-70">
+					<p class="flex flex-wrap gap-x-3 gap-y-1 items-center" data-testid="arena-kind-legend">
+						<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-primary"></span> you</span>
+						<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-secondary"></span> NPC</span>
+						<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-accent"></span> another visitor</span>
+					</p>
 					<p class="flex flex-wrap gap-x-3 gap-y-1 items-center" data-testid="arena-radius-legend">
 						<span class="inline-flex items-center gap-1"><span class="inline-block w-5 border-t-2 border-dashed border-secondary"></span> fringe starts at 300</span>
 						<span class="inline-flex items-center gap-1"><span class="inline-block w-5 border-t-2 border-primary"></span> delivery stops at 420</span>
@@ -261,8 +338,11 @@
 					<p>Freshness (per remote entity, <code>view.freshness(key)</code>):</p>
 					<p class="flex gap-3 items-center">
 						<span class="inline-block w-3 h-3 rounded-full bg-secondary"></span> live
-						<span class="inline-block w-3 h-3 rounded-full bg-secondary opacity-55"></span> coasting
-						<span class="inline-block w-3 h-3 rounded-full bg-secondary opacity-25"></span> stale
+						<span class="inline-block w-3 h-3 rounded-full bg-secondary/55 border border-base-content/30"></span> coasting
+						<!-- Alpha on the FILL, not the element: the border must
+						     stay visible where a quarter-opacity chip vanishes
+						     into a dark card. -->
+						<span class="inline-block w-3 h-3 rounded-full bg-secondary/25 border border-base-content/40" data-testid="arena-stale-swatch"></span> stale
 					</p>
 				</div>
 				<p class="text-xs opacity-60" data-testid="arena-radius-note">

@@ -62,6 +62,18 @@ test.describe('/demos/arena', () => {
 		})).toEqual({ viewBox: [900, 600], leftArc: 30, rightArc: 870 })
 		await expect(page.getByTestId('arena-radius-legend')).toContainText('fringe starts at 300')
 		await expect(page.getByTestId('arena-radius-legend')).toContainText('delivery stops at 420')
+		// The three fill colors name themselves; the stale swatch keeps a
+		// full-opacity border so it survives the dark theme.
+		await expect(page.getByTestId('arena-kind-legend')).toContainText('you')
+		await expect(page.getByTestId('arena-kind-legend')).toContainText('NPC')
+		await expect(page.getByTestId('arena-kind-legend')).toContainText('another visitor')
+		await expect(page.getByTestId('arena-stale-swatch')).toHaveClass(/border/)
+		// The world has texture and an overview: 300-unit grid lines plus
+		// a minimap with the camera window and the received set.
+		expect(await page.getByTestId('arena-grid-line').count()).toBe(12)
+		await expect(page.getByTestId('arena-minimap')).toBeVisible()
+		await expect(page.getByTestId('arena-minimap-view')).toBeVisible()
+		await expect(page.getByTestId('arena-minimap-me')).toBeVisible()
 		await expect(page.getByTestId('arena-radius-note')).toContainText('beyond its top and bottom edges')
 		await expect(page.getByTestId('arena-remote').first()).toBeVisible()
 		await expect.poll(async () => (await hud(page)).total, { timeout: 15_000 }).toBeGreaterThanOrEqual(150)
@@ -165,9 +177,25 @@ test.describe('/demos/arena', () => {
 		current = await camera(page)
 		expect(current.y).toBe(Math.max(0, afterDown.y - 160))
 
+		// The pan controls are a real d-pad: up sits centered ABOVE the
+		// left/down/right row, at btn-sm size, spatial mapping intact.
+		const box = async (id) => await page.getByTestId(id).boundingBox()
+		const [up, left, down, right] = await Promise.all([
+			box('arena-pan-up'), box('arena-pan-left'), box('arena-pan-down'), box('arena-pan-right')
+		])
+		expect(up.y + up.height).toBeLessThanOrEqual(down.y + 1)
+		expect(Math.abs(up.x - down.x)).toBeLessThan(2)
+		expect(Math.abs(left.y - down.y)).toBeLessThan(2)
+		expect(Math.abs(right.y - down.y)).toBeLessThan(2)
+		expect(up.height).toBeGreaterThanOrEqual(30)
+
+		// The keys that just moved the world do not go dead in spectate:
+		// they pan the camera while the own dot stays put.
 		const own = await position(page)
+		const camBefore = await camera(page)
 		await hold(page, 'ArrowRight')
 		expect(await position(page)).toEqual(own)
+		await expect.poll(async () => (await camera(page)).x).toBeGreaterThan(camBefore.x)
 		await page.getByTestId('arena-spectate-toggle').click()
 		await expect(page.getByTestId('arena-cam')).toHaveCount(0)
 		await expect(page.getByTestId('arena-spectate-toggle')).not.toBeChecked()
