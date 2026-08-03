@@ -63,8 +63,18 @@ test.describe('/demos/checkout idempotency', () => {
 
 	test('Reset zeroes the counter and clears the client history', async ({ page }) => {
 		await open(page)
-		// Seed some state first so the reset is observable.
+		// Seed some state first so the reset is observable, and settle on the
+		// COUNTER rather than on the history row. The two arrive by different
+		// deliveries: the row is appended when the RPC RESPONSE returns, while
+		// the counter only moves when the live stream's PUBLISH lands. A baseline
+		// read off the row therefore samples a counter the publish has not
+		// reached yet; the publish then arrives during the dismiss round trip,
+		// and the unchanged-after-cancel assertion below compares a settled value
+		// against a stale baseline. Same read-then-act order the two tests above
+		// already use.
+		const seeded = await readCount(page)
 		await page.getByTestId('checkout-place').click()
+		await expect(page.getByTestId('checkout-count')).toHaveText(String(seeded + 1), { timeout: 10_000 })
 		await expect(page.getByTestId('checkout-history-row')).not.toHaveCount(0)
 
 		const beforeCancel = await readCount(page)
