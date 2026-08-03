@@ -72,16 +72,24 @@ test.describe('ws connect probe', () => {
 			const page = await context.newPage();
 			const started = Date.now();
 			let failed = null;
+			// Take the snapshot the wait itself returns rather than reading
+			// `window.__wsProbe` back out. The live probe carries its `rearm`
+			// function, and a function does not survive `page.evaluate`'s
+			// serialisation - reading it directly would hand back a probe with
+			// pieces missing, or nothing at all.
+			let probe = null;
 			try {
 				await page.goto(route);
 				// Deliberately generous: the point is to observe how long the
 				// client really takes, not to reproduce the gate's own cutoff.
-				await waitForWS(page, 70_000);
+				probe = await waitForWS(page, 70_000);
 			} catch (error) {
 				failed = error.message;
+				// A failed wait is the whole reason this sweep exists, so take the
+				// probe the error carries instead of losing the socket list here.
+				probe = error.probe ?? null;
 			}
 			const elapsed = Date.now() - started;
-			const probe = await page.evaluate(() => window.__wsProbe ?? null).catch(() => null);
 			const attempts = probe?.sockets ?? [];
 			const lost = attempts.filter((s) => s.opened === undefined).length;
 			samples.push({ i, route, elapsed, attempts: attempts.length, lost, failed: Boolean(failed) });

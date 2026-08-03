@@ -6,7 +6,7 @@ import {
 	leaveTraces,
 	openForget
 } from './forget-helpers.js'
-import { expectTouchTarget, openTouchPage } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -57,7 +57,7 @@ test.describe('/demos/forget', () => {
 		await expect(page.getByTestId('fg-audit-applog')).toHaveText('0')
 		await auditTraces(page, 0)
 		expect(await displayedIdentity(page)).toBe(identity)
-		await expect(page.locator('.text-success').first()).toBeVisible()
+		await waitForWS(page)
 
 		await new Promise((resolve) => setTimeout(resolve, 1_100))
 		const after = await leaveTraces(page)
@@ -81,7 +81,7 @@ test.describe('/demos/forget', () => {
 
 			await forget(page, 3)
 			await auditTraces(other, 0)
-			await expect(other.locator('.text-success').first()).toBeVisible()
+			await waitForWS(other)
 			const fresh = await leaveTraces(other)
 			expect(fresh.total).toBe(3)
 			await auditTraces(page, 3)

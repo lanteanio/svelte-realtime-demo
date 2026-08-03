@@ -4,7 +4,8 @@ import {
 	isAppWebSocket,
 	waitForAppWebSocket,
 	waitForBoardReady,
-	waitForWS
+	waitForWS,
+	WS_HYDRATE_RELOADS
 } from './helpers.js';
 
 test.describe('WebSocket Connection', () => {
@@ -44,9 +45,79 @@ test.describe('WebSocket Connection', () => {
 
 	test('connection status shows green wifi icon when connected', async ({ page }) => {
 		await page.goto('/');
-		await page.waitForTimeout(2000);
-		const wifiIcon = page.locator('.text-success').first();
-		await expect(wifiIcon).toBeVisible();
+		await waitForWS(page);
+		await expect(page.locator('.text-success').first()).toBeVisible();
+	});
+
+	test('the connection probe re-arms per wait instead of replaying the first', async ({ page }) => {
+		// 'commit' returns before the client bundle runs, so the probe is
+		// installed in time to wrap the app's own WebSocket constructor. Without
+		// that the socket can be built before the wrapper exists, the first
+		// wait's socket list is empty, and the re-arm assertion below would pass
+		// against a stale probe just as happily.
+		await page.goto('/', { waitUntil: 'commit' });
+		const first = await waitForWS(page);
+		expect(first, 'probe must install or this test discriminates nothing').not.toBeNull();
+		expect(first.sockets.length, 'first wait must have observed the app socket open').toBeGreaterThan(0);
+
+		const second = await waitForWS(page);
+
+		// A probe that never re-arms hands back the FIRST wait's object verbatim:
+		// its clock, and its sockets. That is what made a second wait on the same
+		// page - every reconnect test - report a timeline measured from a t0 long
+		// in the past, against sockets that had already been accounted for.
+		expect(second.t0, 're-armed probe restarts its clock').toBeGreaterThan(first.t0);
+		expect(second.sockets, 'second wait opened no socket, so its list must be empty').toHaveLength(0);
+	});
+
+	test('a wait blocked by a dead app bundle reports the asset, not the socket', async ({ page }) => {
+		// The failure this reproduces is the one measured in the wild: an
+		// /_app/immutable/ asset lost to ERR_NO_BUFFER_SPACE, so the client never
+		// booted and the page sat on its server-rendered status forever. Playwright
+		// cannot inject that specific errno, but the class is what matters - a
+		// failed entry chunk - and blocking it is deterministic where waiting for
+		// host exhaustion is not.
+		await page.route('**/_app/immutable/entry/*.js', (route) => route.abort('connectionfailed'));
+		await page.goto('/', { waitUntil: 'commit' });
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'the wait must fail when the bundle never loads').not.toBeNull();
+		// Naming the asset is the whole point: without it this reads as a socket
+		// that never opened, which is a fault one layer down with a different fix.
+		expect(failure.message).toContain('PAGE NEVER HYDRATED');
+		expect(failure.message).toContain('/_app/immutable/entry/');
+		expect(failure.message).toContain('failed requests:');
+		// A PERSISTENT dead bundle must still fail. The retry spends its budget
+		// and then reports, rather than looping or going quiet - otherwise the
+		// recovery below would be indistinguishable from swallowing the fault.
+		expect(failure.rehydrateReloads, 'retry budget must be spent, then the wait must fail').toBe(WS_HYDRATE_RELOADS);
+	});
+
+	test('a wait recovers from a one-off dead bundle by reloading', async ({ page }) => {
+		// Kill the entry chunks on the FIRST document load only, then serve them
+		// normally. That is the transient this recovery exists for: the asset is
+		// fine, the host lost one fetch. Keyed on the document count rather than
+		// a request counter because the entry is several files and aborting an
+		// arbitrary one of them does not reliably stop hydration.
+		let documentLoads = 0;
+		await page.route('**/*', (route) => {
+			const request = route.request();
+			if (request.resourceType() === 'document') {
+				documentLoads++;
+				return route.continue();
+			}
+			if (documentLoads <= 1 && /_app\/immutable\/entry\/.*\.js/.test(request.url())) {
+				return route.abort('connectionfailed');
+			}
+			return route.continue();
+		});
+
+		await page.goto('/', { waitUntil: 'commit' });
+		const probe = await waitForWS(page, 5000);
+
+		expect(documentLoads, 'the wait must have reloaded the dead page exactly once').toBe(2);
+		expect(probe, 'a recovered wait still reports its probe').not.toBeNull();
+		await expect(page.locator('.text-success').first()).toBeVisible();
 	});
 
 	test('global online count appears in navbar', async ({ page }) => {
@@ -66,9 +137,8 @@ test.describe('WebSocket Connection', () => {
 
 		const boardUrl = await createBoard(page, `WS Nav ${Date.now()}`);
 
-		await page.waitForTimeout(1000);
-		const wifiIcon = page.locator('.text-success');
-		await expect(wifiIcon.first()).toBeVisible({ timeout: 5000 });
+		await waitForWS(page);
+		await expect(page.locator('.text-success').first()).toBeVisible();
 	});
 
 	test('only ONE WebSocket connection per session (no leaks)', async ({ page }) => {

@@ -83,7 +83,7 @@ test.describe('Performance', () => {
 	test('board page performance', async ({ page }) => {
 		// Create a board first
 		await page.goto('/');
-		await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
+		await waitForWS(page);
 		const input = page.getByPlaceholder(/board/i).or(page.locator('input[type="text"]').first());
 		await input.fill(`Perf Test ${Date.now()}`);
 		const createBtn = page.getByRole('button', { name: /create/i }).or(page.locator('form button[type="submit"]'));
@@ -222,7 +222,7 @@ test.describe('Performance', () => {
 
 		// Create a board
 		await page.goto('/');
-		await page.locator('.text-success').first().waitFor({ state: 'visible', timeout: 15000 });
+		await waitForWS(page);
 		const input = page.getByPlaceholder(/board/i).or(page.locator('input[type="text"]').first());
 		await input.fill(`Error Check ${Date.now()}`);
 		const createBtn = page.getByRole('button', { name: /create/i }).or(page.locator('form button[type="submit"]'));

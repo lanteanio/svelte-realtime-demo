@@ -8,6 +8,7 @@ import {
 	openForget,
 	traceResult
 } from './forget-helpers.js'
+import { waitForWS } from './helpers.js'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
@@ -41,8 +42,8 @@ test.describe('cluster: /demos/forget', () => {
 			expect(result.counts.appDemoLog).toBe(6)
 			expect(result.counts.push + result.counts.presence + result.counts.durable).toBeGreaterThan(0)
 			await auditTraces(pair.a, 0)
-			await expect(pair.a.locator('.text-success').first()).toBeVisible()
-			await expect(pair.b.locator('.text-success').first()).toBeVisible()
+			await waitForWS(pair.a)
+			await waitForWS(pair.b)
 
 			await pair.a.getByTestId('fg-leave-traces').click()
 			await auditTraces(pair.b, 3)
