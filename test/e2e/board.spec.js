@@ -164,7 +164,7 @@ test.describe('/board/[slug]', () => {
 		await expect.poll(() => page.locator('.fab-close button').evaluate((element) => Number.parseFloat(getComputedStyle(element).opacity))).toBeLessThan(1)
 	})
 
-	test('two tabs sync notes/settings/cursors and home presence returns exactly to zero (RT-348)', async ({ browser }) => {
+	test('two tabs sync notes/settings/cursors and home presence returns exactly to zero', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()
 		const ctxHome = await browser.newContext()

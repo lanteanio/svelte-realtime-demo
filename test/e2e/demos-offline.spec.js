@@ -89,7 +89,7 @@ test.describe('/demos/offline', () => {
 		await expect(page.getByTestId('off-gap-badge')).toHaveCount(0)
 	})
 
-	test('browser network-offline post replays exactly once on reconnect (RT-350)', async ({ page, context, browserName }) => {
+	test('browser network-offline post replays exactly once on reconnect', async ({ page, context, browserName }) => {
 		test.skip(browserName !== 'chromium', 'context.setOffline network emulation is exercised on chromium only')
 		test.setTimeout(120_000)
 		await openOffline(page)

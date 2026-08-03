@@ -63,7 +63,7 @@ test.describe('cluster: /demos/arena', () => {
 			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
 			for (const page of [a, b]) {
 				await expect.poll(async () => (await hud(page)).total, {
-					message: 'RT-897: non-authority replicas must not report total 0',
+					message: 'non-authority replicas must not report total 0',
 					timeout: 15_000
 				}).toBeGreaterThanOrEqual(150)
 			}

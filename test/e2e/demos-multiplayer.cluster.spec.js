@@ -60,7 +60,7 @@ test.describe('cluster: /demos/multiplayer', () => {
 		}
 	})
 
-	test('reaction append, node preservation, and independent expiry cross replicas (RT-347)', async ({ browser }) => {
+	test('reaction append, node preservation, and independent expiry cross replicas', async ({ browser }) => {
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
 		const a = await ctxA.newPage()

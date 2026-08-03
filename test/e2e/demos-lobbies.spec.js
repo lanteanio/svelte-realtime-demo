@@ -83,7 +83,7 @@ test.describe('/demos/lobbies', () => {
 		}
 	})
 
-	test('solo leave/rejoin cycles stay exactly 1/8 and code rejoin creates no ghosts (RT-344)', async ({ page }) => {
+	test('solo leave/rejoin cycles stay exactly 1/8 and code rejoin creates no ghosts', async ({ page }) => {
 		await openLobbies(page)
 		const id = freshTableId()
 		let code

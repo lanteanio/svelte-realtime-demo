@@ -77,7 +77,7 @@ test.describe('cluster bugs: presence + push', () => {
 	})
 
 	test('lobbies presence + room count stay consistent across replicas', async ({ browser }) => {
-		// Regression for RT-391/RT-417: enumerable owner-room presence must
+		// Regression coverage: enumerable owner-room presence must
 		// converge across replicas, and a live-socket leave must run realtime's
 		// managed-topic drain so the shared room count decrements immediately.
 		const table = String(100000 + Math.floor((Date.now() % 800000)))

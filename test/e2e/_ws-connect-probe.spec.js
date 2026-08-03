@@ -1,5 +1,5 @@
 /**
- * Diagnostic probe for the waitForWS false-failure rate (RT-924).
+ * Diagnostic probe for the waitForWS false-failure rate.
  *
  * The merge gate fails roughly one page-open per full run with a 15s
  * waitForWS timeout, and a full run costs ~350 tests to maybe reproduce it

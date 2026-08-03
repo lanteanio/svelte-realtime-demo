@@ -18,7 +18,7 @@ const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localho
 test.skip(!process.env.INSTANCE_B, 'lobbies cluster coverage requires two explicit replica targets')
 
 test.describe('cluster: /demos/lobbies', () => {
-	test('one durable identity alternating replicas never inflates beyond 1/8 (RT-344)', async ({ browser }) => {
+	test('one durable identity alternating replicas never inflates beyond 1/8', async ({ browser }) => {
 		const ctx = await browser.newContext()
 		const id = freshTableId()
 		for (const origin of [INSTANCE_A, INSTANCE_B, INSTANCE_A, INSTANCE_B]) {

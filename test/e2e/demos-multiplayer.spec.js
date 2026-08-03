@@ -115,7 +115,7 @@ test.describe('/demos/multiplayer', () => {
 		}
 	})
 
-	test('each emoji appends once while earlier nodes keep animating and expire independently (RT-347)', async ({ page }) => {
+	test('each emoji appends once while earlier nodes keep animating and expire independently', async ({ page }) => {
 		await openMultiplayer(page)
 		await waitForReactionCount(page, 0)
 

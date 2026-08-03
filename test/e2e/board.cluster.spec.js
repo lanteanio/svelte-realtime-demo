@@ -26,7 +26,7 @@ const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localho
 test.skip(!process.env.INSTANCE_B, 'board cluster coverage requires two explicit replica targets')
 
 test.describe('cluster: /board/[slug]', () => {
-	test('notes, settings, cursor pixels, activity, and exact leave cleanup converge across replicas (RT-348)', async ({ browser }) => {
+	test('notes, settings, cursor pixels, activity, and exact leave cleanup converge across replicas', async ({ browser }) => {
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
 		const ctxHome = await browser.newContext({ baseURL: INSTANCE_A })

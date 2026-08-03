@@ -1,5 +1,5 @@
 /**
- * Diagnostic probe for the multiplayer presence-roster failure (RT-942).
+ * Diagnostic probe for the multiplayer presence-roster failure.
  *
  * The failure is that two visitors in one live.multiplayer room do not see
  * each other: each renders its own `(you)` entry and `mp-roster-other` stays
