@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 import {
 	REACTION_TOKENS,
 	animationTime,
@@ -26,7 +27,10 @@ test.describe('/demos/multiplayer', () => {
 
 		const input = page.getByTestId('mp-headline-input')
 		await expect(input).toHaveAttribute('maxlength', '80')
-		await expect(input).toHaveAttribute('placeholder', 'Rewrite the headline (max 80 chars)...')
+		// The live value and the editor are labeled apart - the identical
+		// sentence in both used to read as one confusing surface.
+		await expect(page.getByTestId('mp-headline-live-label')).toContainText('Live value')
+		await expect(page.getByTestId('mp-headline-editor-label')).toContainText('advisory lock (80 chars max)')
 		await input.fill('   ')
 		await expect(page.getByTestId('mp-headline-submit')).toBeDisabled()
 		await input.blur()
@@ -34,7 +38,16 @@ test.describe('/demos/multiplayer', () => {
 		for (const token of REACTION_TOKENS) {
 			await expect(page.getByTestId(`mp-react-${token}`)).toBeVisible()
 			await expect(page.getByTestId(`mp-react-${token}`)).toHaveAttribute('aria-label', `React with ${token}`)
+			await expect(page.getByTestId(`mp-react-${token}`)).toHaveClass(/btn-outline/)
 		}
+		// The reaction row names what tapping does; the canvas invites
+		// fingers as well as pointers and dresses itself as interactive.
+		await expect(page.getByText('React - it lands on the canvas for everyone:')).toBeVisible()
+		await expect(page.getByTestId('mp-canvas')).toHaveClass(/cursor-crosshair/)
+		await expect(page.getByTestId('mp-canvas')).toContainText('or drag a finger')
+		// Roster badges pick their label color from the background instead
+		// of fixed white-on-anything.
+		await expect(page.getByTestId('mp-roster').locator('li').first()).toHaveAttribute('style', /color:/)
 		await expect(page.getByRole('link', { name: 'multiplayer.js' })).toHaveAttribute(
 			'href',
 			'https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/multiplayer.js'
@@ -57,10 +70,12 @@ test.describe('/demos/multiplayer', () => {
 			await expect(a.getByTestId('mp-lock-state')).toHaveText('You hold the lock.', { timeout: 10_000 })
 			await expect(b.getByTestId('mp-lock-state')).toContainText(`Locked by ${nameA}.`, { timeout: 10_000 })
 			await expect(inputB).toBeDisabled()
-			await expect(inputB).toHaveAttribute('placeholder', `Locked by ${nameA}`)
 			const fromA = `button-${Date.now()}`
 			await inputA.fill(fromA)
 			await expect(b.getByTestId('mp-typing')).toContainText(`${nameA} is typing...`, { timeout: 10_000 })
+			// The typing echo also fires WHERE the typing happens - the
+			// roster line sits a full viewport away on phones.
+			await expect(b.getByTestId('mp-typing-inline')).toContainText(`${nameA} is typing...`)
 			await a.getByTestId('mp-headline-submit').click()
 			await Promise.all([
 				expect(a.getByTestId('mp-headline-display')).toHaveText(fromA),
@@ -135,5 +150,17 @@ test.describe('/demos/multiplayer', () => {
 		expect(await isConnected(fire), 'the later reaction must remain while the earlier one is pruned').toBe(true)
 		await waitForReactionCount(page, 0)
 		await expectNoMultiplayerErrors(page)
+	})
+
+	test('reaction buttons meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openMultiplayer(page)
+			for (const token of REACTION_TOKENS) {
+				await expectTouchTarget(page.getByTestId(`mp-react-${token}`))
+			}
+		} finally {
+			await context.close()
+		}
 	})
 })

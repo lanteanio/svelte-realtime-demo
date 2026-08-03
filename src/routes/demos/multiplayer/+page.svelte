@@ -68,6 +68,17 @@
 		return err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 	}
 
+	// Identity colors are arbitrary; pale ones make fixed white text
+	// unreadable. Pick the label color from the background's perceived
+	// luminance (BT.709 weights) instead.
+	function textOn(color) {
+		const m = /^#?([0-9a-f]{6})$/i.exec(color ?? '')
+		if (!m) return '#ffffff'
+		const n = parseInt(m[1], 16)
+		const lum = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
+		return lum > 150 ? '#1f2937' : '#ffffff'
+	}
+
 	// One cursor publish per animation frame, no matter how fast the
 	// pointer moves. Coordinates are normalized to the canvas so dots
 	// land on the same relative spot in differently sized windows.
@@ -195,9 +206,9 @@
 		<p class="text-sm opacity-70 mt-1">
 			A single <code>live.multiplayer</code> export with
 			<code>cursors</code>, <code>typing</code>, <code>locks</code>, and
-			<code>reactions</code> enabled. Move your pointer over the canvas
-			to broadcast your cursor, tap an emote to drop it at a random
-			spot, and focus the headline to take the advisory
+			<code>reactions</code> enabled. Move your pointer - or drag a
+			finger - over the canvas to broadcast your cursor, tap an emote
+			to drop it at a random spot, and focus the headline to take the advisory
 			<code>'headline'</code> lock - other visitors see who holds it and
 			their input disables until you blur. Open a second tab to watch
 			every surface fan out.
@@ -217,10 +228,10 @@
 			<h2 class="card-title text-sm">In the lounge</h2>
 			<ul class="flex flex-wrap gap-2 text-xs" data-testid="mp-roster">
 				{#if me}
-					<li class="badge gap-1 text-white" style:background={me.color}>{me.name} (you)</li>
+					<li class="badge gap-1" style:background={me.color} style:color={textOn(me.color)}>{me.name} (you)</li>
 				{/if}
 				{#each room.others as person (person.key)}
-					<li class="badge gap-1 text-white" style:background={person.color} data-testid="mp-roster-other">
+					<li class="badge gap-1" style:background={person.color} style:color={textOn(person.color)} data-testid="mp-roster-other">
 						{person.data?.name ?? 'anon'}
 					</li>
 				{/each}
@@ -236,7 +247,7 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Shared canvas</h2>
 			<div
-				class="relative h-72 rounded bg-base-200 overflow-hidden touch-none select-none"
+				class="relative h-72 rounded bg-base-200 border border-base-300 cursor-crosshair overflow-hidden touch-none select-none"
 				onpointermove={onPointerMove}
 				data-testid="mp-canvas"
 			>
@@ -247,7 +258,7 @@
 						data-testid="mp-cursor"
 					>
 						<div class="w-3 h-3 rounded-full border-2 border-base-100 -translate-x-1/2 -translate-y-1/2" style:background={c.color}></div>
-						<div class="text-[10px] font-semibold px-1 rounded text-white whitespace-nowrap" style:background={c.color}>
+						<div class="text-[10px] font-semibold px-1 rounded whitespace-nowrap" style:background={c.color} style:color={textOn(c.color)}>
 							{nameFor(c.key)}
 						</div>
 					</div>
@@ -261,14 +272,15 @@
 						{emojiFor(r.token)}
 					</div>
 				{/each}
-				<p class="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs opacity-30 pointer-events-none">
-					Move your pointer here. Cursors are volatile sends, one per frame.
+				<p class="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs opacity-60 pointer-events-none whitespace-nowrap">
+					Move your pointer - or drag a finger - here. Cursors are volatile sends, one per frame.
 				</p>
 			</div>
-			<div class="flex gap-2">
+			<div class="flex gap-2 items-center flex-wrap">
+				<span class="text-xs opacity-70">React - it lands on the canvas for everyone:</span>
 				{#each REACTIONS as r (r.token)}
 					<button
-						class="btn btn-ghost btn-sm text-lg"
+						class="btn btn-outline btn-sm text-lg pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						onclick={() => sendReaction(r.token)}
 						aria-label="React with {r.token}"
 						data-testid="mp-react-{r.token}"
@@ -284,19 +296,26 @@
 	<section class="card bg-base-200">
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Shared headline (advisory lock on focus)</h2>
+			<p class="text-xs opacity-70" data-testid="mp-headline-live-label">Live value - what every visitor sees right now:</p>
 			<p class="text-lg font-semibold" data-testid="mp-headline-display">
 				{headline?.text ?? 'loading...'}
 			</p>
 			{#if headline?.by}
 				<p class="text-xs opacity-50">last set by {headline.by}</p>
 			{/if}
+			<label class="text-xs opacity-70" for="mp-headline-editor" data-testid="mp-headline-editor-label">
+				Your editor - focus takes the advisory lock (80 chars max):
+			</label>
 			<form onsubmit={submitHeadline} class="flex gap-2 items-center">
+				<!-- No placeholder: the mirror keeps the field non-empty
+				     whenever nobody local edits, so a placeholder could never
+				     display; the lock state line below is the visible truth. -->
 				<input
+					id="mp-headline-editor"
 					class="input input-bordered input-sm flex-1"
 					bind:value={draft}
 					maxlength="80"
 					disabled={lockedByOther || saving}
-					placeholder={lockedByOther ? `Locked by ${lockHolderName}` : 'Rewrite the headline (max 80 chars)...'}
 					onfocus={focusHeadline}
 					onblur={blurHeadline}
 					oninput={inputHeadline}
@@ -321,6 +340,13 @@
 					You hold the lock.
 				{/if}
 			</p>
+			{#if typingNames.length > 0}
+				<!-- The roster's typing line sits a full viewport away on
+				     phones; the echo fires where the typing happens. -->
+				<p class="text-xs opacity-70" data-testid="mp-typing-inline">
+					{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing...
+				</p>
+			{/if}
 			{#if actionError}
 				<p class="text-xs text-error" data-testid="mp-error">{actionError}</p>
 			{/if}
