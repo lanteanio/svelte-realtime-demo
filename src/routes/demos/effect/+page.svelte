@@ -278,7 +278,7 @@
 		</div>
 	</section>
 
-	<aside class="text-xs opacity-70 leading-relaxed space-y-2">
+	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
 		<p>
 			Server: <code>live.effect([TOPICS.demoEffectOrders], async (event, data, platform) =&gt; &#123; ... &#125;)</code>.
 			The handler runs on every publish to any source topic. It

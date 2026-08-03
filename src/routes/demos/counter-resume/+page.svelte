@@ -198,7 +198,7 @@
 		</div>
 	</div>
 
-	<aside class="text-xs opacity-70 leading-relaxed space-y-2">
+	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
 		<p>
 			Server: <code>setInterval</code> publishes once per second on
 			<code>demos:counter:tick</code>. The publish is captured in the
