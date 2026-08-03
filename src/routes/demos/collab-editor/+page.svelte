@@ -5,13 +5,18 @@
 	the same doc.text('body') facet, so the text under both panels is
 	always identical - the only difference is the selection layer:
 
-	- The offset panel publishes raw { start, end } offsets. They are
+	- The Offset panel publishes raw { start, end } offsets. They are
 	  frozen numbers: an edit before a remote selection shifts the text
-	  but not the stored offsets, so the highlight drifts.
+	  but not the stored offsets, so the published range slides onto
+	  the wrong characters. The offset wire passes the object verbatim,
+	  so the panel also ships the text the range covered at publish
+	  time - that is what lets a drifted row say so.
 	- The CRDT panel binds the room to the document (room.bindDoc) and
 	  publishes { field, start, end }; the range travels as a position
 	  anchor inside the CRDT and room.selections re-resolves it against
-	  the current text on every edit, so the highlight stays glued.
+	  the current text on every edit, so the range stays glued. The
+	  anchor wire carries no app fields - it does not need a drift cue,
+	  staying glued IS its proof.
 
 	Edits are applied as the minimal splice: the input handler diffs
 	the previous document value against the new textarea value by
@@ -54,19 +59,13 @@
 	let localSelections = $state({ offset: null, crdt: null })
 
 	/**
-	 * Apply a textarea edit to the document as the minimal splice.
-	 * Common prefix/suffix diff: exact for the single-region edits a
-	 * native input event produces. The local write applies
-	 * synchronously, so the re-rendered value equals the DOM value and
-	 * the caret stays put; a REMOTE edit landing mid-keystroke can
-	 * still move the caret to the end (acceptable for a demo textarea).
-	 * @param {Event} e
+	 * Common prefix/suffix diff between two document values. Exact for the
+	 * single-region edits a native input event produces, and the same
+	 * splice a remote edit arrives as - which is what lets the caret
+	 * mapping below ride on it too.
+	 * @param {string} prev @param {string} next
 	 */
-	function applyEdit(e) {
-		const el = /** @type {HTMLTextAreaElement} */ (e.currentTarget)
-		const next = el.value
-		const prev = body.value
-		if (next === prev) return
+	function diffSplice(prev, next) {
 		let start = 0
 		const maxStart = Math.min(prev.length, next.length)
 		while (start < maxStart && prev[start] === next[start]) start++
@@ -76,6 +75,21 @@
 			prevEnd--
 			nextEnd--
 		}
+		return { start, prevEnd, nextEnd }
+	}
+
+	/**
+	 * Apply a textarea edit to the document as the minimal splice. The
+	 * local write applies synchronously, so the re-rendered value equals
+	 * the DOM value and the caret stays put.
+	 * @param {Event} e
+	 */
+	function applyEdit(e) {
+		const el = /** @type {HTMLTextAreaElement} */ (e.currentTarget)
+		const next = el.value
+		const prev = body.value
+		if (next === prev) return
+		const { start, prevEnd, nextEnd } = diffSplice(prev, next)
 		try {
 			doc.transact(() => {
 				if (prevEnd > start) body.delete(start, prevEnd - start)
@@ -87,19 +101,73 @@
 		}
 	}
 
+	// --- Caret preservation across remote edits ---
+	// Assigning .value to a focused textarea throws the caret to the end -
+	// mid-script, that feels like the editor fighting back. So the effect
+	// below owns the textarea value outright (there is no template value
+	// binding): it still sees the OLD DOM value and selection when a doc
+	// change arrives, maps the selection through the incoming splice, and
+	// writes value and caret in the same breath. A template binding would
+	// write the value first and destroy the selection the mapping needs.
+	// Local edits never diverge (the write is synchronous, so el.value
+	// already equals the doc), which means only remote splices take the
+	// mapping path.
+	const textareaRefs = { offset: null, crdt: null }
+
+	// selectionchange fires one coalesced event per task, including for
+	// touch selection handles and for a tap that collapses a selection -
+	// the per-element select/keyup/mouseup trio left phone visitors'
+	// published ranges permanently stale in every other tab. The dedupe
+	// key stops the same range from republishing on every keystroke.
+	const lastPublished = { offset: undefined, crdt: undefined }
+
+	function mapThroughSplice(pos, splice) {
+		if (pos <= splice.start) return pos
+		if (pos >= splice.prevEnd) return pos + (splice.nextEnd - splice.prevEnd)
+		return splice.nextEnd
+	}
+
+	$effect(() => {
+		const next = body.value
+		for (const mode of ['offset', 'crdt']) {
+			const el = textareaRefs[mode]
+			if (!el || el.value === next) continue
+			if (document.activeElement === el) {
+				const splice = diffSplice(el.value, next)
+				const start = mapThroughSplice(el.selectionStart ?? 0, splice)
+				const end = mapThroughSplice(el.selectionEnd ?? 0, splice)
+				el.value = next
+				el.setSelectionRange(start, end)
+				// The restore is local UX, not a new selection: swallow the
+				// selectionchange it fires so the published range stays
+				// frozen. Republishing the mapped offsets would quietly
+				// un-drift the Offset panel exactly when its owner is
+				// looking at it.
+				lastPublished[mode] = start === end ? 'null' : `${start}:${end}`
+			} else {
+				el.value = next
+			}
+		}
+	})
+
 	/**
-	 * Publish the local selection onto a room's roster. Offset mode
-	 * sends the raw numbers; crdt mode names the text container so the
-	 * range can anchor into the bound document. A collapsed caret
-	 * clears the published selection so panels only show real ranges.
+	 * Publish the local selection onto a room's roster. Offset mode sends
+	 * the raw numbers plus the text they covered at publish time (extra
+	 * fields ride the offset wire verbatim), so every panel can render
+	 * selected-vs-now-covers and the drift declares itself; crdt mode
+	 * names the text container so the range can anchor into the bound
+	 * document. A collapsed caret clears the published selection so
+	 * panels only show real ranges.
 	 * @param {import('svelte-realtime/multiplayer').MultiplayerRoom} room
 	 * @param {'offset' | 'crdt'} mode
-	 * @param {Event} e
+	 * @param {HTMLTextAreaElement} el
 	 */
-	function reportSelection(room, mode, e) {
-		const el = /** @type {HTMLTextAreaElement} */ (e.currentTarget)
+	function publishSelection(room, mode, el) {
 		const start = el.selectionStart ?? 0
 		const end = el.selectionEnd ?? 0
+		const key = start === end ? 'null' : `${start}:${end}`
+		if (lastPublished[mode] === key) return
+		lastPublished[mode] = key
 		try {
 			if (start === end) {
 				room.setSelection(null)
@@ -108,11 +176,21 @@
 				room.setSelection({ field: 'body', start, end })
 				localSelections[mode] = { start, end }
 			} else {
-				room.setSelection({ start, end })
-				localSelections[mode] = { start, end }
+				const snippet = body.value.slice(start, end)
+				room.setSelection({ start, end, snippet })
+				localSelections[mode] = { start, end, snippet }
 			}
 		} catch (err) {
 			editError = err?.message ?? String(err)
+		}
+	}
+
+	function onSelectionChange() {
+		for (const mode of ['offset', 'crdt']) {
+			const el = textareaRefs[mode]
+			if (el && document.activeElement === el) {
+				publishSelection(mode === 'crdt' ? crdtView : offsetView, mode, el)
+			}
 		}
 	}
 
@@ -120,8 +198,10 @@
 	 * Flatten a room's remote selections into renderable rows. Reads
 	 * room.selections, room.others, and body.value, so calling it from
 	 * the template re-runs it on every roster push and every edit -
-	 * which is exactly what makes the crdt panel's highlights re-glue
-	 * and the offset panel's highlights visibly drift.
+	 * which is exactly what makes the crdt panel's ranges re-glue and
+	 * the offset panel's ranges visibly drift. A row whose publish-time
+	 * snippet no longer matches the text its numbers cover is drifted -
+	 * only offset rows can carry a snippet, so only they can drift.
 	 * @param {import('svelte-realtime/multiplayer').MultiplayerRoom} room
 	 * @param {'offset' | 'crdt'} mode
 	 */
@@ -133,13 +213,15 @@
 			const start = Math.max(0, Math.min(local.start, text.length))
 			const end = Math.max(start, Math.min(local.end, text.length))
 			if (end > start) {
+				const covers = text.slice(start, end)
 				rows.push({
 					key: `local:${mode}`,
 					name: me?.name ?? 'You',
 					color: me?.color ?? '#888',
 					start,
 					end,
-					snippet: text.slice(start, end),
+					snippet: covers,
+					published: typeof local.snippet === 'string' ? local.snippet : undefined,
 					local: true
 				})
 			}
@@ -159,6 +241,7 @@
 				start,
 				end,
 				snippet: text.slice(start, end),
+				published: typeof sel.snippet === 'string' ? sel.snippet : undefined,
 				local: false
 			})
 		}
@@ -179,23 +262,27 @@
 
 	const docLength = $derived(body.value.length)
 	const pct = (n) => (100 * n) / Math.max(1, docLength)
+	const clip = (s) => (s.length > 40 ? `${s.slice(0, 40)}...` : s)
 </script>
+
+<svelte:document onselectionchange={onSelectionChange} />
 
 <div class="max-w-6xl mx-auto p-8 space-y-4">
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Collab editor: selections that survive edits</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Both panels edit the <em>same</em> <code>live.doc</code> text; only the
-			selection layer differs. The left room declares
-			<code>selections: 'offset'</code> (raw <code>&#123; start, end &#125;</code>
-			stamped on the presence roster), the right one
-			<code>selections: 'crdt'</code> bound to the document via
-			<code>room.bindDoc(doc)</code>. Try it in two tabs: in tab A select
-			the same word in <em>both</em> textareas, then type text
-			<em>before</em> it in tab B - the offset panel's highlight drifts
-			onto the wrong characters, the CRDT panel's stays glued to the
-			word. (Each panel is its own room, so a selection only shows up
-			in the matching panel of the other tab.)
+			selection layer differs. The <strong>Offset</strong> panel declares
+			<code>selections: 'offset'</code>: raw <code>&#123; start, end &#125;</code>
+			numbers stamped on the presence roster. The <strong>CRDT</strong> panel
+			declares <code>selections: 'crdt'</code> and binds the room to the
+			document via <code>room.bindDoc(doc)</code>, so a published range
+			travels as a position anchor inside the CRDT. The selection rows under
+			each panel are the proof: after an edit lands in front of a published
+			range, the Offset panel's rows slide onto the wrong characters and say
+			so, while the CRDT panel's rows stay glued to the original text. (Each
+			panel is its own room, so a selection only shows up in the matching
+			panel of the other tab.)
 		</p>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
@@ -206,10 +293,23 @@
 		{/if}
 	</header>
 
+	<ol class="text-sm opacity-80 list-decimal list-inside space-y-0.5" data-testid="collab-steps">
+		<li>Open this page in a second tab.</li>
+		<li>Here, select a word in <em>both</em> textareas - each panel publishes its own range.</li>
+		<li>
+			In the other tab, type in front of that word: the Offset row drifts and flags the
+			mismatch, the CRDT row stays glued.
+		</li>
+	</ol>
+
 	<div class="flex items-center gap-3 text-xs opacity-60">
 		<span data-testid="collab-doc-length">{docLength} chars</span>
 		<span data-testid="collab-doc-synced">{doc.synced ? 'synced' : 'syncing...'}</span>
-		<button class="btn btn-outline btn-error btn-sm" onclick={clearDocument} data-testid="collab-clear">
+		<button
+			class="btn btn-outline btn-error btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+			onclick={clearDocument}
+			data-testid="collab-clear"
+		>
 			Clear document
 		</button>
 		{#if editError}
@@ -229,11 +329,8 @@
 					spellcheck="false"
 					maxlength="4000"
 					placeholder="Type here - the other panel (and every other tab) sees the same text."
-					value={body.value}
 					oninput={applyEdit}
-					onselect={(e) => reportSelection(room, mode, e)}
-					onkeyup={(e) => reportSelection(room, mode, e)}
-					onmouseup={(e) => reportSelection(room, mode, e)}
+					bind:this={textareaRefs[mode]}
 					data-testid="{testPrefix}-textarea"
 				></textarea>
 				<div class="text-xs opacity-60">
@@ -247,11 +344,18 @@
 							data-testid="{testPrefix}-selection-row"
 							data-local={row.local ? 'true' : 'false'}
 						>
-							<div class="flex items-baseline gap-2">
+							<div class="flex items-baseline gap-2 flex-wrap">
 								<span class="font-semibold" style:color={row.color}>{row.name}</span>
 								{#if row.local}<span class="badge badge-primary badge-xs">you</span>{/if}
 								<span class="font-mono opacity-60">[{row.start}, {row.end})</span>
-								<span class="truncate opacity-70">"{row.snippet.slice(0, 40)}{row.snippet.length > 40 ? '...' : ''}"</span>
+								{#if row.published !== undefined && row.published !== row.snippet}
+									<span class="truncate opacity-70">selected "{clip(row.published)}"</span>
+									<span class="text-warning font-medium" data-testid="{testPrefix}-selection-drift">
+										now covers "{clip(row.snippet)}"
+									</span>
+								{:else}
+									<span class="truncate opacity-70">"{clip(row.snippet)}"</span>
+								{/if}
 							</div>
 							<div class="relative h-2 rounded bg-base-300 overflow-hidden">
 								<div
@@ -261,8 +365,9 @@
 							</div>
 						</div>
 					{:else}
-						<p class="text-xs opacity-40" data-testid="{testPrefix}-selections-empty">
-							No selections yet. Select text above or open a second tab.
+						<p class="text-sm opacity-70" data-testid="{testPrefix}-selections-empty">
+							Select text in the box above - or open a second tab and select there - and the
+							range lands here as a row.
 						</p>
 					{/each}
 				</div>
@@ -286,7 +391,7 @@
 			<code>presence</code>; ranges are published with
 			<code>room.setSelection(...)</code> and read back from
 			<code>room.selections</code>. The crdt room resolves each peer's
-			anchor against the bound document reactively, so highlights
+			anchor against the bound document reactively, so ranges
 			re-resolve on every edit.
 		</p>
 		<p>
