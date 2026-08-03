@@ -105,6 +105,10 @@ test.describe('/demos/notifications', () => {
 			await expect(a.getByTestId('send-button')).toBeEnabled()
 			await a.getByTestId('schedule-input').fill('5')
 			await expect(a.getByTestId('send-button')).toHaveText('Schedule (5s)')
+			// The slider states its domain before anyone drags to find it,
+			// and the message field is labeled like its two siblings.
+			await expect(a.getByText('Schedule (5s of 30s max)')).toBeVisible()
+			await expect(a.locator('label', { has: a.getByTestId('text-input') }).locator('span').first()).toHaveText('Message')
 			await a.getByTestId('schedule-input').fill('0')
 			await expect(a.getByTestId('send-button')).toHaveText('Send')
 
@@ -142,10 +146,17 @@ test.describe('/demos/notifications', () => {
 			// (Not optimistic - the outcome is the server-returned reply value.)
 			await expect(a.getByTestId('send-button')).toHaveText('Sending...')
 			await expect(a.getByTestId('outcome')).toHaveCount(0)
+			// The wait announces itself and counts the reply window down.
+			await expect(a.getByTestId('push-wait')).toContainText('waiting for')
+			await expect(a.getByTestId('push-wait')).toContainText('s left')
 
 			// B clicks Got it; the reply value travels back as A's outcome.
 			await inboxCard.getByTestId('inbox-ack-ok').click()
 			await expect(a.getByTestId('outcome-kind')).toHaveText('delivered', { timeout: 8_000 })
+			await expect(a.getByTestId('push-wait')).toHaveCount(0)
+			// The activity entry names the worker that handled it - the
+			// cluster-wiring surface this page was missing.
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-instance')).toHaveText(/^on \S+$/, { timeout: 8_000 })
 
 			// Card cleared from B's inbox; the text input was reset on success.
 			await expect(inboxCard).toHaveCount(0)
@@ -296,6 +307,11 @@ test.describe('/demos/notifications', () => {
 			const bItem = b.getByTestId('scheduled-item').filter({ hasText: text })
 			await expect(aItem).toBeVisible({ timeout: 5_000 })
 			await expect(bItem).toBeVisible({ timeout: 5_000 })
+
+			// Cancel is the row's only, time-critical action: real button
+			// chrome at ack-button size, not ghost btn-xs.
+			await expect(aItem.getByRole('button', { name: 'Cancel' })).toHaveClass(/btn-outline/)
+			await expect(aItem.getByRole('button', { name: 'Cancel' })).toHaveClass(/btn-sm/)
 
 			// Cancel from A; the deletion fans out to B too.
 			await aItem.getByRole('button', { name: 'Cancel' }).click()

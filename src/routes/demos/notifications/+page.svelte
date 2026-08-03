@@ -41,6 +41,7 @@
 		scheduleSec = Math.min(30, Math.max(0, scheduleSec + delta))
 	}
 	let busy = $state(false)
+	let busyStart = $state(0)
 	let outcome = $state(null) // { kind: 'delivered'|'dismissed'|'timeout'|'offline'|'error'|'scheduled', detail?: string }
 
 	// Auto-pick the first recipient when the list changes and current pick is gone.
@@ -114,6 +115,7 @@
 		const trimmed = text.trim()
 		if (!trimmed) return
 		busy = true
+		busyStart = Date.now()
 		outcome = null
 		try {
 			const result = await sendNotification({
@@ -234,7 +236,7 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Incoming ({incoming.length})</h2>
 			{#if incoming.length === 0}
-				<p class="opacity-40 text-sm" data-testid="inbox-empty">
+				<p class="opacity-70 text-sm" data-testid="inbox-empty">
 					Nothing yet. When someone pushes you a notification, the card appears here with reply buttons.
 				</p>
 			{:else}
@@ -287,7 +289,7 @@
 					</select>
 				</label>
 				<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
-					<span class="opacity-70 text-xs">Schedule ({scheduleSec}s)</span>
+					<span class="opacity-70 text-xs">Schedule ({scheduleSec}s of 30s max)</span>
 					<!-- Compact dress on fine pointers, 44px floor where taps land.
 					     ~10px per stop is untappable; steppers give exact-second control on coarse pointers. -->
 					<div class="flex items-center gap-2">
@@ -317,14 +319,17 @@
 					</div>
 				</label>
 			</div>
-			<form onsubmit={(e) => { e.preventDefault(); handleSend() }} class="flex gap-2">
-				<input
-					class="input input-bordered input-sm flex-1 pointer-coarse:min-h-11"
-					bind:value={text}
-					placeholder="Your message..."
-					maxlength="200"
-					data-testid="text-input"
-				/>
+			<form onsubmit={(e) => { e.preventDefault(); handleSend() }} class="flex gap-2 items-end">
+				<label class="flex flex-col gap-1 flex-1">
+					<span class="opacity-70 text-xs">Message</span>
+					<input
+						class="input input-bordered input-sm w-full pointer-coarse:min-h-11"
+						bind:value={text}
+						placeholder="Your message..."
+						maxlength="200"
+						data-testid="text-input"
+					/>
+				</label>
 				<button
 					type="submit"
 					class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11"
@@ -334,6 +339,14 @@
 					{busy ? 'Sending...' : (scheduleSec > 0 ? `Schedule (${scheduleSec}s)` : 'Send')}
 				</button>
 			</form>
+			{#if busy && scheduleSec === 0}
+				<!-- An up-to-8s silent wait reads as a hang; the reply window
+				     counts itself down instead. -->
+				<p class="text-xs opacity-70" data-testid="push-wait">
+					waiting for {recipients.find((u) => u.id === selectedRecipientId)?.name ?? 'the recipient'}
+					to reply... ({Math.max(0, 8 - Math.floor((nowMs - busyStart) / 1000))}s left)
+				</p>
+			{/if}
 			{#if outcome}
 				<div class="alert {outcomeClass(outcome.kind)} py-2" data-testid="outcome">
 					<span class="text-sm">
@@ -350,7 +363,7 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Scheduled ({scheduledList.length})</h2>
 			{#if scheduledList.length === 0}
-				<p class="opacity-40 text-sm" data-testid="scheduled-empty">
+				<p class="opacity-70 text-sm" data-testid="scheduled-empty">
 					Nothing pending. Set a schedule above to enqueue a notification.
 				</p>
 			{:else}
@@ -361,7 +374,7 @@
 							<span class="opacity-70">{entry.fromUserName} &rarr; {entry.toUserName}:</span>
 							<span class="flex-1 truncate">{entry.text}</span>
 							<button
-								class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+								class="btn btn-outline btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 								onclick={() => handleCancel(entry.id)}
 								data-testid="scheduled-cancel-{entry.id}"
 							>
@@ -378,14 +391,23 @@
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Recent activity ({activityList.length})</h2>
+			<p class="text-xs opacity-70" data-testid="activity-wiring-note">
+				Each entry names the worker that handled that step. On a
+				multi-replica deployment a schedule and its fire can land on
+				different workers - the hop between their ids is the cluster
+				connection registry at work. (One local instance shows one id.)
+			</p>
 			{#if activityList.length === 0}
-				<p class="opacity-40 text-sm">Nothing yet.</p>
+				<p class="opacity-70 text-sm">Nothing yet.</p>
 			{:else}
 				<ul class="space-y-1 text-xs font-mono" data-testid="activity-list">
 					{#each activityList as evt (evt.id)}
 						<li class="flex items-center gap-2" data-testid="activity-item">
 							<span class="opacity-50 w-12">{timeAgo(evt.ts)}</span>
 							<span class="badge badge-sm {activityClass(evt.kind)}" data-testid="activity-kind">{activityLabel(evt.kind)}</span>
+							{#if evt.instance}
+								<span class="opacity-60" data-testid="activity-instance" title="worker that handled this step">on {evt.instance}</span>
+							{/if}
 							<span class="opacity-70 truncate flex-1">
 								{evt.fromUserName} &rarr; {evt.toUserName}: {evt.text}
 							</span>

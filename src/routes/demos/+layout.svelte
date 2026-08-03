@@ -37,7 +37,7 @@
 		{ slug: 'schema-evolution',  title: 'Schema evolution' },
 		{ slug: 'flash-sales',       title: 'Flash sales' },
 		{ slug: 'pagination',        title: 'Pagination' },
-		{ slug: 'effect',            title: 'Effects / live.effect' },
+		{ slug: 'effect',            title: 'live.effect / one publish, three streams' },
 		{ slug: 'from-seq',          title: 'Reconnect / fromSeq' },
 		{ slug: 'collab-editor',     title: 'Collab selections' },
 		{ slug: 'multiplayer',       title: 'Multiplayer lounge' },

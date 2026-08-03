@@ -45,7 +45,7 @@
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { leader, redis } from '$lib/server/redis'
 
 const PUSH_TIMEOUT_MS = 8000
 const ACTIVITY_CAP = 50
@@ -81,6 +81,11 @@ async function listActivity() {
  * evicted entry instead of a silent disappearance.
  */
 async function appendActivity(entry, ctx) {
+	// Stamp the worker that handled this step. On a multi-replica
+	// deployment a schedule and its fire routinely land on different
+	// workers - the differing ids are the only visible evidence of the
+	// cluster registry doing its relay work.
+	entry.instance = (leader.instanceId ?? 'local').slice(0, 8)
 	const raw = JSON.stringify(entry)
 	const pipeline = redis.redis.multi()
 	pipeline.lpush(ACTIVITY_KEY, raw)
