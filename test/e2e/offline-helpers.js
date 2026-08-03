@@ -16,8 +16,21 @@ export async function postEntry(page, text, submitWithEnter = false) {
 	await expect(input).toHaveValue('')
 }
 
+/**
+ * Rows the SERVER has confirmed. Scoped to `li[data-entry]` deliberately:
+ * the list also carries ghosted `li[data-queued]` rows for posts this tab
+ * has handed to the offline queue, and an unscoped `li` match would let
+ * `waitExactlyOnce` be satisfied by a local echo that never reached the
+ * server - quietly turning the demo's central guarantee into a check that
+ * the page can render its own optimism.
+ */
 export function entryRows(page, text) {
-	return page.getByTestId('off-entries').locator('li', { hasText: text })
+	return page.getByTestId('off-entries').locator('li[data-entry]', { hasText: text })
+}
+
+/** Ghost rows for mutations still sitting in the queue. */
+export function queuedRows(page, text) {
+	return page.getByTestId('off-entries').locator('li[data-queued]', { hasText: text })
 }
 
 export async function waitExactlyOnce(page, text) {

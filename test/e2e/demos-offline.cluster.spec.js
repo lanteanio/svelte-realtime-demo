@@ -26,7 +26,7 @@ test.describe('cluster: /demos/offline', () => {
 			await postEntry(b, fromB)
 			for (const page of [a, b]) {
 				await waitExactlyOnce(page, fromB)
-				const texts = await page.getByTestId('off-entries').locator('li').allTextContents()
+				const texts = await page.getByTestId('off-entries').locator('li[data-entry]').allTextContents()
 				const indexB = texts.findIndex((text) => text.includes(fromB))
 				const indexA = texts.findIndex((text) => text.includes(fromA))
 				if (indexB < 0 || indexA < 0 || indexB >= indexA) throw new Error('replicas did not converge newest-first')

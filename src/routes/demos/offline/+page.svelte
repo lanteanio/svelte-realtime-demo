@@ -23,6 +23,8 @@
 -->
 <script>
 	import { pendingMutations, uploading, offlineCheckpoint } from 'svelte-realtime/client'
+	import { status } from 'svelte-adapter-uws/client'
+	import { connectionState, isOffline } from '$lib/offline-connection'
 	import { configureApp } from '$lib/configure-app'
 	import { entriesStream, addEntry } from '$live/demos/offline'
 	import { browser } from '$app/environment'
@@ -66,19 +68,36 @@
 	let draft = $state('')
 	let lastError = $state('')
 
+	// Posts this tab has handed to the queue and not yet seen land. The
+	// queue's own consumer surface is a COUNT (pendingMutations), so the
+	// words themselves exist nowhere the visitor can see them - during the
+	// demo's hero flow the guestbook looks like it swallowed the post and
+	// the durability claim has to be taken on arithmetic alone. These are
+	// this tab's memory only: a reload while offline keeps the mutations
+	// (they are in IndexedDB) but not their text, because nothing in the
+	// client API can enumerate a persisted queue's payloads.
+	let queued = $state(/** @type {Array<{ token: string, text: string, at: number }>} */ ([]))
+
 	function handlePost() {
 		const text = draft.trim()
 		if (!text) return
 		draft = ''
 		lastError = ''
+		const token = crypto.randomUUID()
+		queued = [{ token, text, at: Date.now() }, ...queued]
 		// Deliberately NOT awaited: while offline the promise settles only
 		// when the queued call replays after reconnect (minutes, maybe).
 		// Blocking the composer on that would defeat the demo. Failures
 		// (validation, replay errors with live promise holders) surface
-		// inline through the catch.
-		addEntry(text).catch((err) => {
-			lastError = `${err?.code ?? 'ERROR'}: ${err?.message ?? err}`
-		})
+		// inline through the catch. Settling either way retires the local
+		// echo - the server has answered, so the real row is authoritative.
+		addEntry(text)
+			.catch((err) => {
+				lastError = `${err?.code ?? 'ERROR'}: ${err?.message ?? err}`
+			})
+			.finally(() => {
+				queued = queued.filter((q) => q.token !== token)
+			})
 	}
 
 	function timeOf(ts) {
@@ -90,6 +109,13 @@
 	// reacts to, and blocks reconnects with a never-opening WebSocket
 	// stub until unblocked). This page only tracks which mode it is in.
 	let simulatedOffline = $state(false)
+
+	// What the card is allowed to claim, given the real socket AND the
+	// simulation. The mapping lives in $lib/offline-connection with unit
+	// coverage, because its load-bearing case - the 'connecting' window on
+	// every page load being neither up nor down - is a startup state that no
+	// browser test against a warm server can reach.
+	const connection = $derived(connectionState($status, simulatedOffline))
 
 	function goOffline() {
 		if (!browser) return
@@ -159,6 +185,7 @@
 				<span class="opacity-60">
 					checkpoint: seq
 					<span class="font-mono" data-testid="off-checkpoint-seq">{checkpoint.lastUploadedSeq}</span>
+					<span data-testid="off-checkpoint-gloss">(last post the queue uploaded)</span>
 				</span>
 				{#if checkpoint.gapDetected}
 					<span class="badge badge-warning badge-sm" data-testid="off-gap-badge">upload gap detected</span>
@@ -170,22 +197,31 @@
 	<!-- Simulate offline / reconnect in-page, so the queue -> replay story is
 	     visible without opening DevTools. -->
 	<section
-		class="card {simulatedOffline ? 'bg-warning/10 border border-warning' : 'bg-base-200'}"
+		class="card {isOffline(connection) ? 'bg-warning/10 border border-warning' : 'bg-base-200'}"
 		data-testid="off-sim-card"
 	>
 		<div class="card-body py-3 flex-row flex-wrap items-center justify-between gap-3">
 			<div class="text-sm">
-				{#if simulatedOffline}
+				{#if connection === 'simulated'}
 					<span class="badge badge-warning badge-sm mr-2" data-testid="off-sim-badge">simulated offline</span>
 					Socket dropped. New posts queue locally - hit Reconnect to replay them exactly once.
-				{:else}
+				{:else if connection === 'online'}
 					<span class="badge badge-success badge-sm mr-2">online</span>
 					Connected. Go offline to watch posts queue and replay on reconnect.
+				{:else if connection === 'connecting'}
+					<span class="badge badge-ghost badge-sm mr-2" data-testid="off-connecting-badge">connecting</span>
+					Opening the connection...
+				{:else}
+					<span class="badge badge-warning badge-sm mr-2" data-testid="off-down-badge">offline</span>
+					The connection is down ({$status}). New posts queue locally and replay exactly
+					once when it comes back.
 				{/if}
 			</div>
+			<!-- The most-pressed control of the scripted flow: full button size,
+			     and the 44px floor where taps land. -->
 			<button
 				type="button"
-				class="btn btn-sm {simulatedOffline ? 'btn-warning' : 'btn-outline'}"
+				class="btn pointer-coarse:min-h-11 pointer-coarse:min-w-11 {simulatedOffline ? 'btn-warning' : 'btn-outline'}"
 				onclick={toggleOffline}
 				data-testid="off-sim-toggle"
 			>
@@ -200,7 +236,8 @@
 			class="input input-bordered flex-1 bg-base-200"
 			bind:value={draft}
 			maxlength="200"
-			placeholder="Sign the guestbook... (works offline)"
+			aria-label="Sign the guestbook"
+			placeholder="Sign the guestbook..."
 			data-testid="off-input"
 		/>
 		<button
@@ -212,6 +249,13 @@
 			Post
 		</button>
 	</form>
+	<!-- "(works offline)" used to live in the placeholder, where it was
+	     clipped on every phone rung and disappeared the moment anyone typed.
+	     It is the sentence that sells the unit, so it is ordinary copy now. -->
+	<p class="text-xs opacity-60" data-testid="off-composer-note">
+		Works offline: a post made with no connection queues locally and replays
+		exactly once when the connection returns.
+	</p>
 	{#if lastError}
 		<p class="text-xs text-error" data-testid="off-error">{lastError}</p>
 	{/if}
@@ -223,15 +267,28 @@
 				Entries <span class="font-normal">(<span data-testid="off-entries-count">{entries.length}</span>, newest first, capped at 50)</span>
 			</h2>
 			<ul class="space-y-1 text-sm" data-testid="off-entries">
+				<!-- Queued posts render as the visitor's own words, ghosted and
+				     chipped, at the head of the newest-first list. `data-queued`
+				     vs `data-entry` is load-bearing, not decoration: a test
+				     asking "did this text land exactly once" must not be able to
+				     satisfy itself with a local echo that has not landed at all. -->
+				{#each queued as q (q.token)}
+					<li class="flex items-baseline gap-2 opacity-60" data-queued data-testid="off-queued-row">
+						<span class="opacity-50 text-xs font-mono w-20 shrink-0">{timeOf(q.at)}</span>
+						<span class="badge badge-warning badge-xs shrink-0">queued</span>
+						<span class="flex-1 break-words min-w-0">{q.text}</span>
+					</li>
+				{/each}
 				{#each entries as entry (entry.id)}
-					<li class="flex items-baseline gap-2" data-testid="off-entry-{entry.id}">
+					<li class="flex items-baseline gap-2" data-entry data-testid="off-entry-{entry.id}">
 						<span class="opacity-50 text-xs font-mono w-20 shrink-0">{timeOf(entry.at)}</span>
 						<span class="font-semibold shrink-0">{entry.by}</span>
 						<span class="flex-1 break-words min-w-0">{entry.text}</span>
 					</li>
-				{:else}
-					<li class="opacity-40 text-center py-6">No entries yet. Sign above - even offline.</li>
 				{/each}
+				{#if entries.length === 0 && queued.length === 0}
+					<li class="opacity-40 text-center py-6">No entries yet. Sign above - even offline.</li>
+				{/if}
 			</ul>
 		</div>
 	</section>

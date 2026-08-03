@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 import {
 	checkpointSeq,
 	entryRows,
 	openOffline,
 	pendingCount,
 	postEntry,
+	queuedRows,
 	reconnect,
 	simulateOffline,
 	waitExactlyOnce
@@ -24,7 +26,12 @@ test.describe('/demos/offline', () => {
 		await expect(page.getByTestId('off-sim-toggle')).toHaveText('Go offline')
 		const input = page.getByTestId('off-input')
 		await expect(input).toHaveAttribute('maxlength', '200')
-		await expect(input).toHaveAttribute('placeholder', 'Sign the guestbook... (works offline)')
+		await expect(input).toHaveAttribute('placeholder', 'Sign the guestbook...')
+		// The label survives typing and narrow rungs; the promise the
+		// placeholder used to carry is ordinary copy now.
+		await expect(page.getByLabel('Sign the guestbook', { exact: true })).toBeVisible()
+		await expect(page.getByTestId('off-composer-note')).toContainText('replays exactly once')
+		await expect(page.getByTestId('off-checkpoint-gloss')).toContainText('last post the queue uploaded')
 		await expect(page.getByTestId('off-post-button')).toBeDisabled()
 		await input.fill('   ')
 		await expect(page.getByTestId('off-post-button')).toBeDisabled()
@@ -65,11 +72,19 @@ test.describe('/demos/offline', () => {
 		const texts = [0, 1, 2].map((index) => `sim-${index}-${stamp}`)
 		for (const text of texts) await postEntry(page, text)
 		await expect.poll(() => pendingCount(page), { timeout: 15_000 }).toBe(3)
-		for (const text of texts) await expect(entryRows(page, text)).toHaveCount(0)
+		// The visitor's own words are on screen for the whole offline stretch,
+		// as ghosts - and still NOT as confirmed entries, which is the half
+		// that keeps the local echo from standing in for a server round trip.
+		for (const text of texts) {
+			await expect(queuedRows(page, text)).toHaveCount(1)
+			await expect(entryRows(page, text)).toHaveCount(0)
+		}
 		await expect(page.getByTestId('off-error')).toHaveCount(0)
 
 		await reconnect(page)
 		for (const text of texts) await waitExactlyOnce(page, text)
+		// Reconciled, not merely joined by a real row beside the ghost.
+		for (const text of texts) await expect(queuedRows(page, text)).toHaveCount(0)
 		await expect.poll(() => checkpointSeq(page), { timeout: 10_000 }).toBeGreaterThan(beforeCheckpoint)
 		await expect(page.getByTestId('off-gap-badge')).toHaveCount(0)
 	})
@@ -96,17 +111,39 @@ test.describe('/demos/offline', () => {
 		await context.setOffline(true)
 		try {
 			await expect(page.locator('.text-success')).toHaveCount(0, { timeout: 30_000 })
+			// A genuine outage, not the in-page simulation: the card has to say
+			// so rather than keep claiming "Connected" during the very scenario
+			// this demo exists to show.
+			await expect(page.getByTestId('off-down-badge')).toBeVisible({ timeout: 15_000 })
+			await expect(page.getByTestId('off-sim-badge')).toHaveCount(0)
+			await expect(page.getByTestId('off-sim-card')).not.toContainText('Connected.')
 			const text = `network-offline-${Date.now()}-${Math.random().toString(16).slice(2)}`
 			await postEntry(page, text)
 			await expect.poll(() => pendingCount(page), { timeout: 15_000 }).toBe(1)
 			await expect(page.getByTestId('off-error')).toHaveCount(0)
 			await context.setOffline(false)
+			// Approached from the down side, so this waits for a real recovery
+			// rather than reading a card that was never offline.
+			await expect(page.getByTestId('off-down-badge')).toHaveCount(0, { timeout: 60_000 })
+			await expect(page.getByTestId('off-sim-card')).toContainText('Connected.')
 			await expect(page.getByTestId('off-pending-count')).toHaveText('0', { timeout: 60_000 })
 			await waitExactlyOnce(page, text)
 			await page.waitForTimeout(1_000)
 			await expect(entryRows(page, text)).toHaveCount(1)
 		} finally {
 			await context.setOffline(false)
+		}
+	})
+
+	test('the offline toggle meets the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openOffline(page)
+			// The most-pressed control of the scripted flow was btn-sm, a third
+			// smaller than the Post button it sits beside.
+			await expectTouchTarget(page.getByTestId('off-sim-toggle'))
+		} finally {
+			await context.close()
 		}
 	})
 })
