@@ -111,6 +111,44 @@ export const roundInfo = live(async () => {
 })
 
 /**
+ * Bring two SIMULATED contributors into the current round so a solo
+ * visitor can reach the demo's payoff.
+ *
+ * Crossing k needs three DISTINCT contributors, and the page's only
+ * previous remedy was "open two more browsers" - unreachable on a phone,
+ * where incognito windows cannot share a screen, which is most of the
+ * traffic this demo gets. These companions are not a shortcut around the
+ * privacy layer: they publish ordinary 'submitted' events under their own
+ * distinct ids, so the aggregate's own contributor rule counts them and
+ * the protected output crosses k through exactly the mechanism the page
+ * is teaching. Nothing about the k gate, the noise, or the hold is
+ * bypassed - the visitor is simply no longer required to own three
+ * devices to watch it work.
+ *
+ * The ids are round-scoped and openly synthetic so they can never be
+ * mistaken for people, and the page labels the control as simulated.
+ */
+export const inviteCompanions = live(async (ctx) => {
+	const minute = currentMinute()
+	const key = roundSetKey(minute)
+	const companions = [
+		{ userId: `demo-companion-a:${minute}`, score: 4 },
+		{ userId: `demo-companion-b:${minute}`, score: 2 }
+	]
+	const tx = redis.redis.multi()
+	for (const c of companions) tx.sadd(key, c.userId)
+	tx.expire(key, 180)
+	tx.scard(key)
+	const results = await tx.exec()
+	const distinct = Number(results?.[results.length - 1]?.[1] ?? 0)
+	for (const c of companions) {
+		ctx.publish(TOPICS.demoPrivacyMoods, 'submitted', { userId: c.userId, score: c.score })
+	}
+	if (distinct >= K) everPublishedHere = true
+	return { added: companions.length, distinct }
+})
+
+/**
  * Shared reducer shape for both aggregates. A factory (not a shared
  * object) so each aggregate owns its own config instance.
  */

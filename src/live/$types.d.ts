@@ -349,6 +349,7 @@ declare module "$live/demos/privacy" {
 
   export const submitMood: (...args: any[]) => Promise<any>;
   export const roundInfo: (...args: any[]) => Promise<any>;
+  export const inviteCompanions: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
   export const rawMood: {
     "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };

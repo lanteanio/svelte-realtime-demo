@@ -18,13 +18,19 @@ test.describe('/demos/privacy', () => {
 		await openPrivacy(page)
 		await expect(page.getByRole('heading', { name: 'Aggregate privacy: k-anonymity + differential privacy' })).toBeVisible()
 		await expect(page.getByTestId('pv-picker-section')).toBeVisible()
-		for (const [score, title] of [[1, 'rough'], [2, 'meh'], [3, 'okay'], [4, 'good'], [5, 'great']]) {
+		for (const [score, label] of [[1, 'rough'], [2, 'meh'], [3, 'okay'], [4, 'good'], [5, 'great']]) {
 			const button = page.getByTestId(`pv-submit-${score}`)
 			await expect(button).toBeVisible()
 			await expect(button).toBeEnabled()
-			await expect(button).toHaveAttribute('title', title)
-			await expect(button).toContainText(String(score))
+			// The scale label is visible text and an accessible name now, not
+			// a hover-only title that touch and screen readers never got.
+			await expect(page.getByTestId(`pv-mood-label-${score}`)).toHaveText(label)
+			await expect(button).toHaveAttribute('aria-label', `${label} - ${score} of 5`)
 		}
+		// The action leads on a phone; the spec prose is one tap away.
+		await expect(page.getByTestId('pv-lede')).toContainText('Pick a mood below')
+		await expect(page.getByTestId('pv-mechanism-toggle')).toBeVisible()
+		await expect(page.getByTestId('pv-invite')).toBeEnabled()
 		await expect(page.getByTestId('pv-raw-card')).toContainText('exact, every event')
 		await expect(page.getByTestId('pv-protected-card')).toContainText('k = 3, Laplace noise')
 		await expect(page.getByTestId('pv-explainer')).toContainText('k-anonymity')
@@ -100,6 +106,55 @@ test.describe('/demos/privacy', () => {
 		} finally {
 			await Promise.allSettled(contexts.map((context) => context.close()))
 		}
+	})
+
+	test('a solo visitor can reach the payoff: simulated contributors cross k through the real gate', async ({ page }) => {
+		test.setTimeout(120_000)
+		await openPrivacy(page)
+		// Start from a round this test controls, so the k crossing below is
+		// genuinely caused here rather than inherited.
+		const fresh = await waitForFreshRound(page)
+		expect(fresh.distinct).toBeLessThan(fresh.k)
+
+		// One human, then two stand-ins: exactly the situation the page
+		// previously answered with "open two more browsers".
+		//
+		// Submitted directly rather than through the submitMood helper: that
+		// helper asserts the RAW count increases, and the raw card keeps
+		// displaying the previous window's value until the new window's first
+		// publish lands - so across a tumble it can read 11 and then 1 and
+		// fail on a submission that was never lost. This test's subject is
+		// the round-scoped distinct count, which resets cleanly with the
+		// round, so it asserts that instead of borrowing an oracle it does
+		// not need.
+		await page.getByTestId('pv-submit-4').click()
+		await expect(page.getByTestId('pv-submit-note')).toContainText('Submitted 4/5')
+		const afterSelf = await roundState(page)
+		expect(afterSelf.distinct).toBe(fresh.distinct + 1)
+		expect(afterSelf.distinct).toBeLessThan(afterSelf.k)
+
+		await page.getByTestId('pv-invite').click()
+		await expect(page.getByTestId('pv-invite')).toBeEnabled()
+		// The gate is crossed by real distinct contributors, so the protected
+		// aggregate publishes for the first time and the held state retires.
+		await waitForDistinct(page, 3)
+		// waitForProtected returns the card's TEXT snapshot (that is how the
+		// multi-tab test compares replicas), so read the value element for a
+		// numeric assertion rather than coercing the snapshot.
+		await waitForProtected(page)
+		const published = Number(await page.getByTestId('pv-protected-value').textContent())
+		expect(Number.isFinite(published)).toBe(true)
+		await expect(page.getByTestId('pv-protected-held')).toHaveCount(0)
+		await expect(page.getByTestId('pv-error')).toHaveCount(0)
+	})
+
+	test('the countdown ticks every second instead of jumping with the poll', async ({ page }) => {
+		await openPrivacy(page)
+		const read = async () => Number(await page.getByTestId('pv-round-reset').textContent())
+		const first = await read()
+		// A 5s poll with no interpolation holds the same number for seconds
+		// at a time; a per-second tick has moved well before the next poll.
+		await expect.poll(read, { timeout: 4_000 }).toBeLessThan(first)
 	})
 
 	test('mood buttons meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {

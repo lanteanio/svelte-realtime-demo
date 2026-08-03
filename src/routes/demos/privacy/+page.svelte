@@ -9,7 +9,7 @@
 -->
 <script>
 	import { onMount } from 'svelte'
-	import { submitMood, roundInfo, rawMood, privateMood } from '$live/demos/privacy'
+	import { submitMood, roundInfo, rawMood, privateMood, inviteCompanions } from '$live/demos/privacy'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -33,16 +33,45 @@
 	async function refreshRound() {
 		try {
 			round = await roundInfo()
+			tickedReset = round.resetInSeconds
 		} catch (err) {
 			lastError = err?.message ?? String(err)
 		}
 	}
 
+	// The countdown is polled every 5s but ticks every second: a frozen
+	// number that jumps five at a time sits directly beside a privacy
+	// guarantee and reads as breakage. `round.resetInSeconds` is the
+	// authoritative reading; this only interpolates between polls and is
+	// overwritten by every refresh.
+	let tickedReset = $state(/** @type {number | null} */ (null))
+
 	onMount(() => {
 		refreshRound()
-		const timer = setInterval(refreshRound, 5000)
-		return () => clearInterval(timer)
+		const poll = setInterval(refreshRound, 5000)
+		const tick = setInterval(() => {
+			if (tickedReset !== null && tickedReset > 0) tickedReset -= 1
+		}, 1000)
+		return () => {
+			clearInterval(poll)
+			clearInterval(tick)
+		}
 	})
+
+	let inviting = $state(false)
+	async function handleInvite() {
+		if (inviting) return
+		inviting = true
+		lastError = ''
+		try {
+			await inviteCompanions()
+			await refreshRound()
+		} catch (err) {
+			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+		} finally {
+			inviting = false
+		}
+	}
 
 	async function handleSubmit(score) {
 		if (submitting) return
@@ -75,7 +104,18 @@
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Aggregate privacy: k-anonymity + differential privacy</h1>
-		<p class="text-sm opacity-70 mt-1">
+		<p class="text-sm opacity-70 mt-1" data-testid="pv-lede">
+			Pick a mood below. The raw card moves at once; the protected one
+			stays put until three distinct people have submitted this round,
+			then publishes with noise added.
+		</p>
+		<details class="text-sm opacity-70 mt-1">
+			<!-- The spec text used to be nine lines of prose above the only
+			     control, so on every phone rung the page opened with a wall of
+			     text and no visible action. The one-line lede leads; the
+			     mechanism is one tap away for whoever wants it. -->
+			<summary class="cursor-pointer" data-testid="pv-mechanism-toggle">How the two aggregates differ</summary>
+			<p class="mt-1">
 			One "team mood" source topic, two <code>live.aggregate</code> exports with
 			identical reducers. The raw one publishes exact values on every submission.
 			The protected one declares <code>privacy: &#123; k: 3, epsilon: 1.0, noise:
@@ -84,13 +124,13 @@
 			last published value is held, never replaced with a null or a marker, because
 			the drop below k is itself the signal k-anonymity hides. At k it publishes
 			with calibrated Laplace noise.
-		</p>
+			</p>
+		</details>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
 				Submitting as
 				<span class="inline-block w-2 h-2 rounded-full align-middle" style:background={me.color}></span>
 				<strong>{me.name}</strong>
-				- open this page in two more browsers (or incognito windows) to cross k = 3.
 			</p>
 		{/if}
 	</header>
@@ -103,16 +143,20 @@
 				{#each MOODS as m (m.score)}
 					<!-- The page's single participatory act: keep the compact dress on
 					     fine pointers, meet the 44px platform floor where taps land. -->
+					<!-- The scale labels used to live only in `title`, so touch
+					     visitors never saw them and screen readers announced an
+					     emoji plus a bare digit - leaving the 1-5 direction a
+					     guess for exactly the people who most need it stated. -->
 					<button
-						class="btn btn-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+						class="btn btn-sm h-auto flex-col gap-0.5 py-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 						class:btn-primary={submittedScore === m.score}
 						onclick={() => handleSubmit(m.score)}
 						disabled={submitting}
 						data-testid="pv-submit-{m.score}"
-						title={m.label}
+						aria-label="{m.label} - {m.score} of 5"
 					>
 						<span class="text-lg leading-none">{m.emoji}</span>
-						<span class="opacity-60">{m.score}</span>
+						<span class="text-[0.65rem] leading-none opacity-70" data-testid="pv-mood-label-{m.score}">{m.label}</span>
 					</button>
 				{/each}
 			</div>
@@ -122,6 +166,26 @@
 					but the k-cohort counts <strong>distinct</strong> contributors.
 				</p>
 			{/if}
+			<!-- Crossing k needs three DISTINCT contributors, and "open two
+			     more browsers" is not something a phone visitor can do at
+			     all - which was most of the audience for the page's headline
+			     behaviour. These companions publish ordinary events under
+			     their own ids, so k is crossed by the real mechanism; nothing
+			     about the gate or the noise is bypassed. -->
+			<div class="flex flex-wrap items-center gap-2 pt-1">
+				<button
+					class="btn btn-sm btn-outline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+					onclick={handleInvite}
+					disabled={inviting}
+					data-testid="pv-invite"
+				>
+					{inviting ? 'Adding...' : 'Add 2 simulated contributors'}
+				</button>
+				<span class="text-xs opacity-70" data-testid="pv-invite-note">
+					Alone? These are two clearly-marked stand-ins that submit like anyone
+					else, so this round can reach k = 3 and the protected card can publish.
+				</span>
+			</div>
 			{#if lastError}
 				<p class="text-xs text-error" data-testid="pv-error">{lastError}</p>
 			{/if}
@@ -165,9 +229,15 @@
 					     that window, which is the reading being prevented. -->
 					{#if protectedState !== undefined && round?.everPublished === true}
 						<p class="text-4xl font-bold tabular-nums" data-testid="pv-protected-value">{fmt(protectedState.avg)}</p>
+						<!-- "noisy average of a noisy N submissions" parsed as a
+						     typo and buried the actual point: the COUNT is noised
+						     too, which is why it can be fractional. -->
 						<p class="text-xs opacity-60">
-							noisy average of a noisy <span class="font-mono" data-testid="pv-protected-n">{fmt(protectedState.n, 1)}</span>
-							submissions (last published value; held while below k)
+							Noise is added to the average and to the submission count alike -
+							which is why the count reads
+							<span class="font-mono" data-testid="pv-protected-n">{fmt(protectedState.n, 1)}</span>
+							rather than a whole number. This is the last published value, held
+							while the round sits below k.
 						</p>
 					{:else}
 						<p class="opacity-40 text-sm" data-testid="pv-protected-held">
@@ -180,10 +250,14 @@
 					<p class="text-xs opacity-50 border-t border-base-300 pt-2 mt-1" data-testid="pv-round-hint">
 						<span data-testid="pv-round-distinct">{round.distinct}</span> of
 						<span data-testid="pv-round-k">{round.k}</span> distinct contributors this
-						round (resets in ~<span data-testid="pv-round-reset">{round.resetInSeconds}</span>s).
-						You can see this only because
-						the raw aggregate exists for comparison - the protected output alone never
-						reveals its cohort size.
+						round (resets in ~<span data-testid="pv-round-reset">{tickedReset ?? round.resetInSeconds}</span>s).
+						<!-- The old wording credited the raw aggregate, which only
+						     exposes an event count - never the distinct-contributor
+						     count shown here. On a page about honesty, the source of
+						     the number has to be named accurately. -->
+						You can see this only because a demo-only
+						<code>roundInfo()</code> endpoint reports it; neither aggregate
+						exposes cohort size, and the protected output never reveals it.
 					</p>
 				{/if}
 			</div>
