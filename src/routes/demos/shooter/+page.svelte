@@ -17,6 +17,7 @@
 	window is capped by maxRewindMs.
 -->
 <script>
+	import MovePad from '$lib/components/MovePad.svelte'
 	import { shooter } from '$live/demos/shooter'
 	import { apply, RANGE_W, RANGE_H, HITBOX_R, SHOT_MAX_DIST } from '../../../live/demos/shooter.shared.js'
 
@@ -70,6 +71,20 @@
 		setTimeout(() => { sparks = sparks.filter((s) => s.id !== id) }, 400)
 	}
 
+	// Immediate click receipt, separate from the shot itself: with lag on the
+	// slider the muzzle flash honestly waits for the delayed send, which
+	// leaves the click with no acknowledgment for up to 600ms - and a control
+	// that feels dead gets clicked again. The ring says "click received, send
+	// queued" at the click point the moment it happens; the flash still says
+	// "sent" when the send leaves.
+	let clickRings = $state([])
+
+	function addClickRing(x, y) {
+		const id = ++fxId
+		clickRings = [...clickRings, { id, x, y }]
+		setTimeout(() => { clickRings = clickRings.filter((r) => r.id !== id) }, 300)
+	}
+
 	// Hit events ride the channel, not state: onHit's emitEvent lands here
 	// for the shooter and the victim alike. Subscribe before any command.
 	// hitsSeen counts the event stream; the score card shows the
@@ -93,8 +108,29 @@
 		const rect = e.currentTarget.getBoundingClientRect()
 		const px = (e.clientX - rect.left) * (RANGE_W / rect.width)
 		const py = (e.clientY - rect.top) * (RANGE_H / rect.height)
+		addClickRing(px, py)
 		const angle = Math.atan2(py - view.local.y, px - view.local.x)
 		scheduleFire(angle)
+	}
+
+	// Keyboard fire path: Space/Enter shoots toward the nearest rendered
+	// target, so the demo's single success action does not require a
+	// pointing device.
+	function fireAtNearest() {
+		let best = null
+		let bestD = Infinity
+		for (const [, s] of targets) {
+			const dx = s.x - view.local.x
+			const dy = s.y - view.local.y
+			const d = dx * dx + dy * dy
+			if (d < bestD) {
+				bestD = d
+				best = s
+			}
+		}
+		if (!best) return
+		addClickRing(best.x, best.y)
+		scheduleFire(Math.atan2(best.y - view.local.y, best.x - view.local.x))
 	}
 
 	// --- Movement: held keys drained by a ~30Hz rAF-gated loop ---
@@ -112,6 +148,15 @@
 
 	function onKeydown(e) {
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+		if (e.key === ' ' || e.key === 'Enter') {
+			// Not from a button: Enter/Space there must keep activating the
+			// control (confirm dialogs, the pad), not fire a shot.
+			if (e.target instanceof HTMLButtonElement) return
+			if (e.repeat) return
+			fireAtNearest()
+			e.preventDefault()
+			return
+		}
 		const k = keyFor(e)
 		if (!k) return
 		held.add(k)
@@ -153,8 +198,8 @@
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Shooter: lag-compensated hits</h1>
 		<p class="text-sm opacity-70 mt-1">
-			Click the range to shoot. The server rewinds every candidate to the
-			instant you rendered it and tests the ray there
+			Click inside the arena to shoot. The server rewinds every candidate to
+			the instant you rendered it and tests the ray there
 			(<code>live.smooth(&#123; hitTest &#125;)</code>) - so a shot that
 			landed on your screen lands on the server. Crank the latency slider:
 			delayed sends still hit where you saw the target, because the rewind
@@ -167,7 +212,9 @@
 	     (the svg has only a viewBox), so w-full/max-w never engage; fr
 	     tracks give the arena a definite width to fill. -->
 	<div class="grid gap-4 @5xl:grid-cols-[3fr_2fr]">
-		<div class="card bg-base-200">
+		<!-- self-start: the arena card wraps its content instead of stretching
+		     to the taller column and framing the game in dead space. -->
+		<div class="card bg-base-200 self-start">
 			<div class="card-body p-3 space-y-2">
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -199,6 +246,9 @@
 						<circle cx={sp.x} cy={sp.y} r="6" class="fill-warning" opacity="0.9" />
 						<circle cx={sp.x} cy={sp.y} r="12" class="fill-none stroke-warning" stroke-width="2" opacity="0.6" />
 					{/each}
+					{#each clickRings as ring (ring.id)}
+						<circle cx={ring.x} cy={ring.y} r="10" class="fill-none stroke-info" stroke-width="1.5" opacity="0.7" data-testid="sh-click-ring" />
+					{/each}
 					<circle
 						cx={view.local.x} cy={view.local.y} r="9"
 						class="fill-primary stroke-primary-content" stroke-width="2"
@@ -206,8 +256,26 @@
 						data-x={Math.round(view.local.x)}
 						data-y={Math.round(view.local.y)}
 					/>
+					<!-- The shot ray originates at your dot, so aiming requires
+					     knowing which dot is yours before the first click; flips
+					     below the dot near the top edge so it never clips out of
+					     the viewBox. -->
+					<text
+						x={view.local.x}
+						y={view.local.y < 26 ? view.local.y + 22 : view.local.y - 14}
+						text-anchor="middle"
+						class="fill-base-content font-mono select-none pointer-events-none"
+						font-size="10"
+						opacity="0.75"
+						data-testid="sh-you-label"
+					>you</text>
 				</svg>
-				<p class="text-xs opacity-50">WASD / arrows to move, click to shoot.</p>
+				<p class="text-xs opacity-50">WASD / arrows to move; click the arena or press Space to shoot.</p>
+				<MovePad
+					idPrefix="sh-move"
+					onpress={(direction) => held.add(direction)}
+					onrelease={(direction) => held.delete(direction)}
+				/>
 			</div>
 		</div>
 
@@ -221,6 +289,9 @@
 						the shared <code>apply</code> (<code>ctx.applyTo</code>), so
 						this number is the server's answer, not a local guess.
 					</p>
+					<!-- Victims exist too: onHit damages whoever is hit, and your
+					     own hp is the visible half of that story in a shared room. -->
+					<p class="font-mono text-xs opacity-60" data-testid="sh-hp">hp: {view.local.hp ?? 3}</p>
 					<p class="font-mono text-xs opacity-60" data-testid="sh-shots">shots fired: {shotsFired}</p>
 					<p class="font-mono text-xs opacity-60" data-testid="sh-hits">hit events seen: {hitsSeen}</p>
 					{#if lastHit}
@@ -232,21 +303,32 @@
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
 					<h2 class="card-title text-sm">Extra latency: {lagMs}ms</h2>
+					<!-- The slider deliberately exceeds maxRewindMs: a cap taught
+					     only as prose is not learned. Past the mark, shots aimed at
+					     rendered targets start missing - that miss IS the cap. -->
 					<input
 						type="range"
 						class="range range-sm"
-						min="0" max="400" step="50"
+						min="0" max="600" step="50"
 						bind:value={lagMs}
 						data-testid="sh-lag"
 					/>
+					<div class="relative h-4 text-[10px] font-mono opacity-60" aria-hidden="true">
+						<span class="absolute left-0">0</span>
+						<span class="absolute -translate-x-1/2" style="left: 66.67%" data-testid="sh-lag-cap-mark">400 = cap</span>
+						<span class="absolute right-0">600</span>
+					</div>
 					<p class="text-xs opacity-60">
 						Delays your command/shoot sends with a
 						<code>setTimeout</code> wrapper. The shot fires (and the
 						muzzle flash draws) when the send actually leaves; the
 						rewind then resolves it against the scene as rendered at
-						that instant. Targets orbit slowly enough that a shot aimed
-						at a rendered target stays inside its hitbox across the
-						whole slider range.
+						that instant. Up to 400ms the rewind covers you: a shot
+						aimed at a rendered target lands. Past 400ms the server
+						stops covering for you - the rewind clamps at
+						<code>maxRewindMs</code>, the world it tests is newer than
+						the one you aimed at, and the same aimed shot starts to
+						miss. That miss is the cap doing its fairness job.
 					</p>
 				</div>
 			</div>

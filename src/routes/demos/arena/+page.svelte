@@ -14,6 +14,7 @@
 -->
 <script>
 	import { onMount } from 'svelte'
+	import MovePad from '$lib/components/MovePad.svelte'
 	import { arena, population } from '$live/demos/arena'
 	import { apply, WORLD_W, WORLD_H } from '../../../live/demos/arena.shared.js'
 
@@ -26,16 +27,6 @@
 	const INTEREST_RADIUS = 420
 	const STEP = 6
 	const PAN = 160
-
-	// Every pad button is placed explicitly. Grid sparse auto-placement leaves
-	// the cursor after the one definite-column item, so mixing `grid-column` on
-	// `up` with auto-placed siblings scatters left/down/right one cell onward.
-	const PAD_KEYS = [
-		{ dir: 'up', label: 'Move up', glyph: '↑' },
-		{ dir: 'left', label: 'Move left', glyph: '←' },
-		{ dir: 'down', label: 'Move down', glyph: '↓' },
-		{ dir: 'right', label: 'Move right', glyph: '→' }
-	]
 
 	// The client factory takes the SAME pure apply the server declared.
 	// `initial` here is the pre-sync placeholder state; the first sync
@@ -86,24 +77,6 @@
 	function onKeyup(e) {
 		const k = keyFor(e)
 		if (k) held.delete(k)
-	}
-
-	// Touch feeds the same `held` set the keyboard does, so the rAF loop below
-	// drives both identically - continuous travel while pressed, and diagonals
-	// when two buttons are held. A per-tap command would move STEP (6) units
-	// once, needing ~150 taps to cross the 900-unit viewport.
-	function pressDirection(e, direction) {
-		e.preventDefault()
-		// Capture is best-effort: it keeps the release event on the button
-		// when a finger slides off, but setPointerCapture THROWS for a
-		// pointerId with no active pointer (synthetic events, some stale
-		// cancel paths) - and a throw here would swallow the held.add below.
-		try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch { /* no active pointer */ }
-		held.add(direction)
-	}
-
-	function releaseDirection(direction) {
-		held.delete(direction)
 	}
 
 	$effect(() => {
@@ -262,21 +235,14 @@
 					{/if}
 				</div>
 				{#if !spectating}
-					<div class="arena-move-pad" role="group" aria-labelledby="arena-move-label" data-testid="arena-move-pad">
-						<span class="arena-move-label" id="arena-move-label">Touch controls</span>
-						{#each PAD_KEYS as pad (pad.dir)}
-							<button
-								type="button"
-								class="btn btn-sm btn-square arena-move-{pad.dir}"
-								aria-label={pad.label}
-								data-testid="arena-move-{pad.dir}"
-								onpointerdown={(e) => pressDirection(e, pad.dir)}
-								onpointerup={() => releaseDirection(pad.dir)}
-								onpointercancel={() => releaseDirection(pad.dir)}
-								onpointerleave={() => releaseDirection(pad.dir)}
-							>{pad.glyph}</button>
-						{/each}
-					</div>
+					<!-- Touch feeds the same `held` set the keyboard does, so the rAF
+					     loop drives both identically - continuous travel while pressed,
+					     and diagonals when two buttons are held. -->
+					<MovePad
+						idPrefix="arena-move"
+						onpress={(direction) => held.add(direction)}
+						onrelease={(direction) => held.delete(direction)}
+					/>
 				{/if}
 			</div>
 		</div>
@@ -333,46 +299,3 @@
 		</p>
 	</aside>
 </div>
-
-<style>
-	.arena-move-pad {
-		display: none;
-		grid-template-columns: repeat(3, 2.75rem);
-		gap: 0.375rem;
-		justify-content: center;
-	}
-
-	.arena-move-label {
-		grid-column: 1 / -1;
-		text-align: center;
-		font-size: 0.75rem;
-		opacity: 0.7;
-	}
-
-	/*
-	 * Every cell is placed explicitly. Placing only `up` and letting the rest
-	 * auto-flow leaves the placement cursor past the definite item, so left/
-	 * down/right each land one cell onward and the pad renders as a scrambled
-	 * cross with a hole where left belongs.
-	 */
-	.arena-move-up    { grid-area: 2 / 2; }
-	.arena-move-left  { grid-area: 3 / 1; }
-	.arena-move-down  { grid-area: 3 / 2; }
-	.arena-move-right { grid-area: 3 / 3; }
-
-	.arena-move-pad .btn {
-		width: 2.75rem;
-		height: 2.75rem;
-		min-height: 2.75rem;
-		/* A held direction must not also pan/zoom the page or fire a
-		   long-press selection while the rAF loop is driving movement. */
-		touch-action: none;
-		user-select: none;
-	}
-
-	@media (max-width: 767px), (pointer: coarse) {
-		.arena-move-pad {
-			display: grid;
-		}
-	}
-</style>
