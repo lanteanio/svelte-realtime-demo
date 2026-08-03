@@ -58,13 +58,21 @@ test.describe('/demos/ops', () => {
 		const pressureCard = await page.getByTestId('ops-pressure-reason').count()
 		if (process.env.LOCAL_E2E === '1' || process.env.CI) expect(pressureCard).toBeGreaterThan(0)
 		if (pressureCard > 0) {
-			await expect(page.getByTestId('ops-pressure-reason')).toHaveText(/^(NONE|MEMORY|PUBLISH_RATE|SUBSCRIBERS)$/)
+			// The healthy state names itself ("no pressure"); a real reason
+			// only appears while pressure is active. "NONE" used to sit
+			// beside "protection: normal" and read as "no protection".
+			await expect(page.getByTestId('ops-pressure-reason')).toHaveText(/^(no pressure|MEMORY|PUBLISH_RATE|SUBSCRIBERS|under pressure)$/)
 			const pressure = Number(await page.getByTestId('ops-pressure-value').getAttribute('value'))
 			expect(pressure).toBeGreaterThanOrEqual(0)
 			expect(pressure).toBeLessThanOrEqual(1)
 			await expect(page.getByTestId('ops-protection')).not.toHaveText('-')
 			await expect(page.getByTestId('ops-publish-rate')).toHaveText(/^\d+$/)
-			await expect(page.getByTestId('ops-memory-mb')).toHaveText(/^\d+$/)
+			// A reading or an honest blank - never a fabricated zero. If the
+			// adapter reports RSS at all it is a live process, so a plain 0
+			// would itself be the bug this assertion exists to catch.
+			const rss = (await page.getByTestId('ops-memory-mb').textContent())?.trim()
+			expect(rss, 'RSS must be a real reading or an explicit no-reading dash').toMatch(/^(\d+|-)$/)
+			if (rss !== '-') expect(Number(rss), 'a reported RSS cannot be 0 MB for a live process').toBeGreaterThan(0)
 		} else {
 			await expect(page.getByTestId('ops-pressure-missing')).toBeVisible()
 		}
@@ -74,6 +82,14 @@ test.describe('/demos/ops', () => {
 		await expectDlqConsistent(page)
 		await expect(page.getByTestId('ops-curl')).toContainText('Authorization: Bearer $ADMIN_TOKEN')
 		await expect(page.getByTestId('ops-curl')).toContainText('/__realtime/introspect')
+		// The clipped one-liner is reachable without horizontal scrolling.
+		await expect(page.getByTestId('ops-curl-copy')).toBeVisible()
+		await expect(page.getByTestId('ops-curl-hint')).toContainText('scrolls sideways')
+		// Machinery values keep their own column, so a narrow card can no
+		// longer wrap a label's tail into the previous row's value.
+		const machineryColumns = await page.getByTestId('ops-machinery-rows').locator('li').first()
+			.evaluate((li) => getComputedStyle(li).gridTemplateColumns.split(' ').length)
+		expect(machineryColumns).toBe(2)
 		await expect(page.getByTestId('ops-error')).toHaveCount(0)
 		expect(errors).toHaveLength(0)
 	})

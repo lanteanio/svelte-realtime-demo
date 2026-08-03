@@ -13,6 +13,7 @@
 -->
 <script>
 	import { snapshot, dlqSummary } from '$live/demos/ops'
+	import { NO_READING, reading, rssReading, statReading } from '$lib/ops-readings'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -73,6 +74,32 @@
 		return ts ? new Date(ts).toLocaleTimeString() : '-'
 	}
 
+	// Reading rules live in $lib/ops-readings so they can be unit-tested:
+	// the pre-sample window that makes the RSS rule necessary is not
+	// reachable from a browser test against a warm server.
+	const stat = statReading
+	const count = reading
+	const rss = $derived(rssReading(pressure?.memoryMB))
+
+	let copied = $state(false)
+	let copyTimer = null
+	const CURL = 'curl -H "Authorization: Bearer $ADMIN_TOKEN" https://your-host/__realtime/introspect'
+
+	async function copyCurl() {
+		try {
+			await navigator.clipboard.writeText(CURL)
+			copied = true
+			clearTimeout(copyTimer)
+			copyTimer = setTimeout(() => { copied = false }, 2000)
+		} catch {
+			// Clipboard access can be denied outright; say so rather than
+			// showing a success state for something that did not happen.
+			copied = false
+		}
+	}
+
+	$effect(() => () => clearTimeout(copyTimer))
+
 	// Match the cluster-cron page: the instanceId is a 16-hex string; show
 	// the first 8 so the same worker reads the same in both demos.
 	function shortId(id) {
@@ -124,19 +151,19 @@
 			<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-xs mt-1">
 				<div>
 					<dt class="opacity-60">connections</dt>
-					<dd class="font-bold tabular-nums text-lg" data-testid="ops-connections">{snap?.transport?.connections ?? 0}</dd>
+					<dd class="font-bold tabular-nums text-lg" data-testid="ops-connections">{count(snap?.transport?.connections)}</dd>
 				</div>
 				<div>
 					<dt class="opacity-60">in flight</dt>
-					<dd class="font-bold tabular-nums text-lg" data-testid="ops-inflight">{snap?.inFlight ?? 0}</dd>
+					<dd class="font-bold tabular-nums text-lg" data-testid="ops-inflight">{count(snap?.inFlight)}</dd>
 				</div>
 				<div>
 					<dt class="opacity-60">active topics</dt>
-					<dd class="font-bold tabular-nums text-lg" data-testid="ops-topics-active">{snap?.topics?.active ?? 0}</dd>
+					<dd class="font-bold tabular-nums text-lg" data-testid="ops-topics-active">{count(snap?.topics?.active)}</dd>
 				</div>
 				<div>
 					<dt class="opacity-60">subscribers</dt>
-					<dd class="font-bold tabular-nums text-lg" data-testid="ops-topics-subscribers">{snap?.topics?.subscribers ?? 0}</dd>
+					<dd class="font-bold tabular-nums text-lg" data-testid="ops-topics-subscribers">{count(snap?.topics?.subscribers)}</dd>
 				</div>
 			</dl>
 			{#if replica}
@@ -167,12 +194,12 @@
 		<section class="card bg-base-100 border border-base-300" data-testid="ops-handlers-card">
 			<div class="card-body py-3 space-y-1">
 				<h2 class="card-title text-sm">
-					Handlers <span class="font-normal">(<span data-testid="ops-handlers-total">{snap?.handlers?.total ?? 0}</span>)</span>
+					Handlers <span class="font-normal">(<span data-testid="ops-handlers-total">{count(snap?.handlers?.total)}</span>)</span>
 				</h2>
 				{#if byKind}
 					<ul class="text-xs font-mono space-y-0.5" data-testid="ops-handlers-kinds">
 						{#each Object.entries(byKind) as [kind, count] (kind)}
-							<li class="flex justify-between">
+							<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 								<span class="opacity-60">{kind}</span>
 								<span class="tabular-nums">{count}</span>
 							</li>
@@ -194,30 +221,35 @@
 		<section class="card bg-base-100 border border-base-300" data-testid="ops-machinery-card">
 			<div class="card-body py-3 space-y-1">
 				<h2 class="card-title text-sm">Background machinery</h2>
-				<ul class="text-xs font-mono space-y-0.5">
-					<li class="flex justify-between">
+				<!-- Two real columns, not a justified flex row: when the card
+				     narrowed, both sides wrapped independently and a label's
+				     tail ended up beside the previous row's value. A grid
+				     keeps every value in its own column, and the values stay
+				     on one line so a wrap can never interleave them. -->
+				<ul class="text-xs font-mono space-y-0.5" data-testid="ops-machinery-rows">
+					<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 						<span class="opacity-60">push users / sessions</span>
-						<span class="tabular-nums"><span data-testid="ops-push-users">{snap?.push?.users ?? 0}</span> / <span data-testid="ops-push-sessions">{snap?.push?.sessions ?? 0}</span></span>
+						<span class="tabular-nums whitespace-nowrap"><span data-testid="ops-push-users">{count(snap?.push?.users)}</span> / <span data-testid="ops-push-sessions">{count(snap?.push?.sessions)}</span></span>
 					</li>
-					<li class="flex justify-between">
+					<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 						<span class="opacity-60">cron jobs (running)</span>
-						<span class="tabular-nums" data-testid="ops-cron">{snap?.cron?.jobs ?? 0} ({snap?.cron?.running ?? 0})</span>
+						<span class="tabular-nums whitespace-nowrap" data-testid="ops-cron">{count(snap?.cron?.jobs)} ({count(snap?.cron?.running)})</span>
 					</li>
-					<li class="flex justify-between">
+					<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 						<span class="opacity-60">derived / effect / aggregate</span>
-						<span class="tabular-nums" data-testid="ops-reactive">{snap?.reactive?.derived ?? 0} / {snap?.reactive?.effect ?? 0} / {snap?.reactive?.aggregate ?? 0}</span>
+						<span class="tabular-nums whitespace-nowrap" data-testid="ops-reactive">{count(snap?.reactive?.derived)} / {count(snap?.reactive?.effect)} / {count(snap?.reactive?.aggregate)}</span>
 					</li>
-					<li class="flex justify-between">
+					<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 						<span class="opacity-60">watched topics</span>
-						<span class="tabular-nums" data-testid="ops-watched-topics">{snap?.reactive?.watchedTopics ?? 0}</span>
+						<span class="tabular-nums whitespace-nowrap" data-testid="ops-watched-topics">{count(snap?.reactive?.watchedTopics)}</span>
 					</li>
-					<li class="flex justify-between">
+					<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 						<span class="opacity-60">rate-limit buckets</span>
-						<span class="tabular-nums" data-testid="ops-rate-buckets">{snap?.capacity?.rateLimitBuckets ?? 0}</span>
+						<span class="tabular-nums whitespace-nowrap" data-testid="ops-rate-buckets">{count(snap?.capacity?.rateLimitBuckets)}</span>
 					</li>
-					<li class="flex justify-between">
+					<li class="grid grid-cols-[1fr_auto] gap-x-3 items-baseline">
 						<span class="opacity-60">metrics / admission wired</span>
-						<span class="tabular-nums" data-testid="ops-wired">{snap?.metrics ? 'yes' : 'no'} / {snap?.admission ? 'yes' : 'no'}</span>
+						<span class="tabular-nums whitespace-nowrap" data-testid="ops-wired">{snap ? (snap.metrics ? 'yes' : 'no') : NO_READING} / {snap ? (snap.admission ? 'yes' : 'no') : NO_READING}</span>
 					</li>
 				</ul>
 			</div>
@@ -230,10 +262,14 @@
 			<h2 class="card-title text-sm">Admission posture (transport)</h2>
 			{#if pressure}
 				<div class="flex items-center gap-3">
+					<!-- The healthy state used to read "NONE" beside
+					     "protection: normal", which binds to protection and
+					     says the opposite of what it means. Name the state
+					     itself instead of the absent reason field. -->
 					<span
 						class="badge {pressure.active ? 'badge-warning' : 'badge-success'}"
 						data-testid="ops-pressure-reason"
-					>{pressure.reason ?? 'NONE'}</span>
+					>{pressure.active ? (pressure.reason ?? 'under pressure') : 'no pressure'}</span>
 					<progress
 						class="progress progress-warning w-32"
 						value={pressure.value ?? 0}
@@ -242,41 +278,44 @@
 						title="composite pressure scalar (0..1)"
 					></progress>
 					<span class="text-xs opacity-60">
-						protection: <span class="font-mono" data-testid="ops-protection">{snap?.transport?.protection ?? '-'}</span>
+						protection: <span class="font-mono" data-testid="ops-protection">{snap?.transport?.protection ?? NO_READING}</span>
 					</span>
 				</div>
-				<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-2 text-xs">
+				<!-- Units live in the labels, so every value is a bare number
+				     of the same shape and the four stats keep one baseline
+				     even where the column is narrow. -->
+				<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-2 text-xs items-baseline">
 					<div>
 						<dt class="opacity-60">publish/s</dt>
-						<dd class="font-bold tabular-nums" data-testid="ops-publish-rate">{(pressure.publishRate ?? 0).toFixed(0)}</dd>
+						<dd class="font-bold tabular-nums" data-testid="ops-publish-rate">{stat(pressure.publishRate)}</dd>
 					</div>
 					<div>
 						<dt class="opacity-60">RSS MB</dt>
-						<dd class="font-bold tabular-nums" data-testid="ops-memory-mb">{(pressure.memoryMB ?? 0).toFixed(0)}</dd>
+						<dd class="font-bold tabular-nums" data-testid="ops-memory-mb">{rss}</dd>
 					</div>
 					{#if pressure.backpressuredConnections != null}
 						<div>
 							<dt class="opacity-60">backpressured</dt>
-							<dd class="font-bold tabular-nums" data-testid="ops-backpressured">{pressure.backpressuredConnections}</dd>
+							<dd class="font-bold tabular-nums" data-testid="ops-backpressured">{count(pressure.backpressuredConnections)}</dd>
 						</div>
 					{/if}
 					{#if pressure.maxBufferedBytes != null}
 						<div>
-							<dt class="opacity-60">max buffered</dt>
-							<dd class="font-bold tabular-nums" data-testid="ops-max-buffered">{((pressure.maxBufferedBytes ?? 0) / 1024).toFixed(0)}KB</dd>
+							<dt class="opacity-60">max buffered KB</dt>
+							<dd class="font-bold tabular-nums" data-testid="ops-max-buffered">{stat(pressure.maxBufferedBytes / 1024)}</dd>
 						</div>
 					{/if}
 					<!-- Linux-only kernel signals; absent off-Linux and in dev. -->
 					{#if pressure.psi != null}
 						<div>
-							<dt class="opacity-60">PSI cpu-some</dt>
-							<dd class="font-bold tabular-nums" data-testid="ops-psi">{(pressure.psi.cpuSome10 ?? 0).toFixed(1)}%</dd>
+							<dt class="opacity-60">PSI cpu-some %</dt>
+							<dd class="font-bold tabular-nums" data-testid="ops-psi">{stat(pressure.psi.cpuSome10, 1)}</dd>
 						</div>
 					{/if}
 					{#if pressure.cpuThrottle != null}
 						<div>
-							<dt class="opacity-60">CFS throttled</dt>
-							<dd class="font-bold tabular-nums" data-testid="ops-cpu-throttle">{((pressure.cpuThrottle.throttledRatio ?? 0) * 100).toFixed(0)}%</dd>
+							<dt class="opacity-60">CFS throttled %</dt>
+							<dd class="font-bold tabular-nums" data-testid="ops-cpu-throttle">{stat(typeof pressure.cpuThrottle.throttledRatio === 'number' ? pressure.cpuThrottle.throttledRatio * 100 : undefined)}</dd>
 						</div>
 					{/if}
 				</dl>
@@ -292,7 +331,7 @@
 	<section class="card bg-base-100 border border-base-300" data-testid="ops-dlq-card">
 		<div class="card-body py-3 space-y-1">
 			<h2 class="card-title text-sm">
-				Outbound-webhook DLQ <span class="font-normal">(<span data-testid="ops-dlq-total">{dlq?.total ?? 0}</span>)</span>
+				Outbound-webhook DLQ <span class="font-normal">(<span data-testid="ops-dlq-total">{count(dlq?.total)}</span>)</span>
 			</h2>
 			{#if dlq === null}
 				<p class="text-xs opacity-40" data-testid="ops-dlq-off">No dead-letter store configured.</p>
@@ -340,7 +379,23 @@
 				data is gathered; no token configured means nothing is ever
 				admitted.
 			</p>
-			<pre class="text-xs bg-base-300 rounded p-2 overflow-x-auto" data-testid="ops-curl"><code>curl -H "Authorization: Bearer $ADMIN_TOKEN" https://your-host/__realtime/introspect</code></pre>
+			<!-- The one actionable artifact on the card was clipped mid-token
+			     on phones with nothing signalling the rest existed. Copy makes
+			     the whole line reachable without scrolling at all, and the
+			     hint says the rest is there. -->
+			<div class="flex items-start gap-2">
+				<pre class="text-xs bg-base-300 rounded p-2 overflow-x-auto flex-1 min-w-0" data-testid="ops-curl"><code>{CURL}</code></pre>
+				<button
+					class="btn btn-sm btn-outline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+					onclick={copyCurl}
+					data-testid="ops-curl-copy"
+				>
+					{copied ? 'Copied' : 'Copy'}
+				</button>
+			</div>
+			<p class="text-xs opacity-70" data-testid="ops-curl-hint">
+				The line scrolls sideways on narrow screens - Copy takes the whole command.
+			</p>
 		</div>
 	</section>
 
