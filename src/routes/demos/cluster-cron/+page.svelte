@@ -3,7 +3,7 @@
 
 	Two prod servers, same Redis: one of them holds the cluster lease,
 	the other waits. The 1Hz live.cron registered in $live/demos/cluster-cron
-	is gated cluster-wide by live.configureCron({ leader }) so only the
+	is gated cluster-wide by configureCron({ leader }) so only the
 	leader fires per second. The recent-tick log shows which instanceId
 	owns the lease at any moment; if the leader's process exits, the lease
 	expires within the renew window (10s) and a sibling takes over - the
@@ -44,6 +44,14 @@
 
 	const currentLeaderId = $derived(latestTick?.instanceId ?? null)
 
+	// Leader status stays live: once ticks flow, whoever owns the newest tick
+	// is the leader, so a takeover flips this badge for the rest of the
+	// session instead of freezing the mount-time answer. The RPC snapshot
+	// only covers the window before the first tick arrives.
+	const selfIsLeader = $derived(
+		currentLeaderId ? currentLeaderId === myInstanceId : isLeaderNow
+	)
+
 	const seenInstanceIds = $derived.by(() => {
 		const seen = new Set()
 		for (const t of ticks) if (t?.instanceId) seen.add(t.instanceId)
@@ -55,7 +63,17 @@
 		if (!ts) return ''
 		const d = new Date(ts)
 		if (Number.isNaN(d.getTime())) return ''
-		return d.toLocaleTimeString()
+		// The tick log renders times into a fixed 80px column. A bare
+		// toLocaleTimeString() is 8 chars in 24h locales but "9:56:31 PM" in
+		// 12-hour ones, which overflows the column; forcing two-digit h23
+		// fields keeps the visitor's separator while bounding every locale's
+		// output to the column's capacity.
+		return d.toLocaleTimeString(undefined, {
+			hourCycle: 'h23',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		})
 	}
 
 	function shortId(id) {
@@ -70,7 +88,7 @@
 		<h1 class="text-2xl font-bold mt-2">Cluster cron: one leader, one tick</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Redis-backed leader election visualised. <code>createLeader</code> elects exactly one worker
-			across the cluster; <code>live.configureCron(&#123; leader &#125;)</code> gates every cron tick
+			across the cluster; <code>configureCron(&#123; leader &#125;)</code> gates every cron tick
 			on the lease so a 1Hz <code>live.cron</code> fires once per second cluster-wide instead of
 			once per worker.
 		</p>
@@ -85,12 +103,15 @@
 				</div>
 				<div>
 					<div class="text-xs opacity-60">Lease key</div>
-					<div class="font-mono text-xs opacity-80" data-testid="lease-key">{leaseKey || '...'}</div>
+					<!-- Quoted so the key's literal value reads as data, not as a
+					     third "leader" status field next to the badge and the
+					     "Current cron leader" cell. -->
+					<div class="font-mono text-xs opacity-80" data-testid="lease-key">{leaseKey ? `'${leaseKey}'` : '...'}</div>
 				</div>
 				<div>
-					<div class="text-xs opacity-60">Initial leader status</div>
+					<div class="text-xs opacity-60">Leader status</div>
 					<div data-testid="self-leader-status">
-						{#if isLeaderNow}
+						{#if selfIsLeader}
 							<span class="badge badge-primary" data-testid="self-leader-badge">leader</span>
 						{:else}
 							<span class="badge badge-ghost">follower</span>
@@ -99,8 +120,11 @@
 				</div>
 				<div>
 					<div class="text-xs opacity-60">Current cron leader</div>
-					<div class="font-mono text-sm" data-testid="current-leader-id">
-						{currentLeaderId ? shortId(currentLeaderId) : '...'}
+					<div class="flex items-center gap-2">
+						<span class="font-mono text-sm" data-testid="current-leader-id">{currentLeaderId ? shortId(currentLeaderId) : '...'}</span>
+						{#if currentLeaderId && currentLeaderId === myInstanceId}
+							<span class="badge badge-xs badge-primary" data-testid="current-leader-self">this instance</span>
+						{/if}
 					</div>
 				</div>
 			</div>
@@ -119,6 +143,11 @@
 						Waiting for the first cron tick...
 					</p>
 				{:else}
+					<!-- Ownership is encoded once by the badge hue; saying it again in
+					     words on every row repeated one bit thirty times and was the
+					     exact label that clipped at 320px. The mapping is stated once
+					     in the legend below instead. -->
+					<p class="text-xs opacity-60" data-testid="tick-legend">Highlighted badge = this instance.</p>
 					<ul class="space-y-1 max-h-96 overflow-y-auto pr-1" data-testid="cluster-cron-ticks-list">
 						{#each sortedTicks as tick (tick.id)}
 							<li
@@ -131,9 +160,6 @@
 								<span class="badge badge-sm" class:badge-primary={tick.instanceId === myInstanceId} class:badge-ghost={tick.instanceId !== myInstanceId} data-testid="tick-instance-id">
 									{shortId(tick.instanceId)}
 								</span>
-								{#if tick.instanceId === myInstanceId}
-									<span class="text-xs opacity-50">(this instance)</span>
-								{/if}
 							</li>
 						{/each}
 					</ul>
@@ -166,7 +192,28 @@
 		</div>
 	</div>
 
-	<div class="card bg-warning/10 border border-warning/40" data-testid="cluster-cron-instructions">
+	<div class="card bg-base-100 border border-base-300" data-testid="cluster-cron-usage">
+		<div class="card-body py-3 space-y-2 text-xs">
+			<h2 class="card-title text-sm">The wiring</h2>
+			<pre class="bg-base-300 p-2 rounded text-xs overflow-x-auto"><code>import &#123; createLeader &#125; from 'svelte-adapter-uws-extensions/redis/leader'
+import &#123; live, configureCron &#125; from 'svelte-realtime/server'
+
+const leader = createLeader(redis)
+configureCron(&#123; leader: () => leader.isLeader() &#125;)
+
+live.cron('* * * * * *', topic, async (ctx) => &#123;
+  // fires once per second on the elected leader, cluster-wide
+&#125;)</code></pre>
+			<p class="opacity-80 leading-snug">
+				That is the whole surface: one lease, one gate, and every <code>live.cron</code> in the
+				app becomes a cluster singleton. This page's tick handler is registered exactly this way.
+			</p>
+		</div>
+	</div>
+
+	<!-- A recipe, not a warning: base-toned so the live tick log stays the
+	     strongest center on the page. -->
+	<div class="card bg-base-200 border border-base-300" data-testid="cluster-cron-instructions">
 		<div class="card-body py-3 space-y-2 text-xs">
 			<h2 class="card-title text-sm">See the takeover</h2>
 			<p class="opacity-80 leading-snug">
@@ -190,6 +237,10 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5434/stickynotes \
 				<code>leader_renewals_total</code>, <code>leader_lost_total</code>, and
 				<code>svelte_realtime_cron_total&#123;status&#125;</code>. Scrape both servers during the
 				takeover window and the counters tell the same story the page shows.
+			</p>
+			<p class="text-sm leading-snug">
+				For durable work on the same lease, see
+				<a href="/demos/jobs" class="link" data-testid="jobs-pointer">the durable jobs demo</a>.
 			</p>
 		</div>
 	</div>

@@ -59,6 +59,7 @@ test.describe('/demos/cluster-cron', () => {
 			'cluster-cron-self-panel',
 			'cluster-cron-ticks',
 			'cluster-cron-instances',
+			'cluster-cron-usage',
 			'cluster-cron-instructions'
 		]) {
 			await expect(page.getByTestId(id)).toBeVisible()
@@ -66,6 +67,10 @@ test.describe('/demos/cluster-cron', () => {
 
 		await expect(page.getByTestId('lease-key')).not.toHaveText('...')
 		await expect(page.getByTestId('lease-key')).toContainText('leader')
+		// The usage panel must show the application-side wiring, not just name it.
+		await expect(page.getByTestId('cluster-cron-usage')).toContainText('createLeader')
+		await expect(page.getByTestId('cluster-cron-usage')).toContainText('configureCron')
+		await expect(page.getByTestId('cluster-cron-usage')).toContainText('live.cron')
 		await expect(page.getByTestId('self-leader-status')).toHaveText(/leader|follower/)
 		await expect(page.getByText(`cap ${TICK_CAP}`, { exact: true })).toBeVisible()
 		await expect(page.getByTestId('cluster-cron-instructions')).toContainText('leader_acquired_total')
@@ -82,6 +87,12 @@ test.describe('/demos/cluster-cron', () => {
 		const latestLeader = await rows.first().getAttribute('data-instance-id')
 		expect(latestLeader).toMatch(/^[0-9a-f]{16}$/)
 		await expect(page.getByTestId('current-leader-id')).toHaveText(`${latestLeader.slice(0, 8)}...`)
+		// Single instance: the leader is necessarily this worker, so the cell
+		// must say so itself rather than leaving the visitor to prefix-match
+		// hex ids across two cells.
+		await expect(page.getByTestId('current-leader-self')).toBeVisible()
+		// Ownership legend is stated once above the log, not on every row.
+		await expect(page.getByTestId('tick-legend')).toBeVisible()
 		await expect(page.getByTestId('tick-time').first()).not.toHaveText('')
 		await expect(page.getByTestId('tick-instance-id').first()).toHaveText(`${latestLeader.slice(0, 8)}...`)
 
@@ -131,6 +142,20 @@ test.describe('/demos/cluster-cron', () => {
 			expect(body).toMatch(new RegExp(`^# (HELP|TYPE) ${metric}\\b`, 'm'))
 		}
 		expect(metricSum(body, 'leader_acquired_total')).toBeGreaterThan(0)
+	})
+
+	test.describe('tick time format', () => {
+		// en-US is the locale whose bare toLocaleTimeString() renders
+		// "9:56:31 PM" - three characters past the log's fixed 80px column.
+		// The formatter pins two-digit h23 fields, so even here every tick
+		// time must stay at the column's 8-character capacity.
+		test.use({ locale: 'en-US' })
+
+		test('tick times hold the fixed column width in a 12-hour locale', async ({ page }) => {
+			await openClusterCron(page)
+			await expect(page.getByTestId('cluster-cron-tick-row').first()).toBeVisible({ timeout: 10_000 })
+			await expect(page.getByTestId('tick-time').first()).toHaveText(/^\d{2}:\d{2}:\d{2}$/)
+		})
 	})
 
 	test('recent history reaches and stays at the hard 30-row cap with continuous unique sequences', async ({ page }) => {

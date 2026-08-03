@@ -270,7 +270,7 @@ export const registry = {
  *
  * One worker across the cluster holds the Redis lease at any moment;
  * the synchronous `isLeader()` getter is microsecond-cost. Plugged
- * into realtime via `live.configureCron({ leader: () => leader.isLeader() })`
+ * into realtime via `configureCron({ leader: () => leader.isLeader() })`
  * in hooks.ws.js so cron schedules fire once cluster-wide instead of
  * once-per-worker.
  *

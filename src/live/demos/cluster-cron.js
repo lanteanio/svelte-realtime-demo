@@ -3,7 +3,7 @@
  * /demos/cluster-cron - Redis-backed leader election visualised end-to-end.
  *
  * The pitch: run two prod servers against the same Redis. Both register
- * the same 1Hz live.cron, but `live.configureCron({ leader })` (wired in
+ * the same 1Hz live.cron, but `configureCron({ leader })` (wired in
  * src/hooks.ws.js init) gates each tick on the cluster-wide lease. Only
  * the leader fires; the non-leader skips with a `cron{status:'not-leader'}`
  * metric increment. Stop the leader's process (Ctrl-C); the lease
@@ -19,7 +19,7 @@
  *    suitable for calling at the top of every cron tick. Wired once
  *    in src/lib/server/redis.js; this demo just consumes the export.
  *
- *  - live.configureCron({ leader }) - realtime wiring that gates every
+ *  - configureCron({ leader }) - realtime wiring that gates every
  *    cron schedule in the app on the leader getter. Single-instance
  *    dev: this worker is always the leader so behaviour is identical
  *    to no-leader-config. Multi-worker: only the leader fires; a
