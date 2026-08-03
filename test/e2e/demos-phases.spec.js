@@ -27,9 +27,16 @@ test.describe('/demos/phases', () => {
 		)
 		await expect(page.getByTestId('ph-attach-error')).toHaveCount(0)
 		await expect(page.getByTestId('ph-batch-error')).toHaveCount(0)
-		const count = Number(await page.getByTestId('ph-feed-count').textContent())
-		expect(count).toBe(await page.getByTestId('ph-feed-row').count())
-		expect(count).toBeLessThanOrEqual(10)
+		// The count line only exists once it says something the empty
+		// state does not already say.
+		const rows = await page.getByTestId('ph-feed-row').count()
+		if (rows === 0) {
+			await expect(page.getByTestId('ph-feed-empty')).toBeVisible()
+			await expect(page.getByTestId('ph-feed-count')).toHaveCount(0)
+		} else {
+			expect(Number(await page.getByTestId('ph-feed-count').textContent())).toBe(rows)
+		}
+		expect(rows).toBeLessThanOrEqual(10)
 	})
 
 	test('detach hides and releases the feed, while attach reloads work published during detachment', async ({ page }) => {
@@ -61,11 +68,15 @@ test.describe('/demos/phases', () => {
 		await expect(page.getByTestId('ph-publish-fail')).toBeEnabled()
 	})
 
-	test('Fail midway surfaces validation, publishes nothing, and clears on the next successful action', async ({ page }) => {
+	test('Fail midway surfaces validation, states the retraction, publishes nothing, and clears on the next successful action', async ({ page }) => {
 		await openPhases(page)
 		const before = await feedRows(page)
 		await page.getByTestId('ph-publish-fail').click()
 		await expect(page.getByTestId('ph-batch-error')).toContainText('VALIDATION: midway failure - nothing above was published')
+		// The proof used to rest on a number not moving; now the page
+		// says outright that a buffered publish existed and was dropped.
+		await expect(page.getByTestId('ph-retraction')).toContainText('was already buffered')
+		await expect(page.getByTestId('ph-retraction')).toContainText(`still shows ${before.length} ${before.length === 1 ? 'entry' : 'entries'}`)
 		await page.waitForTimeout(1_500)
 		expect(await feedRows(page)).toEqual(before)
 		await expect(page.getByTestId('ph-last-pair')).toHaveCount(0)
@@ -73,6 +84,36 @@ test.describe('/demos/phases', () => {
 
 		const ids = await publishPair(page)
 		await expect(page.getByTestId('ph-batch-error')).toHaveCount(0)
+		await expect(page.getByTestId('ph-retraction')).toHaveCount(0)
 		await waitForPair(page, ids)
+		expect(Number(await page.getByTestId('ph-feed-count').textContent())).toBeGreaterThan(0)
+	})
+
+	test('the transition log records every hop, including the ones the badge is too fast to show', async ({ page }) => {
+		await openPhases(page)
+		const logText = () => page.getByTestId('ph-transition-row').allTextContents()
+		// The auto-attach happened before any human could watch the badge,
+		// and the log still has the whole chain.
+		await expect.poll(logText).toEqual([
+			expect.stringContaining('initialized -> attaching'),
+			expect.stringContaining('attaching -> attached')
+		])
+		await detach(page)
+		// Observed store truth: detach hops through initialized on its way
+		// to detached (attached -> initialized -> detached), an edge the
+		// header's summary chain does not document. The log records what
+		// the store emits, so the assertion pins the emitted truth.
+		await expect.poll(async () => (await logText()).at(-1)).toContain('-> detached')
+		await attach(page)
+		await expect.poll(async () => (await logText()).at(-1)).toContain('attaching -> attached')
+	})
+
+	test('the lifecycle card invites the drill, dresses Detach as a button, and glosses resume-grace', async ({ page }) => {
+		await openPhases(page)
+		await expect(page.getByTestId('ph-detach')).toHaveClass(/btn-outline/)
+		const copy = page.getByTestId('ph-lifecycle-copy')
+		await expect(copy).toContainText('This page attached for you on load')
+		await expect(copy).toContainText('the log above')
+		await expect(copy.getByRole('link', { name: /counter-resume/ })).toHaveAttribute('href', '/demos/counter-resume')
 	})
 })

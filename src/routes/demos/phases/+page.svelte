@@ -26,6 +26,7 @@
 	let entries = $state(/** @type {Array<{ id: string, label: string, half: number, at: number }>} */ ([]))
 	let attachError = $state('')
 	let batchError = $state('')
+	let retractedAt = $state(/** @type {number | null} */ (null))
 	let lastPair = $state(/** @type {{ first: string, second: string } | null} */ (null))
 	let publishing = $state(false)
 
@@ -56,7 +57,8 @@
 			await feed.attach()
 			subscribeValues()
 		} catch (err) {
-			attachError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			const raw = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			attachError = `Attach failed - ${raw}. Try Attach again.`
 		}
 	}
 
@@ -68,11 +70,29 @@
 		entries = []
 	}
 
+	// Every hop of the attach machine, timestamped. The machine moves
+	// faster than the badge can show - attach resolves on the loader
+	// response - so the log is the only place initialized and attaching
+	// are actually observable. Capped to the last handful.
+	let transitions = $state(/** @type {Array<{ id: number, from: string, to: string, at: number }>} */ ([]))
+	let transitionSeq = 0
+
 	onMount(() => {
+		// Subscribe BEFORE the auto-attach: that is what puts
+		// initialized -> attaching -> attached on the record for every
+		// page load instead of only the hops a visitor triggers by hand.
+		let lastPhase = null
+		const offPhase = phase.subscribe((p) => {
+			if (lastPhase !== null && p !== lastPhase) {
+				transitions = [...transitions.slice(-5), { id: transitionSeq++, from: lastPhase, to: p, at: Date.now() }]
+			}
+			lastPhase = p
+		})
 		handleAttach()
 		return () => {
 			// detach() rather than a bare unsubscribe: the attach() retain
 			// would otherwise hold the subscription open after navigation.
+			offPhase()
 			unsubscribeValues()
 			feed.detach()
 		}
@@ -85,8 +105,13 @@
 		try {
 			const result = await postTwo(failMidway)
 			lastPair = { first: result?.first?.id ?? '', second: result?.second?.id ?? '' }
+			retractedAt = null
 		} catch (err) {
 			batchError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			// The deliberate failure is the proof moment: record the count
+			// the feed held when the batch threw, so the retraction is
+			// stated instead of resting on a number that did not move.
+			retractedAt = failMidway ? entries.length : null
 		} finally {
 			publishing = false
 		}
@@ -139,11 +164,19 @@
 					<button class="btn btn-sm btn-primary" onclick={handleAttach} disabled={$phase === 'attached' || $phase === 'attaching'} data-testid="ph-attach">
 						Attach
 					</button>
-					<button class="btn btn-sm btn-ghost" onclick={handleDetach} disabled={$phase === 'detached'} data-testid="ph-detach">
+					<button class="btn btn-sm btn-outline" onclick={handleDetach} disabled={$phase === 'detached'} data-testid="ph-detach">
 						Detach
 					</button>
 				</div>
 			</div>
+
+			{#if transitions.length > 0}
+				<ol class="text-xs font-mono opacity-70 space-y-0.5" data-testid="ph-transitions">
+					{#each transitions as t (t.id)}
+						<li data-testid="ph-transition-row">{fmtTs(t.at)} {t.from} -&gt; {t.to}</li>
+					{/each}
+				</ol>
+			{/if}
 
 			{#if $phase === 'attached'}
 				<ul class="text-xs font-mono space-y-1 min-h-[6rem]" data-testid="ph-feed">
@@ -158,9 +191,11 @@
 						<li class="opacity-40 text-center py-4" data-testid="ph-feed-empty">Feed is empty. Publish a pair below.</li>
 					{/each}
 				</ul>
-				<p class="text-xs opacity-60">
-					<span data-testid="ph-feed-count">{entries.length}</span> entries visible.
-				</p>
+				{#if entries.length > 0}
+					<p class="text-xs opacity-60">
+						<span data-testid="ph-feed-count">{entries.length}</span> entries visible.
+					</p>
+				{/if}
 			{:else}
 				<p class="text-xs opacity-40 min-h-[6rem] flex items-center justify-center" data-testid="ph-feed-hidden">
 					Feed hidden - the subscription is {$phase}. Attach to render it.
@@ -170,14 +205,20 @@
 			{#if attachError}
 				<p class="text-xs text-error" data-testid="ph-attach-error">{attachError}</p>
 			{/if}
-			<p class="text-xs opacity-60">
-				<code>attach()</code> holds an internal retain: the stream
-				stays subscribed with <em>no</em> UI subscriber and reattaches
-				itself across outages (watch the badge cycle
-				<code>attaching -&gt; attached</code> after a reconnect).
-				<code>detach()</code> is "done" - it releases the retain and
-				tears the subscription down immediately, skipping the
-				resume-grace window a normal component unmount gets.
+			<p class="text-xs opacity-60" data-testid="ph-lifecycle-copy">
+				This page attached for you on load. Press <strong>Detach</strong>,
+				then <strong>Attach</strong> - every hop the machine takes lands
+				in the log above, including the <code>attaching</code> that
+				usually resolves too fast to catch on the badge.
+				<code>attach()</code> holds an internal retain: the stream stays
+				subscribed with <em>no</em> UI subscriber and reattaches itself
+				across outages; <code>failed</code> is the hop you get when the
+				server refuses the attach. <code>detach()</code> is "done" - it
+				releases the retain and tears the subscription down immediately,
+				skipping the resume-grace window a normal component unmount gets
+				(the short hold that lets a quick remount resume the same
+				subscription - <a class="link" href="/demos/counter-resume">see
+				it in the counter-resume demo</a>).
 			</p>
 		</div>
 	</section>
@@ -202,6 +243,13 @@
 			</div>
 			{#if batchError}
 				<p class="text-xs text-error" data-testid="ph-batch-error">{batchError}</p>
+			{/if}
+			{#if batchError && retractedAt !== null}
+				<p class="text-xs opacity-70" data-testid="ph-retraction">
+					The first publish was already buffered when the throw hit -
+					the batch retracted it, so the feed above still shows
+					{retractedAt} {retractedAt === 1 ? 'entry' : 'entries'}.
+				</p>
 			{/if}
 			<p class="text-xs opacity-60">
 				Both buttons run the same handler:
