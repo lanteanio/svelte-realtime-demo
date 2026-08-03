@@ -8,13 +8,15 @@ test.describe.configure({ mode: 'serial' })
  * wide as the viewport, so a rung's px value is NOT the viewport width it
  * engages at:
  *
- *   viewport < 1024  ->  container = viewport - 15   (scrollbar gutter)
- *   viewport >= 1024 ->  container = viewport - 223  (13rem sidebar + scrollbar)
+ *   viewport < 1024  ->  container = viewport - scrollbar gutter
+ *   viewport >= 1024 ->  container = viewport - scrollbar gutter - 13rem sidebar
  *
- * That is why a container rung must never be set to the viewport width the
- * design is pinned at. An @3xl (768px container) rung does not engage until a
- * 783px viewport, which silently dropped these pages to one column at exactly
- * 768 - iPad portrait - when they were migrated off md: by px value.
+ * The gutter is platform-dependent: ~15px for a classic scrollbar (Windows,
+ * ubuntu CI), 0 under overlay scrollbars (macOS). That is why a container rung
+ * must never be set to the viewport width the design is pinned at. An @3xl
+ * (768px container) rung does not engage until a 783px viewport on a
+ * classic-scrollbar platform, which silently dropped these pages to one column
+ * at exactly 768 - iPad portrait - when they were migrated off md: by px value.
  *
  * 768 is therefore the width worth defending: it is a real device width and the
  * one the original md: rung guaranteed.
@@ -59,19 +61,49 @@ test.describe('demo column rungs', () => {
 	test('the container inset law the rungs depend on still holds', async ({ page }) => {
 		await page.goto('/demos/ops')
 		await expect(page.getByTestId('ops-columns')).toBeVisible({ timeout: 15_000 })
-		const measure = () => page.evaluate(() => ({
-			viewport: document.documentElement.clientWidth,
-			container: document.querySelector('.demos-content')?.clientWidth ?? -1
-		}))
+		// app.css sets scrollbar-gutter: stable on the root, which reserves the
+		// platform's gutter inside the root scroller whether or not it overflows
+		// (documentElement.clientWidth stays at the viewport width regardless).
+		// body.clientWidth is therefore the width the shell really receives:
+		// viewport minus the reserved gutter, which is ~15px for a classic
+		// scrollbar and 0 under overlay scrollbars. Asserting against it keeps
+		// the law platform-neutral instead of hard-coding one gutter width.
+		// The @container rungs key on the CONTENT box of .demos-content, so
+		// that is what gets measured - clientWidth alone would stay green if a
+		// padding regression quietly shrank every rung's capacity.
+		const measure = () => page.evaluate(() => {
+			const node = document.querySelector('.demos-content')
+			let container = -1
+			if (node) {
+				const cs = getComputedStyle(node)
+				container = node.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+			}
+			return {
+				gutter: window.innerWidth - document.body.clientWidth,
+				available: document.body.clientWidth,
+				container
+			}
+		})
 
 		// Below the sidebar threshold the container trails the viewport only by
 		// the scrollbar gutter; at and above it, also by the 13rem sidebar. If
 		// either changes, every container rung shifts and the pages above need
 		// re-picking - this is the assertion that says so out loud.
+		// Poll on the inset (available minus container) so both sides of the
+		// comparison come from the same measurement - a scrollbar appearing
+		// mid-hydration shifts both together instead of racing the assertion.
+		const inset = async () => {
+			const m = await measure()
+			return m.available - m.container
+		}
+
 		await page.setViewportSize({ width: 768, height: 1024 })
-		await expect.poll(async () => (await measure()).container, { timeout: 5_000 }).toBe(753)
+		await expect.poll(inset, { timeout: 5_000 }).toBe(0)
+		const narrow = await measure()
+		expect(narrow.gutter, 'scrollbar gutter outside any real platform range').toBeGreaterThanOrEqual(0)
+		expect(narrow.gutter, 'scrollbar gutter outside any real platform range').toBeLessThanOrEqual(20)
 
 		await page.setViewportSize({ width: 1440, height: 900 })
-		await expect.poll(async () => (await measure()).container, { timeout: 5_000 }).toBe(1217)
+		await expect.poll(inset, { timeout: 5_000 }).toBe(208)
 	})
 })
