@@ -1,9 +1,19 @@
 import { test, expect } from '@playwright/test'
-import { expectTouchTarget, openTouchPage } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
+/**
+ * The tenant readout is confirmed over the socket, so this wait is a
+ * connection wait wearing an app-level costume: when the socket never
+ * comes up, `tn-ws-pending` simply never clears and the failure reports
+ * a selector, naming nothing about why. Route the connection half
+ * through `waitForWS` first so a dead socket or a page that never
+ * hydrated reports its own timeline, and keep the tenant confirmation
+ * as the app-level gate behind it.
+ */
 async function waitForWsConfirmed(page) {
+	await waitForWS(page)
 	await expect(page.getByTestId('tn-ws-pending')).toHaveCount(0, { timeout: 15_000 })
 	await expect(page.getByTestId('tn-whoami-error')).toHaveCount(0)
 }

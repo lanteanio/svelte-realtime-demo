@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
+import { waitForWS } from './helpers.js'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
@@ -7,8 +8,12 @@ const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localho
 test.skip(!process.env.INSTANCE_B, 'tenants cluster coverage requires two explicit replica targets')
 test.describe.configure({ mode: 'serial' })
 
+// Same reasoning as the single-instance spec: the pending marker is a
+// connection wait in app clothing, so the connection half reports its
+// own timeline before the tenant confirmation is asked for.
 async function openAt(page, origin) {
 	await page.goto(`${origin}/demos/tenants`)
+	await waitForWS(page)
 	await expect(page.getByTestId('tn-ws-pending')).toHaveCount(0, { timeout: 15_000 })
 }
 
