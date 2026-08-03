@@ -23,10 +23,21 @@
 	let dlqRows = $state(/** @type {any[]} */ ([]))
 	let lastOrder = $state(/** @type {{ id: string, mode: string } | null} */ (null))
 	let lastReplay = $state(/** @type {{ replayed: number, total: number } | null} */ (null))
-	let lastError = $state('')
+	// One error slot per card, rendered where its action lives: a replay
+	// failure two cards below the Place button must not report there,
+	// and a background poll hiccup must not overwrite either.
+	let placeError = $state('')
+	let replayError = $state('')
+	let pollError = $state('')
 	let placing = $state(false)
 	let replaying = $state(false)
 	let polling = false
+
+	// The demo's most instructive seconds - deliver, 500, retry, retry,
+	// dead-letter - used to happen invisibly between polls. Track the
+	// failing order until its DLQ row lands and narrate the window.
+	let pendingFail = $state(/** @type {{ id: string, placedAt: number } | null} */ (null))
+	let nowMs = $state(0)
 
 	async function refresh() {
 		if (polling) return
@@ -35,8 +46,12 @@
 			const [r, d] = await Promise.all([recentReceipts(), deadLetters()])
 			receipts = Array.isArray(r) ? r : []
 			dlqRows = Array.isArray(d) ? d : []
+			pollError = ''
+			if (pendingFail && dlqRows.some((row) => row.orderId === pendingFail.id)) {
+				pendingFail = null
+			}
 		} catch (err) {
-			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			pollError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 		} finally {
 			polling = false
 		}
@@ -45,7 +60,14 @@
 	$effect(() => {
 		refresh()
 		const timer = setInterval(() => {
-			if (document.visibilityState === 'visible') refresh()
+			if (document.visibilityState !== 'visible') return
+			// Poll fast while a failing delivery is in flight so the
+			// dead-letter lands on screen close to when it really happened.
+			nowMs = Date.now()
+			if (pendingFail) refresh()
+		}, 1000)
+		const slowTimer = setInterval(() => {
+			if (document.visibilityState === 'visible' && !pendingFail) refresh()
 		}, POLL_MS)
 		const onVisibility = () => {
 			if (document.visibilityState === 'visible') refresh()
@@ -53,6 +75,7 @@
 		document.addEventListener('visibilitychange', onVisibility)
 		return () => {
 			clearInterval(timer)
+			clearInterval(slowTimer)
 			document.removeEventListener('visibilitychange', onVisibility)
 		}
 	})
@@ -60,12 +83,16 @@
 	async function handlePlace(mode) {
 		if (placing) return
 		placing = true
-		lastError = ''
+		placeError = ''
 		try {
 			const order = await placeOrder(mode)
 			lastOrder = { id: order?.id ?? '', mode: order?.mode ?? mode }
+			if (mode === 'fail' && order?.id) {
+				pendingFail = { id: order.id, placedAt: Date.now() }
+				nowMs = Date.now()
+			}
 		} catch (err) {
-			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			placeError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 		} finally {
 			placing = false
 		}
@@ -74,20 +101,31 @@
 	async function handleReplay(ids) {
 		if (replaying) return
 		replaying = true
-		lastError = ''
+		replayError = ''
 		try {
 			const result = await replayOrders(ids)
 			lastReplay = { replayed: result?.replayed ?? 0, total: result?.total ?? 0 }
 			await refresh()
 		} catch (err) {
-			lastError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+			replayError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 		} finally {
 			replaying = false
 		}
 	}
 
+	// Millisecond resolution: the whole retry ladder (300/600/1200ms,
+	// jittered) fits inside two wall-clock seconds, so second-resolution
+	// stamps printed the original delivery and every retry as the same
+	// moment.
+	const timeFmt = new Intl.DateTimeFormat('en-US', {
+		hour12: false,
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		fractionalSecondDigits: 3
+	})
 	function fmtTs(ts) {
-		return ts ? new Date(ts).toLocaleTimeString() : '-'
+		return ts ? timeFmt.format(ts) : '-'
 	}
 	function shortId(id) {
 		return typeof id === 'string' ? id.slice(0, 8) : '-'
@@ -98,7 +136,7 @@
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Outbound webhooks: sign, retry, dead-letter, replay</h1>
 		<p class="text-sm opacity-70 mt-1">
-			<code>live.webhooks.outbound(['demos:outbound:orders'], ...)</code>
+			<code class="break-all">live.webhooks.outbound(['demos:outbound:orders'], ...)</code>
 			POSTs a signed body to a sink endpoint on every publish - no
 			<code>+server.js</code> on the sending side, no client code.
 			Place an order and watch the receipt arrive with its verified
@@ -134,8 +172,16 @@
 					</span>
 				{/if}
 			</div>
-			{#if lastError}
-				<p class="text-xs text-error" data-testid="ow-error">{lastError}</p>
+			{#if placeError}
+				<p class="text-xs text-error" data-testid="ow-error">{placeError}</p>
+			{/if}
+			{#if pendingFail}
+				<p class="text-xs text-warning" aria-live="polite" data-testid="ow-retrying">
+					delivering <span class="font-mono">{shortId(pendingFail.id)}</span> -
+					the sink answers 500, retries are running (300 / 600 / 1200ms,
+					jittered)... {Math.max(0, Math.round((nowMs - pendingFail.placedAt) / 1000))}s -
+					it dead-letters below when the budget exhausts.
+				</p>
 			{/if}
 			<p class="text-xs opacity-60">
 				Both buttons just <code>ctx.publish</code> a
@@ -190,7 +236,7 @@
 					Dead-letter queue <span class="font-normal">(<span data-testid="ow-dlq-count">{dlqRows.length}</span>)</span>
 				</h2>
 				<button
-					class="btn btn-xs btn-ghost"
+					class="btn btn-sm btn-outline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 					onclick={() => handleReplay(undefined)}
 					disabled={replaying || dlqRows.length === 0}
 					data-testid="ow-replay-all"
@@ -198,6 +244,9 @@
 					{replaying ? 'Replaying...' : 'Replay all'}
 				</button>
 			</div>
+			{#if replayError}
+				<p class="text-xs text-error" data-testid="ow-replay-error">{replayError}</p>
+			{/if}
 			<ul class="text-xs font-mono space-y-1" data-testid="ow-dlq">
 				{#each dlqRows as r (r.id)}
 					<li class="flex flex-wrap items-center gap-2" data-testid="ow-dlq-row">
@@ -208,7 +257,7 @@
 						<span class="opacity-60">attempts: {r.attempts}</span>
 						<span class="opacity-50 truncate flex-1" title={r.error}>{r.error}</span>
 						<button
-							class="btn btn-xs btn-outline"
+							class="btn btn-sm btn-outline pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 							onclick={() => handleReplay([r.id])}
 							disabled={replaying}
 							data-testid="ow-replay"
@@ -226,7 +275,10 @@
 				</p>
 			{/if}
 			<p class="text-xs opacity-50">
-				Replay re-fires the ORIGINAL payload through the complete
+				This card is the failure half's API pair: the page reads the
+				queue with <code>getDeadLetter()</code> and replays with
+				<code>replayDeadLetter(ids)</code>. Replay re-fires the
+				ORIGINAL payload through the complete
 				delivery path (SSRF gate re-applied, signature and idempotency
 				key recomputed) - that is the point. So replaying a
 				<code>fail</code> order fails again and returns here, exactly

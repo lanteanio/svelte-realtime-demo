@@ -32,6 +32,15 @@ test.describe('/demos/outbound-webhooks', () => {
 		)
 		await expect(page.getByRole('link', { name: '/demos/ops' })).toHaveAttribute('href', '/demos/ops')
 		await expect(page.getByTestId('ow-error')).toHaveCount(0)
+		await expect(page.getByTestId('ow-replay-error')).toHaveCount(0)
+		// The replay buttons are real-size controls, the replay APIs are
+		// named for the visitor, and the long intro token wraps instead
+		// of clipping at narrow content edges.
+		await expect(page.getByTestId('ow-replay-all')).toHaveClass(/btn-sm/)
+		await expect(page.getByTestId('ow-replay-all')).toHaveClass(/btn-outline/)
+		await expect(page.getByText('getDeadLetter()', { exact: false })).toBeVisible()
+		await expect(page.getByText('replayDeadLetter(ids)', { exact: false })).toBeVisible()
+		await expect(page.locator('header code').first()).toHaveClass(/break-all/)
 	})
 
 	test('a successful order delivers a verified 200 receipt with its stable idempotency key', async ({ page }) => {
@@ -45,6 +54,9 @@ test.describe('/demos/outbound-webhooks', () => {
 			expect(receipt.idempotencyKey).toContain(shortId)
 		}
 		await expect(dlqRow(page, shortId)).toHaveCount(0)
+		// Millisecond stamps: the whole retry ladder fits inside two
+		// wall-clock seconds, so second-resolution times hid the backoff.
+		await expect(page.getByTestId('ow-receipt-row').first().locator('span').first()).toHaveText(/^\d{2}:\d{2}:\d{2}\.\d{3}$/)
 	})
 
 	test('a hidden tab pauses polling, then catches up a same-identity tab order immediately on return', async ({ page, context }) => {
@@ -81,7 +93,12 @@ test.describe('/demos/outbound-webhooks', () => {
 		test.setTimeout(45_000)
 		await openOutbound(page)
 		const shortId = await placeOrder(page, 'fail')
+		// The retry window narrates itself instead of happening invisibly
+		// between polls, and the strip retires when the dead letter lands.
+		await expect(page.getByTestId('ow-retrying')).toContainText('retries are running')
+		await expect(page.getByTestId('ow-retrying')).toContainText(shortId)
 		await waitForDlq(page, shortId)
+		await expect(page.getByTestId('ow-retrying')).toHaveCount(0)
 		const firstReceipts = await waitForReceipts(page, shortId, 3)
 		for (const receipt of firstReceipts) {
 			expect(receipt.text).toMatch(/\b500\b/)
