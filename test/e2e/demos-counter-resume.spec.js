@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick, waitForWS } from './helpers.js'
+import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/counter-resume - a server-driven
 // 1Hz counter (cluster-singleton cron -> Redis INCR) streamed with merge:'set'
@@ -42,6 +42,8 @@ test.describe('/demos/counter-resume', () => {
 		test.setTimeout(20_000)
 		await open(page)
 		await expect(page.getByTestId('ws-status')).toHaveText('open')
+		await expect(page.getByTestId('ws-status')).toHaveClass(/badge-success/)
+		await expect(page.getByTestId('offline-elapsed')).toHaveCount(0)
 
 		const start = await counterValue(page)
 		expect(Number.isFinite(start)).toBe(true)
@@ -180,6 +182,72 @@ test.describe('/demos/counter-resume', () => {
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
+		}
+	})
+
+	test('the in-page drop severs, counts the outage, recovers itself, and the resume badge marks the gap', async ({ page }) => {
+		test.setTimeout(60_000)
+		await open(page)
+		await expect.poll(() => counterValue(page), { timeout: 10_000 }).toBeGreaterThan(1)
+
+		await page.getByTestId('drop-connection').click()
+		await expect(page.getByTestId('drop-connection')).toBeDisabled()
+		await expect(page.getByTestId('ws-status')).not.toHaveText('open', { timeout: 10_000 })
+		await expect(page.getByTestId('ws-status')).not.toHaveClass(/badge-success/)
+		// The outage announces itself and counts up while it lasts.
+		await expect(page.getByTestId('offline-elapsed')).toBeVisible()
+		await expect
+			.poll(async () => Number(((await page.getByTestId('offline-elapsed').textContent()) ?? '').match(/offline for (\d+)s/)?.[1] ?? 0), { timeout: 8_000 })
+			.toBeGreaterThanOrEqual(2)
+		await page.waitForTimeout(300)
+		const frozen = await counterValue(page)
+		await page.waitForTimeout(2_000)
+		expect(await counterValue(page)).toBe(frozen)
+
+		// The window closes on its own: no second interaction required.
+		await expect(page.getByTestId('ws-status')).toHaveText('open', { timeout: 25_000 })
+		await expect(page.getByTestId('offline-elapsed')).toHaveCount(0)
+		await expect(page.getByTestId('drop-connection')).toBeEnabled()
+		await expect
+			.poll(() => counterValue(page), { timeout: 20_000 })
+			.toBeGreaterThanOrEqual(frozen + 4)
+		const badges = await page.locator('[data-testid="gap-badge"]').allTextContents()
+		const maxGap = Math.max(0, ...badges.map((t) => Number((t.match(/\+(\d+)/) || [])[1] || 0)))
+		expect(maxGap, `expected a multi-tick gap badge after the in-page outage; badges=${JSON.stringify(badges)}`).toBeGreaterThanOrEqual(4)
+	})
+
+	test('a prepend does not rebuild the rows below it, and timestamps carry milliseconds', async ({ page }) => {
+		test.setTimeout(30_000)
+		await open(page)
+		await expect.poll(async () => (await ledgerValues(page)).length, { timeout: 10_000 }).toBeGreaterThanOrEqual(1)
+		const row = await page.locator('[data-testid="ledger-row"]').first().elementHandle()
+		const rowValue = await row.getAttribute('data-value')
+		await expect(page.locator('[data-testid="ledger-row"]').first().locator('span').first()).toHaveText(/^\d{2}:\d{2}:\d{2}\.\d{3}$/)
+
+		// Two more ticks land on top...
+		await expect
+			.poll(async () => (await ledgerValues(page))[0], { timeout: 10_000 })
+			.toBeGreaterThanOrEqual(Number(rowValue) + 2)
+		// ...and the original row is still the SAME DOM node, not a
+		// recreated copy: keys identify entries, not positions.
+		expect(await row.evaluate((el) => el.isConnected)).toBe(true)
+		expect(await row.getAttribute('data-value')).toBe(rowValue)
+	})
+
+	test('the page states the counter is shared before the control that resets it', async ({ page }) => {
+		await open(page)
+		await expect(page.getByTestId('reset-shared-note')).toContainText('every connected visitor')
+		await expect(page.getByTestId('drop-connection')).toContainText('Drop the connection')
+	})
+
+	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			await expectTouchTarget(page.getByTestId('drop-connection'))
+			await expectTouchTarget(page.getByTestId('reset-button'))
+		} finally {
+			await context.close()
 		}
 	})
 
