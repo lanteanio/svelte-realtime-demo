@@ -33,14 +33,20 @@
 	$effect(() => {
 		const off = logFeed.subscribe((v) => {
 			entries = Array.isArray(v) ? v.slice() : []
+			// The store holds the pagination metadata the server sent; read it
+			// here so the caption reports the wire rather than a local guess.
+			hasMore = logFeed.hasMore
 		})
 		return () => off()
 	})
 
-	// Track hasMore in component state. Returned by `loadMore()`; also
-	// readable via `logFeed.hasMore`. We reflect it into a $state so
-	// Svelte rerenders the button after each load.
-	let hasMore = $state(true)
+	// hasMore comes off the WIRE, never from an initializer. It starts null -
+	// "not told yet" - because a hardcoded `true` renders the client's own
+	// guess as though it were server state, and would keep rendering it for
+	// any feed that fits in one page. The subscribe callback below syncs it
+	// from `logFeed.hasMore` on every frame; `loadMore()`'s return value is
+	// kept as confirmation rather than as the source.
+	let hasMore = $state(/** @type {boolean | null} */ (null))
 	let loading = $state(false)
 	let lastError = $state('')
 
@@ -119,8 +125,17 @@
 	}
 
 	function timeOf(ts) {
-		const d = new Date(ts)
-		return d.toLocaleTimeString()
+		// The time column is a fixed 80px slot. A bare toLocaleTimeString() is
+		// 8 characters in 24-hour locales but "9:15:02 PM" in 12-hour ones,
+		// which runs into the seq column beside it; forcing two-digit h23
+		// fields keeps the visitor's own separators while bounding every
+		// locale to the column's width.
+		return new Date(ts).toLocaleTimeString(undefined, {
+			hourCycle: 'h23',
+			hour: '2-digit',
+			minute: '2-digit',
+			second: '2-digit'
+		})
 	}
 </script>
 
@@ -191,7 +206,19 @@
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="entries-empty">loading...</p>
 			{:else}
-				<ul class="space-y-1 text-xs font-mono" data-testid="entries-list">
+				<!-- Each load merges 25 rows ABOVE the button, which used to push
+				     it about a full viewport down the page: exhausting the log
+				     meant click, long scroll, hunt, eight times over. The rows
+				     grow inside their own scroll region so the card chrome, the
+				     button and the caption stay where the visitor left them.
+				     A FIXED height rather than a max, because a cap stops binding
+				     the day a page returns fewer rows than 24rem holds, and the
+				     button starts moving again. Today the two behave identically
+				     - the list only renders once it has rows, and the first page
+				     is 25 of them, which overflows this at every rung - so that
+				     equivalence is a property of the current page size and not
+				     something to lean on. -->
+				<ul class="space-y-1 text-xs font-mono h-96 overflow-y-auto" data-testid="entries-list">
 					{#each entries as e (e.id)}
 						<!-- The fixed time/seq/badge columns consume a 320px row
 						     whole; letting the message wrap to its own line keeps
@@ -212,16 +239,24 @@
 				</ul>
 			{/if}
 
-			<div class="flex items-center gap-2 pt-2">
+			<div class="flex flex-wrap items-center gap-x-3 gap-y-1 pt-2">
+				<!-- The unit's headline interaction, and it used to be a
+				     borderless btn-sm indistinguishable from the caption beside
+				     it. It may look like the primary action it is. -->
 				<button
-					class="btn btn-sm btn-ghost"
+					class="btn btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 					onclick={handleLoadMore}
-					disabled={loading || !hasMore}
+					disabled={loading || hasMore !== true}
 					data-testid="load-more"
 				>
-					{loading ? 'Loading...' : (hasMore ? `Load more (next ${state.pageSize})` : 'No more entries')}
+					{loading ? 'Loading...' : (hasMore === false ? 'No more entries' : `Load more (next ${state.pageSize})`)}
 				</button>
-				<span class="text-xs opacity-60" data-testid="has-more-state">hasMore: {hasMore ? 'true' : 'false'}</span>
+				<span class="text-xs opacity-60 font-mono" data-testid="has-more-state">
+					hasMore: {hasMore === null ? 'waiting for the first page' : String(hasMore)}
+				</span>
+				<span class="text-xs opacity-60 font-mono" data-testid="cursor-state">
+					next cursor: {hasMore === false ? 'null' : '{ offset }'}
+				</span>
 				{#if lastError}
 					<span class="text-xs text-error" data-testid="error">{lastError}</span>
 				{/if}
@@ -245,6 +280,17 @@
 			(getter). New <code>'created'</code> publishes merge by id at the
 			end of the list because the stream is configured with the
 			default <code>prepend: false</code>.
+		</p>
+		<p>
+			The caption reads <code>hasMore</code> off the store on every frame
+			rather than keeping a local copy, so it reports what the server
+			said and not what this page assumed. The cursor is retained inside
+			the store and is not on its public surface today, which is why the
+			readout can state the moment it becomes <code>null</code> - the
+			loader stops returning one once the feed is exhausted - but not the
+			<code>&#123; offset &#125;</code> value while pages remain. Showing
+			a number the page would have to reconstruct is exactly the kind of
+			invented reading this gallery tries not to print.
 		</p>
 	</aside>
 </div>

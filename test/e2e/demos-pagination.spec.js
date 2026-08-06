@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 // Exhaustive human-like coverage for /demos/pagination - a 200-entry log feed
 // served in cursor-based pages of 25 (loader returns { data, hasMore, cursor },
@@ -53,9 +53,61 @@ test.describe('/demos/pagination', () => {
 		// order - exact, not just a count.
 		expectContiguousFromOne(await seqsOf(page), PAGE_SIZE)
 		await expect(page.getByTestId('entries-count')).toHaveText(String(PAGE_SIZE))
+		// Discriminating BECAUSE the page no longer initialises hasMore to
+		// true: until a frame lands the caption reads "waiting for the first
+		// page", so reading "true" here can only have come off the wire.
 		await expect(page.getByTestId('has-more-state')).toContainText('hasMore: true')
+		await expect(page.getByTestId('cursor-state')).toContainText('{ offset }')
 		await expect(page.getByTestId('load-more')).toBeEnabled()
 		await expect(page.getByTestId('load-more')).toHaveText(`Load more (next ${PAGE_SIZE})`)
+		// Fixed 80px time column: two-digit h23 keeps every locale inside it.
+		await expect(page.getByTestId('entry-time').first()).toHaveText(/^\d{2}:\d{2}:\d{2}$/)
+	})
+
+	test('the Load more target does not flee down the page as rows arrive', async ({ page }) => {
+		test.setTimeout(30_000)
+		await open(page)
+
+		const button = page.getByTestId('load-more')
+		// Measured against the DOCUMENT, not the viewport: a click can scroll
+		// the page, and a viewport-relative box reports that as the control
+		// moving when the layout never changed. What this finding is about is
+		// the button being pushed down the page by rows inserted above it.
+		const docTop = () => button.evaluate((el) => el.getBoundingClientRect().top + window.scrollY)
+		const before = await docTop()
+
+		await button.click()
+		await expect(page.getByTestId('entry-row')).toHaveCount(2 * PAGE_SIZE, { timeout: 8_000 })
+
+		// 25 more rows merged ABOVE this control. It used to be displaced about
+		// a full viewport downward per load; the rows grow inside their own
+		// scroll region now, so the target the visitor is about to press again
+		// is still where they left it.
+		const after = await docTop()
+		expect(
+			Math.abs(after - before),
+			`Load more moved ${Math.round(after - before)}px down the document after one load`
+		).toBeLessThanOrEqual(2)
+
+		// ...and it stayed put because the list scrolls, not because the load
+		// silently failed to add anything.
+		const scrolls = await page.getByTestId('entries-list')
+			.evaluate((el) => el.scrollHeight > el.clientHeight + 1)
+		expect(scrolls, 'the entries list must be its own scroll region').toBe(true)
+	})
+
+	test('Load more reads as the primary action and meets the 44px floor', async ({ browser }) => {
+		test.setTimeout(30_000)
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			// It was a borderless btn-sm, visually indistinguishable from the
+			// caption beside it and under the touch minimum.
+			await expect(page.getByTestId('load-more')).toHaveClass(/btn-primary/)
+			await expectTouchTarget(page.getByTestId('load-more'))
+		} finally {
+			await context.close()
+		}
 	})
 
 	test('Load more advances the cursor to the NEXT chronological slice', async ({ page }) => {
@@ -256,6 +308,10 @@ test.describe('/demos/pagination', () => {
 		}
 
 		await expect(page.getByTestId('has-more-state')).toContainText('hasMore: false', { timeout: 5_000 })
+		// The loader stops returning a cursor once the feed is exhausted, and
+		// the readout says so - approached from the paging side, so this waits
+		// for the real transition rather than reading a never-paged page.
+		await expect(page.getByTestId('cursor-state')).toContainText('next cursor: null')
 		await expect(page.getByTestId('load-more')).toBeDisabled()
 		await expect(page.getByTestId('load-more')).toHaveText('No more entries')
 
