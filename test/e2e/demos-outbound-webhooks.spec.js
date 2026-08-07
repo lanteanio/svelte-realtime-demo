@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
 import {
 	dlqCount,
 	dlqRow,
@@ -131,6 +132,114 @@ test.describe('/demos/outbound-webhooks', () => {
 			.toBeGreaterThan(beforeReceipts)
 		await expect.poll(() => dlqCount(page), { timeout: 30_000 }).toBeGreaterThanOrEqual(beforeDlq)
 		await waitForDlq(page, tracked)
+	})
+
+	// The finding was measured at 412, 390, 360 and 320, where the unbroken
+	// token lost characters off the content edge - "demos:outbo" at 320. The
+	// existing pin asserts the break-all CLASS, which a `whitespace-nowrap`
+	// sitting beside it satisfies while clipping exactly as before. Measure the
+	// overflow itself, at the rungs the finding named.
+	test('the intro token wraps instead of clipping at every narrow rung', async ({ browser }) => {
+		for (const [width, height] of [[412, 915], [390, 844], [360, 640], [320, 568]]) {
+			const context = await browser.newContext({ viewport: { width, height } })
+			const page = await context.newPage()
+			try {
+				await openOutbound(page)
+				// Measured with getClientRects against the PARENT's content
+				// width, not scrollWidth/clientWidth on the code element
+				// itself: <code> is a non-replaced inline box, and both of
+				// those are defined as 0 there, so the obvious version of this
+				// assertion reads 0 <= 0 and passes whatever the token does.
+				// A wrapped token produces several rects, each inside the
+				// content width; an unwrappable one produces a single rect
+				// wider than it, and that overhang is the clipping.
+				const size = await page.locator('header code').first().evaluate((el) => {
+					const parent = el.parentElement
+					const style = getComputedStyle(parent)
+					const contentWidth = parent.clientWidth
+						- parseFloat(style.paddingLeft || '0')
+						- parseFloat(style.paddingRight || '0')
+					const rects = Array.from(el.getClientRects())
+					return { widest: Math.max(...rects.map((r) => r.width)), contentWidth, lines: rects.length }
+				})
+				// Guard against the measurement silently going vacuous again.
+				expect(size.contentWidth, 'measured a zero-width container').toBeGreaterThan(0)
+				expect(size.lines, 'measured no rendered line boxes').toBeGreaterThan(0)
+				expect(
+					size.widest,
+					`the intro token overhangs its container by ${Math.round(size.widest - size.contentWidth)}px at ${width}x${height}, so characters are clipped`
+				).toBeLessThanOrEqual(size.contentWidth + 1)
+			} finally {
+				await context.close()
+			}
+		}
+	})
+
+	// The suite pinned btn-sm and btn-outline as CLASSES, on a fine pointer.
+	// Both survive deleting the coarse-pointer floor, which is the entire
+	// finding - these were the smallest targets on the page and they are the
+	// last step of the stated success line.
+	test('the replay controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await openOutbound(page)
+			await expectTouchTarget(page.getByTestId('ow-replay-all'))
+			// The per-row control exists only once there are dead letters, so
+			// earn one rather than quietly skip the half of the finding it
+			// belongs to. Waiting for the ROW is enough - the full waitForDlq
+			// helper also pins the retry state (attempts: 3, HTTP 500), which
+			// this test does not need and which would make a geometry
+			// assertion depend on retry timing.
+			const shortId = await placeOrder(page, 'fail')
+			const row = dlqRow(page, shortId)
+			await expect(row).toBeVisible({ timeout: 30_000 })
+			await expectTouchTarget(row.getByTestId('ow-replay'))
+		} finally {
+			await context.close()
+		}
+	})
+
+	// The card is about WHERE a replay failure reports. The suite asserted only
+	// that both error slots are absent AT REST, which is satisfied by any
+	// arrangement at all - including the original single shared lastError that
+	// reported two cards above the button. That assertion cannot fail on this
+	// defect, so it never tested it.
+	//
+	// It was recorded as untestable because there is no way to make only the
+	// replay RPC fail. There is: the client rejects pending calls when the
+	// socket drops, so closing it with the replay call in flight is a real
+	// replay failure, not a simulated error string. Arming the interception
+	// only after the dead letter exists keeps it from firing on unrelated
+	// traffic during setup.
+	test('a replay failure reports beside the Replay button, not two cards above it', async ({ page }) => {
+		let armed = false
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((message) => {
+				server.send(message)
+				if (armed && typeof message === 'string' && /replay/i.test(message)) ws.close()
+			})
+			server.onMessage((message) => ws.send(message))
+		})
+		await openOutbound(page)
+		// Any dead letter enables Replay all, which is all this test needs; the
+		// full retry-state helper would tie an error-placement assertion to
+		// retry timing for no benefit.
+		const shortId = await placeOrder(page, 'fail')
+		await expect(dlqRow(page, shortId)).toBeVisible({ timeout: 30_000 })
+		await expect(page.getByTestId('ow-replay-all')).toBeEnabled()
+
+		armed = true
+		await page.getByTestId('ow-replay-all').click()
+
+		// It must render, and render INSIDE the DLQ card beside the control
+		// that caused it...
+		await expect(page.getByTestId('ow-dlq-card').getByTestId('ow-replay-error'))
+			.toBeVisible({ timeout: 20_000 })
+		// ...while the place card's slot stays empty. A single shared error
+		// state could not satisfy both of these at once, which is what makes
+		// this pair discriminating rather than decorative.
+		await expect(page.getByTestId('ow-error')).toHaveCount(0)
 	})
 
 })
