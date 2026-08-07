@@ -38,6 +38,15 @@ test.describe('/demos/privacy', () => {
 		await expect(page.getByRole('link', { name: 'privacy.js' })).toHaveAttribute('href', /src\/live\/demos\/privacy\.js$/)
 		await expect(page.getByTestId('pv-submit-note')).toHaveCount(0)
 		await expect(page.getByTestId('pv-error')).toHaveCount(0)
+		// The distinct-contributor number comes from the demo-only roundInfo()
+		// endpoint, NOT from the raw aggregate: raw exposes an event count and
+		// never a distinct-contributor count. The page used to credit raw,
+		// which on the one unit chaired for honesty had it contradicting its
+		// own "the protected output alone never reveals its cohort size"
+		// claim. Pinned so the attribution cannot drift back.
+		await expect(page.getByTestId('pv-round-hint')).toContainText('demo-only')
+		await expect(page.getByTestId('pv-round-hint')).toContainText('roundInfo()')
+		await expect(page.getByTestId('pv-round-hint')).toContainText('the protected output never reveals it')
 		expect((await roundState(page)).k).toBe(3)
 	})
 
@@ -145,6 +154,16 @@ test.describe('/demos/privacy', () => {
 		const published = Number(await page.getByTestId('pv-protected-value').textContent())
 		expect(Number.isFinite(published)).toBe(true)
 		await expect(page.getByTestId('pv-protected-held')).toHaveCount(0)
+		// The published caption carries the page's most interesting encoding:
+		// the submission COUNT is noised too, which is why it can read
+		// fractionally. It used to say "noisy average of a noisy N
+		// submissions", which parses as a typo and made the fractional count
+		// look like a bug rather than the point. Asserted HERE rather than on
+		// load because the caption only exists once something has actually
+		// published - before that the card renders pv-protected-held instead,
+		// so an on-load assertion would be asserting against the wrong branch.
+		await expect(page.getByTestId('pv-protected-value-area'))
+			.toContainText('Noise is added to the average and to the submission count alike')
 		await expect(page.getByTestId('pv-error')).toHaveCount(0)
 	})
 
@@ -166,6 +185,42 @@ test.describe('/demos/privacy', () => {
 			}
 		} finally {
 			await context.close()
+		}
+	})
+
+	// At 360x640, 320x568 and 844x390 the first viewport used to show only the
+	// title and a nine-line spec paragraph, with the picker entirely below the
+	// fold - on a unit whose visitor-success line begins "submit a mood", the
+	// page opened with no visible action and invited a bounce before the demo
+	// was ever exercised.
+	//
+	// Asserting the lede's TEXT proves the copy changed; it does not prove the
+	// action became reachable, which is what the finding actually claimed. So
+	// this measures the action itself, at the three rungs the finding named.
+	test('the primary action is above the fold on every phone rung named in the finding', async ({ browser }) => {
+		for (const [width, height] of [[360, 640], [320, 568], [844, 390]]) {
+			const context = await browser.newContext({ viewport: { width, height } })
+			const page = await context.newPage()
+			try {
+				await openPrivacy(page)
+				// "Above the fold" is a claim about what the visitor sees
+				// before touching anything, so a test that had scrolled first
+				// would be answering a different question. Assert the starting
+				// position rather than assuming it.
+				expect(
+					await page.evaluate(() => window.scrollY),
+					`${width}x${height} did not start at the top of the document`
+				).toBe(0)
+				// ratio 1, not mere intersection: a single visible pixel of the
+				// first button would satisfy toBeInViewport() while still
+				// leaving the action effectively unreachable.
+				await expect(
+					page.getByTestId('pv-submit-1'),
+					`the first mood button is not fully inside the first viewport at ${width}x${height}`
+				).toBeInViewport({ ratio: 1 })
+			} finally {
+				await context.close()
+			}
 		}
 	})
 })
