@@ -28,6 +28,47 @@ function expectContinuousNewestFirst(seqs) {
 	}
 }
 
+// Opacity composites down the tree, so an element's own computed value says
+// nothing about how it actually renders inside a dimmed ancestor. The aside
+// that used to hold the only jobs pointer is opacity-50; the link inside it
+// reads 1 on its own and 0.5 in the frame. Multiply the chain to measure what
+// the visitor sees.
+function pointerMetrics(locator) {
+	return locator.evaluate((el) => {
+		let opacity = 1
+		for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+			const own = Number.parseFloat(getComputedStyle(node).opacity)
+			if (Number.isFinite(own)) opacity *= own
+		}
+		const rect = el.getBoundingClientRect()
+		return {
+			opacity,
+			fontSize: Number.parseFloat(getComputedStyle(el).fontSize),
+			width: rect.width,
+			height: rect.height
+		}
+	})
+}
+
+// Computed colours arrive in whatever space the theme authored them (daisyUI
+// emits oklch), so painting one pixel is the only parser that handles every
+// notation. Alpha is the load-bearing field: a solid surface reports 1, a
+// `/10` tint reports 0.1 without ever compositing against its backdrop.
+function paintedColor(locator, property) {
+	return locator.evaluate((el, prop) => {
+		const canvas = document.createElement('canvas')
+		canvas.width = 1
+		canvas.height = 1
+		const ctx = canvas.getContext('2d')
+		const raw = getComputedStyle(el)[prop]
+		ctx.clearRect(0, 0, 1, 1)
+		ctx.fillStyle = raw
+		ctx.fillRect(0, 0, 1, 1)
+		const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+		return { raw, r, g, b, alpha: a / 255, chroma: (Math.max(r, g, b) - Math.min(r, g, b)) / 255 }
+	}, property)
+}
+
 function metricSum(body, name, labels = () => true) {
 	let total = 0
 	for (const line of body.split(/\r?\n/)) {
@@ -105,7 +146,12 @@ test.describe('/demos/cluster-cron', () => {
 		await openClusterCron(page)
 		const before = (await tickSeqs(page))[0] ?? 0
 
-		await page.getByRole('link', { name: '/demos/jobs', exact: true }).click()
+		// The prominent pointer in the takeover card is the drill-down the page
+		// offers; the quiet aside link is a footnote and must not be the only
+		// route out. Clicking the aside link here is what let the prominent one
+		// be deleted with every test still green.
+		await expect(page.getByRole('link', { name: '/demos/jobs', exact: true })).toBeVisible()
+		await page.getByTestId('jobs-pointer').click()
 		await expect(page).toHaveURL(/\/demos\/jobs$/)
 		await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
 
@@ -113,6 +159,114 @@ test.describe('/demos/cluster-cron', () => {
 		await expect(page).toHaveURL(/\/demos\/cluster-cron$/)
 		await waitForWS(page)
 		await expect.poll(async () => (await tickSeqs(page))[0] ?? 0, { timeout: 10_000 }).toBeGreaterThan(before)
+	})
+
+	test('the durable-jobs pointer renders at full opacity and body size on phone and desktop', async ({ page }) => {
+		for (const viewport of [{ width: 390, height: 844 }, { width: 1366, height: 768 }]) {
+			await page.setViewportSize(viewport)
+			await openClusterCron(page)
+
+			const pointer = page.getByTestId('jobs-pointer')
+			await expect(pointer).toBeVisible()
+			const prominent = await pointerMetrics(pointer)
+			const footnote = await pointerMetrics(page.getByRole('link', { name: '/demos/jobs', exact: true }))
+
+			// The instrument has to be able to report a dim element, or "1" below
+			// proves nothing. The aside link is the known-dimmed control on the
+			// same page: if the chain walk were broken both would read 1.
+			expect(footnote.opacity, `aside link opacity at ${viewport.width}px`).toBeLessThan(1)
+			expect(prominent.opacity, `jobs-pointer opacity at ${viewport.width}px`).toBe(1)
+
+			// "Normal-size line" from the finding: body text, not the metadata
+			// size. The finding also called the footnote the smallest target on
+			// the page; that half is already closed globally by the demos-layout
+			// rule that lifts every closing aside to 0.875rem, so size parity
+			// here is correct and only the floor is worth pinning.
+			expect(prominent.fontSize, `jobs-pointer font-size at ${viewport.width}px`).toBeGreaterThanOrEqual(14)
+			expect(prominent.width).toBeGreaterThan(0)
+			expect(prominent.height).toBeGreaterThan(0)
+
+			// Placement is the other half of "repeat the pointer under the
+			// takeover card": a pointer that drifts back into the closing aside
+			// inherits its dimming again and stops being the page's drill-down.
+			const placement = await pointer.evaluate((el) => ({
+				inRecipe: !!el.closest('[data-testid="cluster-cron-instructions"]'),
+				inAside: !!el.closest('aside')
+			}))
+			expect(placement.inRecipe, 'jobs-pointer left the takeover card').toBe(true)
+			expect(placement.inAside, 'jobs-pointer sits inside the dimmed aside').toBe(false)
+		}
+	})
+
+	test('the tick log states ownership once and fits a 320px viewport without clipping', async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 568 })
+		await openClusterCron(page)
+		await expect(page.getByTestId('cluster-cron-tick-row').first()).toBeVisible({ timeout: 10_000 })
+
+		// Stated once, above the log - not once per row.
+		await expect(page.getByTestId('tick-legend')).toHaveCount(1)
+		const rowTexts = await page.getByTestId('cluster-cron-tick-row').allTextContents()
+		expect(rowTexts.length).toBeGreaterThan(0)
+		for (const text of rowTexts) {
+			expect(text, 'tick row repeats the ownership annotation').not.toMatch(/this instance/i)
+		}
+
+		const layout = await page.getByTestId('cluster-cron-ticks').evaluate((card) => {
+			const rows = [...card.querySelectorAll('[data-testid="cluster-cron-tick-row"]')]
+			return {
+				card: { client: card.clientWidth, scroll: card.scrollWidth },
+				rows: rows.map((row) => {
+					const badge = row.querySelector('[data-testid="tick-instance-id"]')
+					return {
+						client: row.clientWidth,
+						scroll: row.scrollWidth,
+						badge: badge ? { client: badge.clientWidth, scroll: badge.scrollWidth } : null
+					}
+				})
+			}
+		})
+
+		// Non-vacuity: these are block and inline-flex boxes, so the widths are
+		// real numbers. A zero would mean the measurement never landed on a laid
+		// out element and every comparison below would pass on nothing.
+		expect(layout.card.client).toBeGreaterThan(0)
+		expect(layout.rows.length).toBeGreaterThan(0)
+		expect(layout.card.scroll).toBeLessThanOrEqual(layout.card.client)
+		for (const row of layout.rows) {
+			expect(row.client).toBeGreaterThan(0)
+			expect(row.scroll, 'tick row overflows its column at 320px').toBeLessThanOrEqual(row.client)
+			expect(row.badge?.client ?? 0).toBeGreaterThan(0)
+			expect(row.badge.scroll, 'instance badge clips at 320px').toBeLessThanOrEqual(row.badge.client)
+		}
+	})
+
+	test('the takeover recipe is a base surface while the accent stays in the live log', async ({ page }) => {
+		await openClusterCron(page)
+		await expect(page.getByTestId('cluster-cron-tick-row').first()).toBeVisible({ timeout: 10_000 })
+
+		const recipe = await paintedColor(page.getByTestId('cluster-cron-instructions'), 'backgroundColor')
+		const basePanel = await paintedColor(page.getByTestId('cluster-cron-self-panel'), 'backgroundColor')
+		const log = await paintedColor(page.getByTestId('cluster-cron-ticks'), 'backgroundColor')
+
+		// A tinted card is a translucent wash over the page (bg-warning/10 keeps
+		// alpha 0.1 in the computed value); a base surface is opaque. This is the
+		// property, not the class name.
+		expect(recipe.alpha, `recipe background ${recipe.raw}`).toBe(1)
+		expect(recipe.raw, 'recipe card no longer shares the base-200 surface').toBe(basePanel.raw)
+		// Control: base-200 and base-100 must differ, or the equality above would
+		// hold for any two cards on the page.
+		expect(recipe.raw).not.toBe(log.raw)
+
+		const recipeBorder = await paintedColor(page.getByTestId('cluster-cron-instructions'), 'borderTopColor')
+		const logBorder = await paintedColor(page.getByTestId('cluster-cron-ticks'), 'borderTopColor')
+		expect(recipeBorder.alpha, `recipe border ${recipeBorder.raw}`).toBe(1)
+		expect(recipeBorder.raw, 'recipe card no longer shares the base-300 border').toBe(logBorder.raw)
+
+		// Salience direction: the strongest colour field belongs to the live
+		// election, not to the static recipe beside it.
+		const badge = await paintedColor(page.getByTestId('tick-instance-id').first(), 'backgroundColor')
+		expect(badge.chroma, `leader badge ${badge.raw} is not a chromatic accent`).toBeGreaterThan(0)
+		expect(badge.chroma).toBeGreaterThan(recipe.chroma)
 	})
 
 	test('/metrics exposes registered leader and cron families with live samples', async ({ page, request }) => {

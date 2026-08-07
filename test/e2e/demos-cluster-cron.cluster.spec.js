@@ -1,6 +1,10 @@
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
 import { waitForWS } from './helpers.js'
+
+const execFileAsync = promisify(execFile)
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
@@ -46,6 +50,36 @@ async function waitForConvergence(a, b) {
 		])
 		return leaderA === leaderB && Math.abs(seqA - seqB) <= 1
 	}, { timeout: 15_000 }).toBe(true)
+}
+
+// Expiring the lease is the only way to produce a takeover without killing a
+// process, and it has to happen in Redis because the lease is server-side
+// state - dropping a client socket changes nothing about who holds it. Bound
+// this to the provisioned local container, exactly as the resilience tier
+// does, so it can never point at a shared or deployed Redis.
+const REDIS_CONTAINER = process.env.TEST_REDIS_CONTAINER ?? ''
+const LOCAL_PROVISIONER = /^srd-test-redis-[0-9]+-[0-9]+$/.test(REDIS_CONTAINER)
+
+async function redisCli(...args) {
+	const { stdout } = await execFileAsync('docker', ['exec', REDIS_CONTAINER, 'redis-cli', ...args], {
+		encoding: 'utf8',
+		timeout: 30_000,
+		windowsHide: true
+	})
+	return stdout.trim()
+}
+
+async function statusOf(page) {
+	return (await page.getByTestId('self-leader-status').textContent())?.trim() ?? ''
+}
+
+async function pollUntil(predicate, timeoutMs, intervalMs = 500) {
+	const deadline = Date.now() + timeoutMs
+	while (Date.now() < deadline) {
+		if (await predicate()) return true
+		await new Promise((resolve) => setTimeout(resolve, intervalMs))
+	}
+	return false
 }
 
 function expectContinuousNewestFirst(seqs) {
@@ -139,6 +173,72 @@ test.describe('cluster: /demos/cluster-cron', () => {
 			await expect(rowsB).toHaveCount(TICK_CAP)
 			expectContinuousNewestFirst(await tickSeqs(a))
 			expectContinuousNewestFirst(await tickSeqs(b))
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	test('a leader change after mount moves the badge on both replicas', async ({ browser }) => {
+		test.skip(!LOCAL_PROVISIONER, 'forcing a re-election needs the provisioned local Redis')
+		test.skip(!DISTINCT_TARGETS, 'a takeover needs two distinct replicas')
+		test.setTimeout(200_000)
+
+		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
+		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
+			await waitForConvergence(a, b)
+
+			const [idA, idB] = await Promise.all([selfId(a), selfId(b)])
+			expect(idA).not.toBe(idB)
+			const leaderBefore = await latestLeader(a)
+			expect([idA, idB]).toContain(leaderBefore)
+
+			// Both pages have been mounted and have answered once. Whatever the
+			// badge says from here on is a post-mount claim.
+			const before = await Promise.all([statusOf(a), statusOf(b)])
+			expect(before.filter((status) => status === 'leader')).toHaveLength(1)
+
+			const leaseKey = (await a.getByTestId('lease-key').textContent())?.trim().replace(/^'|'$/g, '') ?? ''
+			expect(leaseKey).not.toBe('')
+			// The page publishes the key; confirm it names the lease this cluster
+			// is actually holding before deleting anything. A wrong key would
+			// otherwise delete nothing and leave the takeover below looking
+			// merely slow.
+			expect(await redisCli('GET', leaseKey), 'lease-key does not name the live lease').toBe(leaderBefore)
+
+			// Deleting the lease makes the holder's next renew fail, which only
+			// clears its flag - it cannot re-acquire until the tick after that.
+			// The follower needs one tick, so the takeover usually lands on the
+			// first delete; retry because which timer fires first is a race.
+			let leaderAfter = leaderBefore
+			for (let attempt = 1; attempt <= 5 && leaderAfter === leaderBefore; attempt++) {
+				await redisCli('DEL', leaseKey)
+				await pollUntil(async () => (await latestLeader(a)) !== leaderBefore, 25_000)
+				leaderAfter = await latestLeader(a)
+			}
+			expect(leaderAfter, 'no replica took the lease over after five expiries').not.toBe(leaderBefore)
+			expect([idA, idB]).toContain(leaderAfter)
+
+			await waitForConvergence(a, b)
+
+			// The assertion this test exists for. A mount-time snapshot keeps
+			// both pages on their boot answer forever, so the page that was
+			// elected at mount would still claim the lease it just lost.
+			const demoted = leaderBefore === idA ? a : b
+			const promoted = leaderBefore === idA ? b : a
+			await expect(demoted.getByTestId('self-leader-status')).toHaveText('follower', { timeout: 15_000 })
+			await expect(promoted.getByTestId('self-leader-status')).toHaveText('leader', { timeout: 15_000 })
+
+			// The rest of the panel has to agree, on both replicas.
+			for (const page of [a, b]) {
+				await expect(page.getByTestId('current-leader-id')).toHaveText(`${leaderAfter.slice(0, 8)}...`)
+				await expect(page.getByTestId('instance-leader-badge')).toHaveCount(1)
+			}
+			await expect(promoted.getByTestId('current-leader-self')).toBeVisible()
+			await expect(demoted.getByTestId('current-leader-self')).toHaveCount(0)
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
