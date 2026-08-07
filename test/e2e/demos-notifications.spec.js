@@ -68,6 +68,20 @@ test.describe('/demos/notifications', () => {
 		await expect(page.getByTestId('send-button')).toBeDisabled()
 		// The queue starts empty.
 		await expect(page.getByTestId('scheduled-empty')).toBeVisible()
+
+		// On a fresh database this instructional copy is most of the page's
+		// content and the visitor's only in-place guidance, so it has to be
+		// READABLE and not merely present. toBeVisible() passes identically at
+		// the opacity-40 the finding was about, so assert the computed value:
+		// the class is not the claim, the rendered contrast is.
+		for (const id of ['inbox-empty', 'scheduled-empty', 'activity-empty']) {
+			const opacity = await page.getByTestId(id)
+				.evaluate((el) => parseFloat(getComputedStyle(el).opacity))
+			expect(
+				opacity,
+				`${id} renders at ${opacity} opacity, which is the faint state this fix removed`
+			).toBeGreaterThanOrEqual(0.6)
+		}
 	})
 
 	test('send controls gate on recipient presence, message text, and the schedule slider', async ({ browser }) => {
@@ -156,7 +170,11 @@ test.describe('/demos/notifications', () => {
 			await expect(a.getByTestId('push-wait')).toHaveCount(0)
 			// The activity entry names the worker that handled it - the
 			// cluster-wiring surface this page was missing.
-			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-instance')).toHaveText(/^on \S+$/, { timeout: 8_000 })
+			// /^on \S+$/ proves only that a chip exists - a literal placeholder
+			// satisfies it while surfacing nothing about the cluster, which is
+			// exactly the finding. Instance ids are hex (the same identity
+			// cluster-cron and ops render), so require that shape instead.
+			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-instance')).toHaveText(/^on [0-9a-f]{6,}$/i, { timeout: 8_000 })
 
 			// Card cleared from B's inbox; the text input was reset on success.
 			await expect(inboxCard).toHaveCount(0)

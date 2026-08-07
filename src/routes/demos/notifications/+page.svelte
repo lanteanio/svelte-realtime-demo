@@ -398,7 +398,7 @@
 				connection registry at work. (One local instance shows one id.)
 			</p>
 			{#if activityList.length === 0}
-				<p class="opacity-70 text-sm">Nothing yet.</p>
+				<p class="opacity-70 text-sm" data-testid="activity-empty">Nothing yet.</p>
 			{:else}
 				<ul class="space-y-1 text-xs font-mono" data-testid="activity-list">
 					{#each activityList as evt (evt.id)}
