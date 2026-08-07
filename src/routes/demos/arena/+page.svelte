@@ -267,7 +267,7 @@
 					<g transform="translate({VIEW_W - MAP_W - 10}, 10)" data-testid="arena-minimap">
 						<rect width={MAP_W} height={MAP_H} rx="3" class="fill-base-100/80 stroke-base-content/30" />
 						{#each [...view.remote] as [key, s] (key)}
-							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={s.npc ? 'fill-secondary' : 'fill-accent'} />
+							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={s.npc ? 'fill-secondary' : 'fill-accent'} data-testid="arena-minimap-entity" />
 						{/each}
 						<rect
 							x={Math.max(0, Math.min(MAP_W - mapX(VIEW_W), mapX(cam.x - VIEW_W / 2)))}

@@ -1,5 +1,15 @@
 import { test, expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+
+// A `border` class paints nothing if its colour is transparent, so asking
+// whether an element HAS a border class answers a different question from
+// whether it draws a visible edge. Reads the alpha out of a computed colour.
+function alphaOf(color) {
+	const match = color.match(/rgba?\(([^)]+)\)/)
+	if (!match) return 1
+	const parts = match[1].split(',').map((value) => parseFloat(value))
+	return parts.length > 3 ? parts[3] : 1
+}
 
 function collectErrors(page) {
 	const errors = []
@@ -74,6 +84,27 @@ test.describe('/demos/arena', () => {
 		await expect(page.getByTestId('arena-minimap')).toBeVisible()
 		await expect(page.getByTestId('arena-minimap-view')).toBeVisible()
 		await expect(page.getByTestId('arena-minimap-me')).toBeVisible()
+		// The minimap's whole claim is that it draws the RECEIVED set, with the
+		// dark remainder standing for what culling withheld. A visible frame,
+		// camera window and own dot prove none of that: the entity dots can be
+		// removed entirely and every assertion above still passes. Compare the
+		// drawn dots against the HUD's own count, read in ONE evaluate so a
+		// moving entity cannot race the two reads apart.
+		const drawn = await page.evaluate(() => {
+			const text = document.querySelector('[data-testid="arena-hud"]')?.textContent ?? ''
+			return {
+				dots: document.querySelectorAll('[data-testid="arena-minimap-entity"]').length,
+				receiving: Number(text.match(/receiving\s+(\d+)/)?.[1] ?? -1)
+			}
+		})
+		expect(drawn.dots, 'the minimap draws no received entities at all').toBeGreaterThan(0)
+		expect(drawn.dots, 'the minimap must draw exactly the received set the HUD reports').toBe(drawn.receiving)
+		// The count above is a DOM count, which a hidden node would still
+		// satisfy, so confirm the dots are actually painted.
+		await expect(
+			page.getByTestId('arena-minimap-entity').first(),
+			'the minimap entity dots are in the DOM but not painted'
+		).toBeVisible()
 		await expect(page.getByTestId('arena-radius-note')).toContainText('beyond its top and bottom edges')
 		await expect(page.getByTestId('arena-remote').first()).toBeVisible()
 		await expect.poll(async () => (await hud(page)).total, { timeout: 15_000 }).toBeGreaterThanOrEqual(150)
@@ -214,5 +245,52 @@ test.describe('/demos/arena', () => {
 			message: 'received set should settle after panning',
 			timeout: 12_000
 		}).toBeLessThan(60)
+	})
+
+	// The geometry pin above asserts up.height >= 30 on a FINE pointer, where
+	// btn-sm already clears 30 - so the coarse-pointer floor, which is the
+	// whole size half of this control's finding, went unmeasured. Strip the
+	// pointer-coarse classes and that pin still passes; this one does not.
+	test('the pan d-pad meets the 44px floor on a coarse-pointer rung', async ({ browser }) => {
+		const { context, page } = await openTouchPage(browser)
+		try {
+			await open(page)
+			// The d-pad exists only in spectate mode.
+			await page.getByTestId('arena-spectate-toggle').click()
+			await expect(page.getByTestId('arena-pan-grid')).toBeVisible()
+			for (const direction of ['up', 'left', 'down', 'right']) {
+				await expectTouchTarget(page.getByTestId(`arena-pan-${direction}`))
+			}
+		} finally {
+			await context.close()
+		}
+	})
+
+	// The stale chip is a quarter-opacity fill that used to disappear into a
+	// dark card. The fix keeps the alpha on the FILL and gives the element a
+	// full-opacity border, so the chip still reads as a chip. Asserting the
+	// `border` CLASS proves nothing: a border class with a transparent colour
+	// paints no edge at all, and that state passes a class check. Ask instead
+	// whether an edge is actually painted, in both themes, since a swatch that
+	// only survives one of them has not solved the problem.
+	test('the stale swatch paints a visible edge in both themes', async ({ page }) => {
+		await open(page)
+		for (const theme of ['light', 'dark']) {
+			await page.evaluate((value) => document.documentElement.setAttribute('data-theme', value), theme)
+			const edge = await page.getByTestId('arena-stale-swatch').evaluate((el) => {
+				const style = getComputedStyle(el)
+				return {
+					color: style.borderTopColor,
+					width: parseFloat(style.borderTopWidth),
+					style: style.borderTopStyle
+				}
+			})
+			expect(edge.width, `the stale swatch has no border width in ${theme}`).toBeGreaterThan(0)
+			expect(edge.style, `the stale swatch border is not drawn in ${theme}`).not.toBe('none')
+			expect(
+				alphaOf(edge.color),
+				`the stale swatch border is ${edge.color} in ${theme}, which paints no visible edge`
+			).toBeGreaterThan(0.2)
+		}
 	})
 })
