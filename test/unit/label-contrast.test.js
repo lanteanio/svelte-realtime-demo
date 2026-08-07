@@ -24,7 +24,9 @@ test('every identity colour gets a label that clears WCAG AA for normal text', (
 // the bar. Ratios are asserted with a tolerance rather than to the digit, so
 // this pins the OUTCOME and not an implementation detail.
 test('the colours the old rule got wrong are now well clear of the bar', () => {
-	for (const [color, whiteRatio] of [['#14b8a6', 2.49], ['#3b82f6', 3.68], ['#f97316', 2.80]]) {
+	/** @type {Array<[string, number]>} */
+	const measuredAgainstWhite = [['#14b8a6', 2.49], ['#3b82f6', 3.68], ['#f97316', 2.80]]
+	for (const [color, whiteRatio] of measuredAgainstWhite) {
 		// White really was that bad on these - the old rule chose it anyway.
 		assert.ok(
 			Math.abs(contrastRatio(color, '#ffffff') - whiteRatio) < 0.05,
