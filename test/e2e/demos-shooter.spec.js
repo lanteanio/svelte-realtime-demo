@@ -28,9 +28,11 @@ test.describe('/demos/shooter', () => {
 		await expect(page.getByTestId('sh-you-label')).toBeVisible()
 		const slider = page.getByTestId('sh-lag')
 		await expect(slider).toHaveAttribute('min', '0')
-		// The slider runs PAST maxRewindMs on purpose: the band beyond the
-		// marked cap is where aimed shots start missing, which is the only
-		// way the cap is experienceable rather than prose.
+		// The slider runs past the marked value, but the mark is a label for
+		// maxRewindMs rather than a threshold in this control: the render-time
+		// a shot carries is stamped at send time, so a delay invented on this
+		// page never reaches the server's rewind age. Asserting a miss beyond
+		// the mark would be asserting a mechanism the transport does not have.
 		await expect(slider).toHaveAttribute('max', '600')
 		await expect(slider).toHaveAttribute('step', '50')
 		await expect(page.getByTestId('sh-lag-cap-mark')).toHaveText('400 = cap')
@@ -154,5 +156,143 @@ test.describe('/demos/shooter', () => {
 		}, { message: 'rendered target hits must credit score and emit a server hit event', timeout: 5_000 })
 			.toBeGreaterThanOrEqual(1)
 		await expect(page.getByTestId('sh-last-hit')).toBeVisible()
+	})
+
+	test('Enter fires when nothing owns it, and a focused link keeps its own Enter', async ({ page }) => {
+		const errors = collectShooterErrors(page)
+		await openShooter(page)
+
+		// Enter with nothing focused is a fire path, which is the keyboard gap
+		// this page was changed to close.
+		await page.evaluate(() => {
+			if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+		})
+		await page.keyboard.press('Enter')
+		await expect.poll(async () => (await shooterStats(page)).shots).toBe(1)
+
+		// Enter with a link focused belongs to the link. Consuming it here made
+		// every link in the page and its surrounding layout inoperable by
+		// keyboard - the same WCAG 2.1.1 failure the fire path was added to fix,
+		// moved somewhere else. Navigation is the only honest proof, since a
+		// handler that fires AND calls preventDefault leaves the shot counter
+		// looking perfectly healthy.
+		const home = page.locator('a.demos-home-link')
+		await home.focus()
+		await expect(home).toBeFocused()
+		await page.keyboard.press('Enter')
+		await expect(page).toHaveURL(/\/$/)
+		expect(errors).toEqual([])
+	})
+
+	test('the arena card wraps its content instead of stretching to the taller column', async ({ page }) => {
+		await page.setViewportSize({ width: 1440, height: 900 })
+		const errors = collectShooterErrors(page)
+		await openShooter(page)
+
+		// A stretched card takes the grid row's height, and the row is as tall as
+		// its tallest item - so a stretched arena card measures EXACTLY the side
+		// column's height, and a wrapped one measures less. That equality is the
+		// discriminator, and it needs no tolerance.
+		//
+		// Note what cannot be used here: the card's height against its own
+		// card-body's. daisyUI gives card-body flex-grow, so the body stretches
+		// with the card and those two are equal either way - an assertion that
+		// looks like a measurement and can never fail.
+		const geometry = await page.getByTestId('sh-arena-card').evaluate((card) => {
+			const grid = card.parentElement
+			const side = grid?.querySelector('[data-testid="sh-side-column"]')
+			return {
+				columns: grid ? getComputedStyle(grid).gridTemplateColumns.split(' ').length : 0,
+				cardHeight: card.getBoundingClientRect().height,
+				sideHeight: side?.getBoundingClientRect().height ?? 0
+			}
+		})
+
+		// A stacked layout has no taller sibling to stretch to, so the band could
+		// not exist and the comparison below would prove nothing.
+		expect(geometry.columns, 'the two-column layout did not engage at 1440px').toBe(2)
+		expect(geometry.cardHeight).toBeGreaterThan(0)
+		expect(geometry.sideHeight).toBeGreaterThan(0)
+		expect(
+			geometry.cardHeight,
+			`arena card is ${Math.round(geometry.cardHeight)}px beside a ${Math.round(geometry.sideHeight)}px column - matching it means the card took the row's height instead of wrapping its content, and the surplus is dead space under the caption`
+		).toBeLessThan(geometry.sideHeight)
+		expect(errors).toEqual([])
+	})
+
+	test('a lagged click is acknowledged at once, at the point it was clicked', async ({ page }) => {
+		const errors = collectShooterErrors(page)
+		await openShooter(page)
+
+		const slider = page.getByTestId('sh-lag')
+		await slider.fill('400')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 400ms' })).toBeVisible()
+		await slider.blur()
+
+		// Far from the player dot, so a receipt drawn at the shooter instead of
+		// at the click could not pass the distance check below.
+		const aimX = 120
+		const aimY = 90
+		await clickRangeAt(page, aimX, aimY)
+
+		const ring = page.getByTestId('sh-click-ring').first()
+		await expect(ring).toBeVisible()
+		const at = await ring.evaluate((node) => ({
+			x: Number(node.getAttribute('cx')),
+			y: Number(node.getAttribute('cy'))
+		}))
+		// The receipt is on screen while the shot is still inside its send
+		// delay. That window is the whole finding: 400ms of silence on the
+		// reported path is what trains a visitor to click again.
+		expect((await shooterStats(page)).shots).toBe(0)
+		expect(
+			Math.hypot(at.x - aimX, at.y - aimY),
+			`receipt drawn at ${at.x},${at.y} for a click at ${aimX},${aimY}`
+		).toBeLessThanOrEqual(4)
+
+		await expect.poll(async () => (await shooterStats(page)).shots).toBe(1)
+		expect(errors).toEqual([])
+	})
+
+	test('being shot narrates itself to the victim, through damage and respawn', async ({ browser }) => {
+		test.setTimeout(120_000)
+		const contextA = await browser.newContext()
+		const contextB = await browser.newContext()
+		const a = await contextA.newPage()
+		const b = await contextB.newPage()
+		try {
+			await Promise.all([openShooter(a), openShooter(b)])
+			const hpOf = async (page) => Number(
+				(await page.getByTestId('sh-hp').textContent())?.match(/\d+/)?.[0] ?? 0
+			)
+			const scoreOf = async (page) => (await shooterStats(page)).score
+			const scoreBefore = await scoreOf(a)
+
+			// Aim at where B says it is. Both pages render the same world
+			// coordinates, so B's own dot is the aim point; the ray stops on the
+			// first body, so an NPC drifting across the line costs an attempt
+			// rather than the test.
+			const transitions = []
+			let previous = await hpOf(b)
+			for (let attempt = 0; attempt < 80 && transitions.length < 3; attempt++) {
+				const victim = await ownPosition(b)
+				await clickRangeAt(a, victim.x, victim.y)
+				await a.waitForTimeout(120)
+				const now = await hpOf(b)
+				if (now !== previous) {
+					transitions.push([previous, now])
+					previous = now
+				}
+			}
+
+			// The victim's own reading of the damage, in order, including the
+			// respawn that restores it. An existence check on "hp: <digit>"
+			// passes with hp hard-coded, or frozen, or never wired to the wire.
+			expect(transitions, 'the victim never saw its own hp move').toEqual([[3, 2], [2, 1], [1, 3]])
+			// ...and it was these shots that did it.
+			expect(await scoreOf(a) - scoreBefore).toBeGreaterThanOrEqual(3)
+		} finally {
+			await Promise.allSettled([contextA.close(), contextB.close()])
+		}
 	})
 })

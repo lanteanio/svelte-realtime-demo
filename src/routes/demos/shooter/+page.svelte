@@ -8,13 +8,16 @@
 	uplink + interpolation measurement, capped at maxRewindMs 400) and
 	tests the ray there.
 
-	The wow: drag the latency slider up to 400ms. Your command and shoot
-	sends now leave late (a setTimeout wrapper - a stand-in for a slow
-	uplink), yet shots aimed at where you SEE a target still land: the
-	rewind resolves against the rendered scene, not the server's present.
-	Fairness holds because both rewind legs are server-measured - a client
-	can inflate its latency only by genuinely lagging - and the whole
-	window is capped by maxRewindMs.
+	The compensation covers the legs the server measures itself, your real
+	uplink and interpolation, and nothing else: a shot's render-time is
+	stamped inside shoot() when the send leaves, so the latency slider's
+	setTimeout ages your aim instead of widening the rewind. Shots still
+	land through most of the slider's travel, but that is the orbit speeds
+	being slow enough to keep the drift inside the hitbox (see orbitFor in
+	shooter.js), NOT the rewind absorbing the wait. Fairness holds for the
+	same reason the slider cannot cheat: a client can inflate its measured
+	latency only by genuinely lagging, and the window is capped by
+	maxRewindMs.
 -->
 <script>
 	import MovePad from '$lib/components/MovePad.svelte'
@@ -146,12 +149,27 @@
 		}
 	}
 
+	// Space and Enter belong to whatever control has focus: Enter activates a
+	// link, Space presses a button, either types into an editor. Naming the
+	// element types to skip is what shipped first, and it named buttons but not
+	// anchors - so a focused link stopped navigating, because this handler ate
+	// the key and called preventDefault on it. That traded one keyboard gap for
+	// another. Asking the inverse question keeps a control added to this page
+	// later from silently losing its keys.
+	function ownsItsOwnKeys(target) {
+		if (!(target instanceof Element)) return false
+		if (target instanceof HTMLElement && target.isContentEditable) return true
+		return !!target.closest(
+			'a[href], button, input, select, textarea, summary,'
+			+ ' [contenteditable]:not([contenteditable="false"]),'
+			+ ' [tabindex]:not([tabindex="-1"])'
+		)
+	}
+
 	function onKeydown(e) {
 		if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
 		if (e.key === ' ' || e.key === 'Enter') {
-			// Not from a button: Enter/Space there must keep activating the
-			// control (confirm dialogs, the pad), not fire a shot.
-			if (e.target instanceof HTMLButtonElement) return
+			if (ownsItsOwnKeys(e.target)) return
 			if (e.repeat) return
 			fireAtNearest()
 			e.preventDefault()
@@ -201,10 +219,11 @@
 			Click inside the arena to shoot. The server rewinds every candidate to
 			the instant you rendered it and tests the ray there
 			(<code>live.smooth(&#123; hitTest &#125;)</code>) - so a shot that
-			landed on your screen lands on the server. Crank the latency slider:
-			delayed sends still hit where you saw the target, because the rewind
-			window is server-measured (uplink + interpolation) and capped by
-			<code>maxRewindMs: 400</code>.
+			landed on your screen lands on the server. The window it covers is the
+			one it measured itself - your real uplink and interpolation - capped by
+			<code>maxRewindMs: 400</code>. Crank the latency slider and the
+			compensation does not follow it: a shot is stamped when its send
+			leaves, so the wait ages your aim rather than widening the rewind.
 		</p>
 	</header>
 
@@ -214,8 +233,8 @@
 	<div class="grid gap-4 @5xl:grid-cols-[3fr_2fr]">
 		<!-- self-start: the arena card wraps its content instead of stretching
 		     to the taller column and framing the game in dead space. -->
-		<div class="card bg-base-200 self-start">
-			<div class="card-body p-3 space-y-2">
+		<div class="card bg-base-200 self-start" data-testid="sh-arena-card">
+			<div class="card-body p-3 space-y-2" data-testid="sh-arena-card-body">
 				<!-- svelte-ignore a11y_click_events_have_key_events -->
 				<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 				<svg
@@ -279,7 +298,7 @@
 			</div>
 		</div>
 
-		<div class="space-y-4">
+		<div class="space-y-4" data-testid="sh-side-column">
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
 					<h2 class="card-title text-sm">Score</h2>
@@ -303,9 +322,13 @@
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
 					<h2 class="card-title text-sm">Extra latency: {lagMs}ms</h2>
-					<!-- The slider deliberately exceeds maxRewindMs: a cap taught
-					     only as prose is not learned. Past the mark, shots aimed at
-					     rendered targets start missing - that miss IS the cap. -->
+					<!-- The mark labels what maxRewindMs IS; it is not a threshold in
+					     this slider's behaviour, and the caption must not imply one.
+					     The transport stamps a shot's render-time inside shoot(), at
+					     send time, so a delay invented here never enters the server's
+					     rewind age and the cap cannot be crossed from the app side at
+					     all. Making it crossable needs an app-supplied render stamp
+					     the public API does not expose. -->
 					<input
 						type="range"
 						class="range range-sm"
@@ -321,14 +344,15 @@
 					<p class="text-xs opacity-60">
 						Delays your command/shoot sends with a
 						<code>setTimeout</code> wrapper. The shot fires (and the
-						muzzle flash draws) when the send actually leaves; the
-						rewind then resolves it against the scene as rendered at
-						that instant. Up to 400ms the rewind covers you: a shot
-						aimed at a rendered target lands. Past 400ms the server
-						stops covering for you - the rewind clamps at
-						<code>maxRewindMs</code>, the world it tests is newer than
-						the one you aimed at, and the same aimed shot starts to
-						miss. That miss is the cap doing its fairness job.
+						muzzle flash draws) when the send actually leaves, and the
+						render-time it carries is stamped at that moment - so the
+						server rewinds to when the send left, not to when you
+						clicked. Your aim keeps ageing during the wait while the
+						compensation does not grow to match, so aimed shots start
+						to miss as you drag this up. That is the honest half of
+						the fairness rule: the rewind is measured from your real
+						uplink and interpolation, and a delay you invent locally
+						is not latency you earned.
 					</p>
 				</div>
 			</div>
