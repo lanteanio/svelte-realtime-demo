@@ -26,10 +26,14 @@ const nouns = [
 	'Muffin', 'Noodle', 'Platypus', 'Quokka', 'Starfish', 'Turnip'
 ]
 
-const colors = [
+// Exported so the label-contrast rule can be checked against the WHOLE palette
+// rather than against a copy that can drift out of step with this one.
+export const IDENTITY_COLORS = [
 	'#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6',
 	'#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'
 ]
+
+const colors = IDENTITY_COLORS
 
 /** Generate a random display name and color for a new user. */
 export function generateIdentity() {

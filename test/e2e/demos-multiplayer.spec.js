@@ -14,6 +14,36 @@ import {
 	waitForReactionCount
 } from './multiplayer-helpers.js'
 
+// Computed colours arrive as `rgb(r, g, b)` / `rgba(r, g, b, a)`. These read
+// what actually reached the screen, because the findings here are about
+// rendered appearance and a class or an inline-style presence check is a proxy
+// for it. The WCAG rule itself is exercised across the whole identity palette
+// in test/unit/label-contrast.test.js.
+function channelsOf(value) {
+	return (String(value).match(/[\d.]+/g) ?? []).map(Number)
+}
+
+function alphaOfComputed(value) {
+	const parts = channelsOf(value)
+	return parts.length > 3 ? parts[3] : 1
+}
+
+function luminanceOfComputed(value) {
+	const [r = 0, g = 0, b = 0] = channelsOf(value)
+	const channel = (byte) => {
+		const s = byte / 255
+		return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+	}
+	return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+function contrastOfComputed(a, b) {
+	const la = luminanceOfComputed(a)
+	const lb = luminanceOfComputed(b)
+	const [hi, lo] = la > lb ? [la, lb] : [lb, la]
+	return (hi + 0.05) / (lo + 0.05)
+}
+
 test.describe.configure({ mode: 'serial' })
 
 test.describe('/demos/multiplayer', () => {
@@ -44,10 +74,41 @@ test.describe('/demos/multiplayer', () => {
 		// fingers as well as pointers and dresses itself as interactive.
 		await expect(page.getByText('React - it lands on the canvas for everyone:')).toBeVisible()
 		await expect(page.getByTestId('mp-canvas')).toHaveClass(/cursor-crosshair/)
-		await expect(page.getByTestId('mp-canvas')).toContainText('or drag a finger')
-		// Roster badges pick their label color from the background instead
-		// of fixed white-on-anything.
-		await expect(page.getByTestId('mp-roster').locator('li').first()).toHaveAttribute('style', /color:/)
+		// BOTH instructions, not only the canvas caption: the header intro is
+		// the other half of that finding and can revert on its own.
+		await expect(page.getByTestId('mp-canvas-hint')).toContainText('drag a finger')
+		await expect(page.getByTestId('mp-intro')).toContainText('drag a finger')
+
+		// The crosshair class is one third of the affordance claim. The canvas
+		// edge and the hint's legibility are the other two, and both can be
+		// removed while a class assertion stays green.
+		const canvas = await page.getByTestId('mp-canvas').evaluate((el) => {
+			const style = getComputedStyle(el)
+			return { width: parseFloat(style.borderTopWidth), color: style.borderTopColor }
+		})
+		expect(canvas.width, 'the canvas has no border, so its edge merges with the card').toBeGreaterThan(0)
+		expect(
+			alphaOfComputed(canvas.color),
+			`the canvas border is ${canvas.color}, which paints no visible edge`
+		).toBeGreaterThan(0.1)
+		const hintOpacity = await page.getByTestId('mp-canvas-hint')
+			.evaluate((el) => parseFloat(getComputedStyle(el).opacity))
+		expect(hintOpacity, `the canvas hint renders at ${hintOpacity} opacity`).toBeGreaterThanOrEqual(0.5)
+
+		// An inline `color:` declaration proves only that SOMETHING was set -
+		// an always-white mapping satisfies it, which is the whole complaint.
+		// Measure the contrast that actually reaches the screen. The palette is
+		// checked exhaustively in test/unit/label-contrast.test.js; this proves
+		// the rule survives the trip through the DOM for whichever colour this
+		// visitor drew.
+		const chip = await page.getByTestId('mp-roster').locator('li').first().evaluate((el) => {
+			const style = getComputedStyle(el)
+			return { color: style.color, background: style.backgroundColor }
+		})
+		expect(
+			contrastOfComputed(chip.color, chip.background),
+			`roster chip renders ${chip.color} on ${chip.background}, below WCAG AA for normal text`
+		).toBeGreaterThanOrEqual(4.5)
 		await expect(page.getByRole('link', { name: 'multiplayer.js' })).toHaveAttribute(
 			'href',
 			'https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/multiplayer.js'

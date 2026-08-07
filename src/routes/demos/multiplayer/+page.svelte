@@ -25,6 +25,7 @@
 <script>
 	import { lounge } from '$live/demos/multiplayer'
 	import { untrack } from 'svelte'
+	import { labelColorOn } from '$lib/label-contrast'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -68,16 +69,10 @@
 		return err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
 	}
 
-	// Identity colors are arbitrary; pale ones make fixed white text
-	// unreadable. Pick the label color from the background's perceived
-	// luminance (BT.709 weights) instead.
-	function textOn(color) {
-		const m = /^#?([0-9a-f]{6})$/i.exec(color ?? '')
-		if (!m) return '#ffffff'
-		const n = parseInt(m[1], 16)
-		const lum = 0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)
-		return lum > 150 ? '#1f2937' : '#ffffff'
-	}
+	// Identity colours are arbitrary, so the label colour is measured against
+	// the background rather than guessed. The rule lives in $lib/label-contrast
+	// so the whole palette can be checked at once; this page only ever renders
+	// the one colour its visitor drew.
 
 	// One cursor publish per animation frame, no matter how fast the
 	// pointer moves. Coordinates are normalized to the canvas so dots
@@ -203,7 +198,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Multiplayer lounge: one room, every surface</h1>
-		<p class="text-sm opacity-70 mt-1">
+		<p class="text-sm opacity-70 mt-1" data-testid="mp-intro">
 			A single <code>live.multiplayer</code> export with
 			<code>cursors</code>, <code>typing</code>, <code>locks</code>, and
 			<code>reactions</code> enabled. Move your pointer - or drag a
@@ -228,10 +223,10 @@
 			<h2 class="card-title text-sm">In the lounge</h2>
 			<ul class="flex flex-wrap gap-2 text-xs" data-testid="mp-roster">
 				{#if me}
-					<li class="badge gap-1" style:background={me.color} style:color={textOn(me.color)}>{me.name} (you)</li>
+					<li class="badge gap-1" style:background={me.color} style:color={labelColorOn(me.color)}>{me.name} (you)</li>
 				{/if}
 				{#each room.others as person (person.key)}
-					<li class="badge gap-1" style:background={person.color} style:color={textOn(person.color)} data-testid="mp-roster-other">
+					<li class="badge gap-1" style:background={person.color} style:color={labelColorOn(person.color)} data-testid="mp-roster-other">
 						{person.data?.name ?? 'anon'}
 					</li>
 				{/each}
@@ -258,7 +253,7 @@
 						data-testid="mp-cursor"
 					>
 						<div class="w-3 h-3 rounded-full border-2 border-base-100 -translate-x-1/2 -translate-y-1/2" style:background={c.color}></div>
-						<div class="text-[10px] font-semibold px-1 rounded whitespace-nowrap" style:background={c.color} style:color={textOn(c.color)}>
+						<div class="text-[10px] font-semibold px-1 rounded whitespace-nowrap" style:background={c.color} style:color={labelColorOn(c.color)}>
 							{nameFor(c.key)}
 						</div>
 					</div>
@@ -272,7 +267,10 @@
 						{emojiFor(r.token)}
 					</div>
 				{/each}
-				<p class="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs opacity-60 pointer-events-none whitespace-nowrap">
+				<p
+					class="absolute bottom-2 left-1/2 -translate-x-1/2 text-xs opacity-60 pointer-events-none whitespace-nowrap"
+					data-testid="mp-canvas-hint"
+				>
 					Move your pointer - or drag a finger - here. Cursors are volatile sends, one per frame.
 				</p>
 			</div>
