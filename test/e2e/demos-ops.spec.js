@@ -73,6 +73,20 @@ test.describe('/demos/ops', () => {
 			const rss = (await page.getByTestId('ops-memory-mb').textContent())?.trim()
 			expect(rss, 'RSS must be a real reading or an explicit no-reading dash').toMatch(/^(\d+|-)$/)
 			if (rss !== '-') expect(Number(rss), 'a reported RSS cannot be 0 MB for a live process').toBeGreaterThan(0)
+			// Units belong to the LABEL, never glued to the value. This card
+			// rendered "0KB" while its siblings put the unit in the label
+			// ("RSS MB", "publish/s"), which broke the scan rhythm on the last
+			// of the four stats. Keeping every value the same shape is also
+			// what lets the four hold one baseline in a narrow column, so this
+			// is the same fix the baseline test below depends on.
+			await expect(page.getByTestId('ops-pressure-card')).toContainText('max buffered KB')
+			const postureValues = await page.getByTestId('ops-posture-stats').locator('dd')
+				.evaluateAll((els) => els.map((e) => e.textContent.trim()))
+			expect(postureValues.length).toBeGreaterThanOrEqual(2)
+			for (const value of postureValues) {
+				expect(value, 'a posture value must be a bare number or an explicit dash, never a value with its unit glued on')
+					.toMatch(/^(\d+(\.\d+)?|-)$/)
+			}
 		} else {
 			await expect(page.getByTestId('ops-pressure-missing')).toBeVisible()
 		}
@@ -136,6 +150,66 @@ test.describe('/demos/ops', () => {
 			}
 		} finally {
 			await other.close()
+		}
+	})
+
+	// The admin plane's single actionable artifact needs 554px and was clipped
+	// mid-token below ~900px, with no scrollbar, fade or control signalling
+	// that the rest existed. A Copy button answers that only if it copies:
+	// asserting the button is VISIBLE, which is all the suite did before,
+	// would survive a control wired to nothing at all.
+	test('the admin one-liner is actually copyable, not merely offered', async ({ page, context }) => {
+		await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+		await openOps(page)
+
+		await page.getByTestId('ops-curl-copy').click()
+		// The label flip is the visible acknowledgement...
+		await expect(page.getByTestId('ops-curl-copy')).toHaveText('Copied')
+
+		// ...and this is the part the old pin never checked. What lands on the
+		// clipboard must be exactly what the card displays, or the control
+		// hands over a command the page never showed.
+		const clipboard = await page.evaluate(() => navigator.clipboard.readText())
+		const shown = (await page.getByTestId('ops-curl').textContent())?.trim()
+		expect(clipboard.trim()).toBe(shown)
+		expect(clipboard).toContain('Authorization: Bearer $ADMIN_TOKEN')
+		expect(clipboard).toContain('/__realtime/introspect')
+	})
+
+	// The four posture stats stepped to 4 columns at a 640px VIEWPORT, but the
+	// sidebar takes 208px there, so each column was about 100px: "max buffered"
+	// wrapped and its value dropped a baseline below the other three, turning
+	// one scannable row into two ragged ones. The step is keyed to the card's
+	// own width now, so this asserts the behaviour at the exact rung reported.
+	test('the admission posture stats hold their baselines where the sidebar squeezes the card', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 640, height: 900 } })
+		const page = await context.newPage()
+		try {
+			await openOps(page)
+			const stats = page.getByTestId('ops-posture-stats')
+			await expect(stats).toBeVisible()
+
+			// Keyed to the CONTAINER: at a 640 viewport the card sits far under
+			// the @2xl rung, so the 4-column step must not engage here. That is
+			// precisely the difference the fix turned on, because the old
+			// viewport-keyed rung fired at exactly this width.
+			const columns = await stats.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)
+			expect(columns, 'the 4-column step must be keyed to the card width, not the viewport').toBe(2)
+
+			// With N values in C columns the values must occupy exactly
+			// ceil(N/C) baselines. A wrapped label drops its own value one line
+			// and shows up here as an extra distinct baseline - which is the
+			// reported symptom, measured rather than described.
+			const tops = await stats.locator('dd')
+				.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)))
+			expect(tops.length).toBeGreaterThanOrEqual(2)
+			const expected = Math.ceil(tops.length / columns)
+			expect(
+				new Set(tops).size,
+				`posture values sit on ${new Set(tops).size} baselines; ${expected} expected for ${tops.length} values in ${columns} columns`
+			).toBe(expected)
+		} finally {
+			await context.close()
 		}
 	})
 

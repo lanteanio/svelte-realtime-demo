@@ -284,7 +284,7 @@
 				<!-- Units live in the labels, so every value is a bare number
 				     of the same shape and the four stats keep one baseline
 				     even where the column is narrow. -->
-				<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-2 text-xs items-baseline">
+				<dl class="grid grid-cols-2 @2xl:grid-cols-4 gap-2 text-xs items-baseline" data-testid="ops-posture-stats">
 					<div>
 						<dt class="opacity-60">publish/s</dt>
 						<dd class="font-bold tabular-nums" data-testid="ops-publish-rate">{stat(pressure.publishRate)}</dd>
