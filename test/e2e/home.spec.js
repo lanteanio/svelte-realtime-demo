@@ -176,6 +176,23 @@ test.describe('home + gallery', () => {
 			await expect(tile.locator('[data-testid="tile-desc"]')).not.toHaveText('')
 		}
 
+		// A tile description is the entry path to its demo, so an API named
+		// here that does not exist sends a visitor looking for something they
+		// will never find - and worse, contradicts what the demo itself
+		// teaches once they arrive. cluster-cron advertised
+		// `live.configureCron({ leader })`; the export is the standalone
+		// `configureCron`, which is what the demo's own wiring panel shows.
+		const clusterCron = demoTile(page, 'cluster-cron').locator('[data-testid="tile-desc"]')
+		await expect(clusterCron).toContainText('configureCron({ leader })')
+		await expect(clusterCron).not.toContainText('live.configureCron')
+		// ...and no other tile reintroduces the same non-existent name.
+		const descriptions = await page.getByTestId('tile-desc')
+			.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''))
+		expect(
+			descriptions.filter((text) => text.includes('live.configureCron')),
+			'a gallery description names an export that does not exist'
+		).toEqual([])
+
 		const filter = page.getByTestId('demos-filter')
 		await filter.fill('CRDT')
 		await expect(page.getByTestId('demos-filter-count')).toHaveText('2 / 34')

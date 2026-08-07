@@ -253,7 +253,7 @@ export async function upgrade({ cookies }) {
  *   notifications scheduler fires no-op until first connect.
  * - `wirePublishRateMetrics(...)` - one-shot gauge registration
  *   against the worker-local `platform.pressure` snapshot.
- * - `live.configureCron({ leader })` - gates the cron tick on the
+ * - `configureCron({ leader })` - gates the cron tick on the
  *   Redis-backed leader-election primitive so cron schedules fire
  *   ONCE across the cluster instead of N times across N workers.
  *   Single-instance dev: this worker is always the leader.

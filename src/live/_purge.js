@@ -25,7 +25,7 @@
  *    chunk idempotency keyspace.
  *
  * Both crons inherit cluster-singleton semantics from the global
- * `live.configureCron({ leader })` wiring in src/hooks.ws.js, so each fires
+ * `configureCron({ leader })` wiring in src/hooks.ws.js, so each fires
  * exactly once per interval across the whole cluster.
  *
  * Interval validation: requested value must be in 1..60 and divide 60 evenly
