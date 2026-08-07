@@ -70,6 +70,26 @@ test.describe('/demos/effect', () => {
 		await expect(page.getByTestId('place-qty')).toHaveAttribute('max', '20')
 		await expect(page.getByTestId('place-qty')).toHaveAttribute('step', '1')
 		await expect(page.locator('header strong')).not.toHaveText('')
+
+		// Clear feeds is the reset affordance, and as a borderless btn-ghost it
+		// read as a caption rather than a control - especially where it wraps
+		// alone onto its own row. Asserting a class would work, but the claim
+		// is that it LOOKS clickable, and btn-ghost keeps its border width
+		// while painting the border transparent - so width proves nothing and
+		// only the painted edge does.
+		const chrome = await page.getByTestId('clear').evaluate((el) => {
+			const style = getComputedStyle(el)
+			return { width: parseFloat(style.borderTopWidth), color: style.borderTopColor }
+		})
+		expect(chrome.width, 'Clear feeds has no border width at all').toBeGreaterThan(0)
+		const alpha = (() => {
+			const parts = (chrome.color.match(/[\d.]+/g) ?? []).map(Number)
+			return parts.length > 3 ? parts[3] : 1
+		})()
+		expect(
+			alpha,
+			`Clear feeds paints its border as ${chrome.color}, so it reads as text rather than a control`
+		).toBeGreaterThan(0.1)
 	})
 
 	test('feed cards stay stacked at 640px and become three readable columns at 768px', async ({ page }) => {

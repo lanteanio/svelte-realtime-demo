@@ -116,4 +116,37 @@ test.describe('/demos/phases', () => {
 		await expect(copy).toContainText('the log above')
 		await expect(copy.getByRole('link', { name: /counter-resume/ })).toHaveAttribute('href', '/demos/counter-resume')
 	})
+
+	// A raw "CODE: message" tells a visitor what broke internally and nothing
+	// about what to do, so the framing and the recovery hint are the finding.
+	// This branch was recorded as unreachable, which left the copy unpinned and
+	// free to be deleted silently. It is reachable: an attach in flight when the
+	// socket drops fails for real, which is a genuine failure rather than a
+	// simulated error string. The interception arms immediately before the
+	// click so it cannot fire during load or detach.
+	test('a failed attach explains itself and says what to do next', async ({ page }) => {
+		let armed = false
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((message) => {
+				server.send(message)
+				if (armed) ws.close()
+			})
+			server.onMessage((message) => ws.send(message))
+		})
+		await openPhases(page)
+		await detach(page)
+		await expect(page.getByTestId('ph-attach')).toBeEnabled()
+
+		armed = true
+		await page.getByTestId('ph-attach').click()
+
+		const error = page.getByTestId('ph-attach-error')
+		await expect(error).toBeVisible({ timeout: 20_000 })
+		// Both halves of the request: name the operation that failed, and give
+		// the visitor a next step. The underlying code stays visible, so this
+		// frames the raw message rather than hiding it.
+		await expect(error).toContainText('Attach failed')
+		await expect(error).toContainText('Try Attach again')
+	})
 })
