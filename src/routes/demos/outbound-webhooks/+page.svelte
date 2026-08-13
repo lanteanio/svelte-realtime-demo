@@ -290,7 +290,7 @@
 
 	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
 		<p>
-			Server: <code>orderEvents = live.webhooks.outbound(['demos:outbound:orders'],
+			Server: <code class="break-all">orderEvents = live.webhooks.outbound(['demos:outbound:orders'],
 			&#123; url, secret, urlMode: 'off', validateUrl, retry, timeoutMs,
 			idempotencyKey &#125;)</code>. The sink is same-host loopback -
 			exactly what the default SSRF guard blocks - so the config uses

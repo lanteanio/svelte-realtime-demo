@@ -134,41 +134,70 @@ test.describe('/demos/outbound-webhooks', () => {
 		await waitForDlq(page, tracked)
 	})
 
-	// The finding was measured at 412, 390, 360 and 320, where the unbroken
-	// token lost characters off the content edge - "demos:outbo" at 320. The
-	// existing pin asserts the break-all CLASS, which a `whitespace-nowrap`
-	// sitting beside it satisfies while clipping exactly as before. Measure the
-	// overflow itself, at the rungs the finding named.
+	// The rungs the finding measured at, where an unbroken token lost characters
+	// off the content edge - "demos:outbo" at 320.
+	const NARROW_RUNGS = [[412, 915], [390, 844], [360, 640], [320, 568]]
+
+	/**
+	 * Assert a long inline token stays inside its container's content box.
+	 *
+	 * Measured with getClientRects against the PARENT's content width, not
+	 * scrollWidth/clientWidth on the code element itself: <code> is a
+	 * non-replaced inline box, and both of those are defined as 0 there, so
+	 * the obvious version of this assertion reads 0 <= 0 and passes whatever
+	 * the token does. A wrapped token produces several rects, each inside the
+	 * content width; an unwrappable one produces a single rect wider than it,
+	 * and that overhang is the clipping.
+	 *
+	 * Asserting the `break-all` CLASS instead is what let this regress before:
+	 * a `whitespace-nowrap` sitting beside it satisfies the class check while
+	 * clipping exactly as the finding described. Only the geometry settles it.
+	 */
+	async function expectTokenFits(locator, label, width, height) {
+		const size = await locator.evaluate((el) => {
+			const parent = el.parentElement
+			const style = getComputedStyle(parent)
+			const contentWidth = parent.clientWidth
+				- parseFloat(style.paddingLeft || '0')
+				- parseFloat(style.paddingRight || '0')
+			const rects = Array.from(el.getClientRects())
+			return { widest: Math.max(...rects.map((r) => r.width)), contentWidth, lines: rects.length }
+		})
+		// Guard against the measurement silently going vacuous again.
+		expect(size.contentWidth, `${label}: measured a zero-width container`).toBeGreaterThan(0)
+		expect(size.lines, `${label}: measured no rendered line boxes`).toBeGreaterThan(0)
+		expect(
+			size.widest,
+			`${label} overhangs its container by ${Math.round(size.widest - size.contentWidth)}px at ${width}x${height}, so characters are clipped`
+		).toBeLessThanOrEqual(size.contentWidth + 1)
+	}
+
 	test('the intro token wraps instead of clipping at every narrow rung', async ({ browser }) => {
-		for (const [width, height] of [[412, 915], [390, 844], [360, 640], [320, 568]]) {
+		for (const [width, height] of NARROW_RUNGS) {
 			const context = await browser.newContext({ viewport: { width, height } })
 			const page = await context.newPage()
 			try {
 				await openOutbound(page)
-				// Measured with getClientRects against the PARENT's content
-				// width, not scrollWidth/clientWidth on the code element
-				// itself: <code> is a non-replaced inline box, and both of
-				// those are defined as 0 there, so the obvious version of this
-				// assertion reads 0 <= 0 and passes whatever the token does.
-				// A wrapped token produces several rects, each inside the
-				// content width; an unwrappable one produces a single rect
-				// wider than it, and that overhang is the clipping.
-				const size = await page.locator('header code').first().evaluate((el) => {
-					const parent = el.parentElement
-					const style = getComputedStyle(parent)
-					const contentWidth = parent.clientWidth
-						- parseFloat(style.paddingLeft || '0')
-						- parseFloat(style.paddingRight || '0')
-					const rects = Array.from(el.getClientRects())
-					return { widest: Math.max(...rects.map((r) => r.width)), contentWidth, lines: rects.length }
-				})
-				// Guard against the measurement silently going vacuous again.
-				expect(size.contentWidth, 'measured a zero-width container').toBeGreaterThan(0)
-				expect(size.lines, 'measured no rendered line boxes').toBeGreaterThan(0)
-				expect(
-					size.widest,
-					`the intro token overhangs its container by ${Math.round(size.widest - size.contentWidth)}px at ${width}x${height}, so characters are clipped`
-				).toBeLessThanOrEqual(size.contentWidth + 1)
+				await expectTokenFits(page.locator('header code').first(), 'the intro token', width, height)
+			} finally {
+				await context.close()
+			}
+		}
+	})
+
+	// The closing aside carries the longest token on the page - the whole
+	// `live.webhooks.outbound(...)` declaration. It reads as prose with spaces
+	// in it, which is why it was passed over: the clipping risk is not the
+	// token's total length but its longest unbreakable RUN, and
+	// `live.webhooks.outbound(['demos:outbound:orders'],` has no space in it
+	// at all. Same failure as the intro token, same rungs, one section lower.
+	test('the closing aside token wraps instead of clipping at every narrow rung', async ({ browser }) => {
+		for (const [width, height] of NARROW_RUNGS) {
+			const context = await browser.newContext({ viewport: { width, height } })
+			const page = await context.newPage()
+			try {
+				await openOutbound(page)
+				await expectTokenFits(page.locator('aside code').first(), 'the closing aside token', width, height)
 			} finally {
 				await context.close()
 			}
