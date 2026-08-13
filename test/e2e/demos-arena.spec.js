@@ -119,6 +119,59 @@ test.describe('/demos/arena', () => {
 		expect(errors).toEqual([])
 	})
 
+	// The finding asked the map to show four things; the interest circle was
+	// the one still missing. It is also the only one that carries the demo's
+	// actual claim - culling follows where the CAMERA looks, not where the
+	// entity is - so drawing it is half the job and pinning that it tracks the
+	// camera is the other half.
+	test('the minimap draws the camera interest circle, and it tracks the camera rather than the entity', async ({ page }) => {
+		await open(page)
+		const circle = page.getByTestId('arena-minimap-interest')
+		const mapMe = page.getByTestId('arena-minimap-me')
+		await expect(circle).toBeVisible()
+
+		const attrs = (loc, ...names) =>
+			loc.evaluate((el, ns) => Object.fromEntries(ns.map((n) => [n, Number(el.getAttribute(n))])), names)
+
+		// Derive the map's scale from the page rather than restating the
+		// 2400x1600 -> 180x120 numbers here. A test carrying its own copy of
+		// them agrees with a resized map that has silently become wrong.
+		const world = await position(page)
+		const me0 = await attrs(mapMe, 'cx', 'cy')
+		const scale = me0.cx / world.x
+		expect(scale, 'could not derive the minimap scale from the page').toBeGreaterThan(0)
+
+		// The radius the page ADVERTISES to the visitor, read from the legend,
+		// so the drawn circle and the caption cannot quietly disagree.
+		const legend = (await page.getByTestId('arena-radius-legend').textContent()) ?? ''
+		const advertised = Number(legend.match(/delivery stops at (\d+)/)?.[1])
+		expect(advertised, 'the radius legend no longer names the delivery radius').toBeGreaterThan(0)
+
+		const c0 = await attrs(circle, 'cx', 'cy', 'r')
+		expect(c0.r, 'the interest circle is not the radius the legend advertises').toBeCloseTo(advertised * scale, 0)
+		// Not spectating, so the interest centre is the entity.
+		expect(c0.cx).toBeCloseTo(me0.cx, 0)
+		expect(c0.cy).toBeCloseTo(me0.cy, 0)
+
+		// Spectating decouples the two. A circle pinned to the entity dot
+		// satisfies every assertion above and fails here.
+		await page.getByTestId('arena-spectate-toggle').click()
+		await expect(page.getByTestId('arena-spectate-toggle')).toBeChecked()
+		const { width: mapW } = await attrs(page.getByTestId('arena-minimap').locator('rect').first(), 'width')
+		const cam0 = await camera(page)
+		// Pan toward the middle of the world, so the camera cannot clamp at an
+		// edge and leave this asserting against a move that never happened.
+		await page.getByTestId(cam0.x > mapW / scale / 2 ? 'arena-pan-left' : 'arena-pan-right').click()
+		await expect.poll(async () => (await camera(page)).x).not.toBe(cam0.x)
+
+		const cam1 = await camera(page)
+		const c1 = await attrs(circle, 'cx', 'cy', 'r')
+		const me1 = await attrs(mapMe, 'cx', 'cy')
+		expect(cam1.x, 'the camera never left the entity, so nothing was decoupled').not.toBe(world.x)
+		expect(c1.cx, 'the interest circle did not follow the camera').toBeCloseTo(cam1.x * scale, 0)
+		expect(me1.cx, 'the entity dot moved, so spectate is not leaving the entity alone').toBeCloseTo(world.x * scale, 0)
+	})
+
 	// The finding asked for three labelled chips "using the same fills as the
 	// dots". Naming the labels proves the chips exist; it says nothing about
 	// the colours, and a legend that names the wrong colour is worse than no

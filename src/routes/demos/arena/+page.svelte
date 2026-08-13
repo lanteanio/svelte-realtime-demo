@@ -185,6 +185,9 @@
 	const MAP_H = 120
 	const mapX = (wx) => (wx * MAP_W) / WORLD_W
 	const mapY = (wy) => (wy * MAP_H) / WORLD_H
+	// 180/2400 and 120/1600 are the same 0.075, so a world circle stays a
+	// circle on the map and one scalar is enough for its radius.
+	const MAP_SCALE = MAP_W / WORLD_W
 
 	// --- World-to-screen, centered on your dot (or the spectate camera) ---
 	const cam = $derived(spectating ? { x: camX, y: camY } : { x: view.local.x, y: view.local.y })
@@ -291,6 +294,18 @@
 						{#each [...view.remote] as [key, s] (key)}
 							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={remoteKind(s.npc).dot} data-testid="arena-minimap-entity" data-kind={remoteKind(s.npc).id} />
 						{/each}
+						<!-- The camera's interest circle, at world scale. This is the
+						     same 420-unit boundary the scene draws as arena-cull-ring,
+						     and the thing the server actually culls by, so it follows
+						     the CAMERA rather than the entity - in spectate they are
+						     not the same point. Drawn against the whole world rect it
+						     is what makes the culling legible: the gap between this
+						     circle and the frame is everything being thrown away. -->
+						<circle
+							cx={mapX(cam.x)} cy={mapY(cam.y)} r={INTEREST_RADIUS * MAP_SCALE}
+							class="fill-none stroke-primary opacity-70" stroke-width="1"
+							data-testid="arena-minimap-interest"
+						/>
 						<rect
 							x={Math.max(0, Math.min(MAP_W - mapX(VIEW_W), mapX(cam.x - VIEW_W / 2)))}
 							y={Math.max(0, Math.min(MAP_H - mapY(VIEW_H), mapY(cam.y - VIEW_H / 2)))}
