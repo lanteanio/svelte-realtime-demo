@@ -176,6 +176,18 @@ test.describe('/demos/notifications', () => {
 			// cluster-cron and ops render), so require that shape instead.
 			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-instance')).toHaveText(/^on [0-9a-f]{6,}$/i, { timeout: 8_000 })
 
+			// The worker id says which instance HANDLED the send; it cannot say
+			// whether the push crossed instances to reach the recipient, which
+			// is the registry's actual job and the thing the page could not
+			// show. Both tabs are on one instance here, so `local` is the
+			// truth and asserting it is a real check rather than a placeholder:
+			// a badge hardcoded to 'relayed via cluster' fails right here, and
+			// the cluster tier asserts the opposite value on the path that
+			// genuinely relays.
+			const via = a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-via')
+			await expect(via).toHaveAttribute('data-via', 'local', { timeout: 8_000 })
+			await expect(via).toHaveText('same instance')
+
 			// Card cleared from B's inbox; the text input was reset on success.
 			await expect(inboxCard).toHaveCount(0)
 			await expect(a.getByTestId('text-input')).toHaveValue('')

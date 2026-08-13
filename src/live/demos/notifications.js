@@ -45,7 +45,7 @@
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
-import { leader, redis } from '$lib/server/redis'
+import { leader, redis, registry } from '$lib/server/redis'
 
 const PUSH_TIMEOUT_MS = 8000
 const ACTIVITY_CAP = 50
@@ -103,6 +103,38 @@ async function appendActivity(entry, ctx) {
 }
 
 /**
+ * Which way a push is about to travel, read from the cluster registry that
+ * decides it.
+ *
+ * `live.push` picks its own path internally - a local socket goes through
+ * `platform.request`, anything else falls through to `registry.request` - and
+ * reports only the reply, so the one thing this demo exists to show is the one
+ * thing the call does not tell you. Asking the registry the same question it
+ * will ask is what makes the hop visible.
+ *
+ * Compared against `registry.instanceId`, never `leader.instanceId`: the
+ * registry generates its own id and writes THAT into every connection row, so
+ * the leader's id is an unrelated random string and comparing to it would
+ * label every recipient remote, including on a single-instance dev box where
+ * no hop is possible at all.
+ *
+ * A recipient with no row is not offline-by-omission here: the push still
+ * runs, and its own NOT_FOUND is what settles that.
+ */
+async function deliveryPath(toUserId) {
+	try {
+		const owner = await registry.lookup(toUserId)
+		if (!owner?.instanceId) return { via: 'unknown', toInstance: null }
+		const via = owner.instanceId === registry.instanceId ? 'local' : 'cluster'
+		return { via, toInstance: owner.instanceId.slice(0, 8) }
+	} catch {
+		// The badge is a teaching aid; a registry read that fails must not
+		// take the notification down with it.
+		return { via: 'unknown', toInstance: null }
+	}
+}
+
+/**
  * Fire one push and report the outcome to the activity log.
  *
  * On reply: `delivered` (ack: 'ok') or `dismissed` (ack: 'dismiss').
@@ -110,11 +142,15 @@ async function appendActivity(entry, ctx) {
  * offline if neither this instance's local registry nor the cluster
  * registry has them. Other LiveErrors surface as 'error'.
  *
+ * Every outcome also carries the path the push took, so a delivery that
+ * crossed instances is distinguishable from one that never left this one.
+ *
  * Returns a flat object the sender's RPC can render in its outcome
  * banner without re-throwing.
  */
 async function deliverPush(entry, ctx) {
 	const { id, fromUserName, fromUserColor, toUserId, toUserName, text } = entry
+	const path = await deliveryPath(toUserId)
 	try {
 		const reply = await live.push(
 			{ userId: toUserId },
@@ -130,9 +166,11 @@ async function deliverPush(entry, ctx) {
 			pushId: id,
 			fromUserName,
 			toUserName,
-			text
+			text,
+			via: path.via,
+			toInstance: path.toInstance
 		}, ctx)
-		return { ok: true, ack }
+		return { ok: true, ack, via: path.via, toInstance: path.toInstance }
 	} catch (err) {
 		const code = err instanceof LiveError ? err.code : null
 		const kind = code === 'NOT_FOUND' ? 'offline' : (code === 'TIMEOUT' ? 'timeout' : 'error')
@@ -144,9 +182,11 @@ async function deliverPush(entry, ctx) {
 			fromUserName,
 			toUserName,
 			text,
+			via: path.via,
+			toInstance: path.toInstance,
 			error: err?.message ?? String(err)
 		}, ctx)
-		return { ok: false, kind, error: err?.message ?? String(err) }
+		return { ok: false, kind, via: path.via, toInstance: path.toInstance, error: err?.message ?? String(err) }
 	}
 }
 

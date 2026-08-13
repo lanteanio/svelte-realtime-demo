@@ -76,6 +76,15 @@ test.describe('cluster: /demos/notifications cross-replica', () => {
 				.toContainText('delivered', { timeout: 10_000 })
 			await expect(b.getByTestId('activity-item').filter({ hasText: text }).first())
 				.toContainText('delivered', { timeout: 10_000 })
+
+			// This is the case the page previously could not distinguish from a
+			// same-instance send: B's socket is on the other replica, so the
+			// push had to travel the cluster connection registry to reach it.
+			// The single-instance tier asserts the OTHER value on the same
+			// badge, so neither run can be satisfied by a hardcoded label.
+			const via = a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-via')
+			await expect(via).toHaveAttribute('data-via', 'cluster', { timeout: 10_000 })
+			await expect(via).toContainText('relayed via cluster')
 		} finally {
 			await ctxA.close()
 			await ctxB.close()

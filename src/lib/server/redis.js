@@ -237,6 +237,12 @@ async function resetFailedRegistry(failed) {
  * instance so the next connection can recover without a process restart.
  */
 export const registry = {
+	// The registry mints its OWN instance id, unrelated to the leader's, and
+	// it is the id written into every `conns:{userId}` row. A lookup result is
+	// therefore only comparable to THIS value - measuring it against
+	// `leader.instanceId` compares two unrelated random ids and reports every
+	// recipient as remote, including on a single-instance dev box.
+	get instanceId() { return activeRegistry().instanceId },
 	request(...args) { return activeRegistry().request(...args) },
 	lookup(...args) { return activeRegistry().lookup(...args) },
 	send(...args) { return activeRegistry().send(...args) },

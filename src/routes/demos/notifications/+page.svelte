@@ -408,6 +408,26 @@
 							{#if evt.instance}
 								<span class="opacity-60" data-testid="activity-instance" title="worker that handled this step">on {evt.instance}</span>
 							{/if}
+							<!-- The hop itself, not just the worker that handled the
+							     send. Two ids differing tells you a schedule and its
+							     fire were handled by different workers; only this
+							     says whether the PUSH crossed instances, which is
+							     the registry's actual job. -->
+							{#if evt.via === 'cluster'}
+								<span
+									class="badge badge-sm badge-outline badge-accent"
+									data-testid="activity-via"
+									data-via="cluster"
+									title="the recipient was connected to another instance, so this push went through the cluster connection registry"
+								>relayed via cluster{#if evt.toInstance}&nbsp;&rarr; {evt.toInstance}{/if}</span>
+							{:else if evt.via === 'local'}
+								<span
+									class="badge badge-sm badge-ghost"
+									data-testid="activity-via"
+									data-via="local"
+									title="the recipient was connected to this same instance, so no cluster hop was needed"
+								>same instance</span>
+							{/if}
 							<span class="opacity-70 truncate flex-1">
 								{evt.fromUserName} &rarr; {evt.toUserName}: {evt.text}
 							</span>
