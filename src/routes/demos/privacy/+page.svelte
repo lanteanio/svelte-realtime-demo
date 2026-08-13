@@ -25,7 +25,7 @@
 		return () => { for (const off of offs) off() }
 	})
 
-	let round = $state(/** @type {{ distinct: number, k: number, everPublished: boolean, resetInSeconds: number } | null} */ (null))
+	let round = $state(/** @type {{ roundId: number, distinct: number, k: number, everPublished: boolean, resetInSeconds: number } | null} */ (null))
 	let lastError = $state('')
 	let submitting = $state(false)
 	let submittedScore = $state(/** @type {number | null} */ (null))
@@ -247,7 +247,12 @@
 					{/if}
 				</div>
 				{#if round}
-					<p class="text-xs opacity-50 border-t border-base-300 pt-2 mt-1" data-testid="pv-round-hint">
+					<!-- The round id rides as an attribute rather than as text: it
+					     names which round the counts beside it belong to, which
+					     matters to anything comparing two readings, but it is a
+					     window index and not something to put in front of a
+					     visitor reading a sentence about contributors. -->
+					<p class="text-xs opacity-50 border-t border-base-300 pt-2 mt-1" data-testid="pv-round-hint" data-round-id={round.roundId}>
 						<span data-testid="pv-round-distinct">{round.distinct}</span> of
 						<span data-testid="pv-round-k">{round.k}</span> distinct contributors this
 						round (resets in ~<span data-testid="pv-round-reset">{tickedReset ?? round.resetInSeconds}</span>s).

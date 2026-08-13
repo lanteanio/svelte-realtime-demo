@@ -1,11 +1,18 @@
 import { test, expect } from '@playwright/test'
 import { expectTouchTarget, openTouchPage } from './helpers.js'
 import {
+	assertSameRound,
+	inStableRound,
 	openPrivacy,
+	pinRoundId,
 	protectedSnapshot,
 	rawState,
 	roundState,
+	RoundRolled,
+	stageRollOnNextSubmit,
+	STAGED_ROUND_STEP,
 	submitMood,
+	unpinRoundId,
 	waitForDistinct,
 	waitForFreshRound,
 	waitForProtected
@@ -53,7 +60,9 @@ test.describe('/demos/privacy', () => {
 	test('one identity can drive all five moods while counting as only one contributor', async ({ page }) => {
 		// Waiting out a round boundary can cost a minute; the assertions after it
 		// are the point of the test and must not be skipped to save that time.
-		test.setTimeout(120_000)
+		// A tumble landing mid-sequence buys a second attempt, and that attempt
+		// waits out its own boundary first, so the ceiling covers two of them.
+		test.setTimeout(240_000)
 		await openPrivacy(page)
 		// The contributor set is round-scoped and these specs are serial against
 		// one shared cluster, so an inherited round can already sit at or above
@@ -61,23 +70,33 @@ test.describe('/demos/privacy', () => {
 		// demo's central claim - the protected value is WITHHELD below k - go
 		// unexercised while the test still reported green. Start from a round
 		// this test actually controls instead.
-		const initialRound = await waitForFreshRound(page)
-		expect(initialRound.distinct).toBeLessThan(initialRound.k - 1)
-		const initialRaw = await rawState(page)
-		const protectedBefore = await protectedSnapshot(page)
+		//
+		// Every assertion below compares counts that are scoped to that one
+		// round, so the sequence is retried rather than asserted across a
+		// boundary: `n` restarting at 1 is indistinguishable from four lost
+		// submissions if the window is allowed to change underneath it.
+		await inStableRound(page, async (initialRound) => {
+			expect(initialRound.distinct).toBeLessThan(initialRound.k - 1)
+			const initialRaw = await rawState(page)
+			const protectedBefore = await protectedSnapshot(page)
 
-		for (const score of [1, 2, 3, 4, 5]) await submitMood(page, score)
-		const raw = await rawState(page)
-		expect(raw.n).toBeGreaterThanOrEqual(initialRaw.n + 5)
-		expect(raw.avg).toBeGreaterThanOrEqual(1)
-		expect(raw.avg).toBeLessThanOrEqual(5)
-		const round = await roundState(page)
-		// Five submissions, exactly one new distinct contributor.
-		expect(round.distinct).toBe(initialRound.distinct + 1)
-		expect(round.distinct).toBeLessThan(round.k)
-		await page.waitForTimeout(1_000)
-		expect(await protectedSnapshot(page)).toBe(protectedBefore)
-		await expect(page.getByTestId('pv-error')).toHaveCount(0)
+			for (const score of [1, 2, 3, 4, 5]) await submitMood(page, score)
+			// The per-submission checks each guard their own poll; the totals
+			// here span all five, so the boundary is re-checked across the whole
+			// sequence before anything cumulative is asserted.
+			await assertSameRound(page, initialRound.roundId, 'driving all five moods')
+			const raw = await rawState(page)
+			expect(raw.n).toBeGreaterThanOrEqual(initialRaw.n + 5)
+			expect(raw.avg).toBeGreaterThanOrEqual(1)
+			expect(raw.avg).toBeLessThanOrEqual(5)
+			const round = await roundState(page)
+			// Five submissions, exactly one new distinct contributor.
+			expect(round.distinct).toBe(initialRound.distinct + 1)
+			expect(round.distinct).toBeLessThan(round.k)
+			await page.waitForTimeout(1_000)
+			expect(await protectedSnapshot(page)).toBe(protectedBefore)
+			await expect(page.getByTestId('pv-error')).toHaveCount(0)
+		})
 	})
 
 	test('fresh identities cross k and converge on one protected noisy value', async ({ browser }) => {
@@ -93,8 +112,12 @@ test.describe('/demos/privacy', () => {
 			let state = await roundState(pages[0])
 			let crossed = state.distinct >= state.k
 
+			// This test's subject is the round-scoped distinct count and the
+			// agreement between replicas, not the running event total, so a
+			// tumble costs it nothing and must not fail it. The crossing is
+			// annotated on the report rather than swallowed.
 			for (let i = 0; i < pages.length; i++) {
-				await submitMood(pages[i], i + 2)
+				await submitMood(pages[i], i + 2, { onRoll: 'skip' })
 				state = await roundState(pages[i])
 				if (!crossed && state.distinct < state.k) {
 					await pages[i].waitForTimeout(500)
@@ -107,7 +130,7 @@ test.describe('/demos/privacy', () => {
 			// rolled over during the first pass, this re-earns k in the fresh
 			// window; otherwise these are ordinary additional events from the
 			// same already-distinct contributors.
-			for (let i = 0; i < pages.length; i++) await submitMood(pages[i], 5 - i)
+			for (let i = 0; i < pages.length; i++) await submitMood(pages[i], 5 - i, { onRoll: 'skip' })
 			await waitForDistinct(pages[0], 3)
 			const protectedValues = await Promise.all(pages.map((page) => waitForProtected(page)))
 			expect(new Set(protectedValues).size).toBe(1)
@@ -222,5 +245,79 @@ test.describe('/demos/privacy', () => {
 				await context.close()
 			}
 		}
+	})
+
+	// The boundary this covers arrives at most once a minute and never on
+	// demand, so left to chance it is exercised only occasionally - which is
+	// how it reached the merge gate as a bare 'Expected: > 1  Received: 1'
+	// with nothing naming a round. It is staged here instead, at the attribute
+	// the helpers read, so the handling runs on every single run.
+	//
+	// Placed LAST, and asking for no cohort room, so it cannot influence the
+	// tests above. It is the only test here that submits without asserting
+	// anything about the cohort, and its two submissions would otherwise land
+	// in the round the next test inherits - changing where that test starts
+	// and what its baseline count means. A test that stages faults has to be
+	// the one that absorbs their cost.
+	test('a round boundary is named as a boundary and retried, not reported as lost submissions', async ({ page }) => {
+		const anyRound = { minSecondsLeft: 1, requireRoom: false }
+		await openPrivacy(page)
+
+		// The id has to BE the aggregate's window index, not merely a number
+		// that changes at about the right time - the whole point is that it
+		// identifies the window scoping `n`. Both aggregates tumble on the UTC
+		// minute, so the page's id must agree with the clock. Bracketed by two
+		// readings because the test itself can straddle a boundary.
+		const beforeMinute = Math.floor(Date.now() / 60_000)
+		const start = await roundState(page)
+		const afterMinute = Math.floor(Date.now() / 60_000)
+		expect(start.roundId).toBeGreaterThanOrEqual(beforeMinute)
+		expect(start.roundId).toBeLessThanOrEqual(afterMinute)
+
+		// Detection: a crossing is reported as a crossing, naming both windows.
+		const staged = start.roundId + STAGED_ROUND_STEP
+		await pinRoundId(page, staged)
+		await expect(assertSameRound(page, start.roundId, 'a staged crossing'))
+			.rejects.toThrow(new RegExp(`rolled from ${start.roundId} to ${staged}`))
+		await unpinRoundId(page)
+
+		// Recovery: a crossing costs the attempt, not the test.
+		const attemptsSeen = []
+		const outcome = await inStableRound(page, async (round, attempt) => {
+			attemptsSeen.push(attempt)
+			if (attempt === 1) throw new RoundRolled(round.roundId, round.roundId + 1, 'a staged first attempt')
+			return 'ran in the second window'
+		}, { freshRound: anyRound })
+		expect(attemptsSeen).toEqual([1, 2])
+		expect(outcome).toBe('ran in the second window')
+
+		// Exhaustion still fails - the retry must not turn a genuinely
+		// unrunnable sequence into a silent pass - and it fails naming the
+		// boundary rather than a count that looks like lost data.
+		await expect(inStableRound(page, async (round) => {
+			throw new RoundRolled(round.roundId, round.roundId + 1, 'a staged crossing')
+		}, { attempts: 1, freshRound: anyRound })).rejects.toThrow(/rolled from \d+ to \d+/)
+
+		// A sequence that never crosses must not be retried or altered.
+		let ran = 0
+		expect(await inStableRound(page, async () => { ran++; return 'clean' }, { freshRound: anyRound })).toBe('clean')
+		expect(ran).toBe(1)
+
+		// The submission helper is where this actually presented in the gate,
+		// so its crossing path is exercised rather than reasoned about. The
+		// staged roll lands after the starting read and before the raw count
+		// settles, which is the real ordering.
+		await stageRollOnNextSubmit(page)
+		await expect(submitMood(page, 2)).rejects.toThrow(/rolled from \d+ to \d+/)
+		await unpinRoundId(page)
+
+		// The same crossing, for a caller whose subject does not span it, is
+		// reported rather than raised - and it still says a crossing happened,
+		// so a run that took the weaker path cannot look like a clean one.
+		await stageRollOnNextSubmit(page)
+		const tolerated = await submitMood(page, 3, { onRoll: 'skip' })
+		expect(tolerated.rolled).toBe(true)
+		await unpinRoundId(page)
+		expect(test.info().annotations.filter((a) => a.type === 'round-rolled').length).toBeGreaterThan(0)
 	})
 })

@@ -99,14 +99,32 @@ export const submitMood = live(async (ctx, score) => {
  * Distinct-contributor count for the current round, plus k and the
  * seconds until the round (and both windows) reset. Drives the "n of k
  * contributors" hint under the protected card.
+ *
+ * `roundId` names WHICH round the other three numbers describe. Everything
+ * here is round-scoped, so a reading is only comparable to another reading
+ * from the same round: across a tumble the counts restart from zero, and a
+ * consumer holding two readings cannot otherwise tell that apart from a
+ * count that went backwards. The id is the tumbling window index the
+ * aggregates themselves use - both windows are `period: 'minute'`, which
+ * anchors to the UTC minute boundary, the same instant this floor divides
+ * on - so it identifies the aggregate window, not a parallel clock that
+ * merely resembles it.
+ *
+ * One `now` feeds the id, the set read and the countdown. Sampling the
+ * clock twice can straddle the boundary and report one round's id beside
+ * the next round's remaining seconds, which is precisely the confusion the
+ * id exists to remove.
  */
 export const roundInfo = live(async () => {
-	const distinct = await redis.redis.scard(roundSetKey(currentMinute()))
+	const now = Date.now()
+	const minute = Math.floor(now / 60_000)
+	const distinct = await redis.redis.scard(roundSetKey(minute))
 	return {
+		roundId: minute,
 		distinct,
 		k: K,
 		everPublished: everPublishedHere,
-		resetInSeconds: 60 - Math.floor((Date.now() / 1000) % 60)
+		resetInSeconds: 60 - Math.floor((now / 1000) % 60)
 	}
 })
 
