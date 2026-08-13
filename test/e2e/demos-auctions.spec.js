@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { expectTouchTarget, openTouchPage } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 const RUN = `e2e-${Date.now()}`
 
@@ -23,6 +23,12 @@ async function waitForPushReady(...pages) {
 test.describe('/demos/auctions', () => {
 	test('form exposes exact caps and prevents empty or reserve-below-start listings', async ({ page }) => {
 		await page.goto('/demos/auctions')
+		// The form's enabled/disabled behaviour is driven by client state, so
+		// every assertion below is about a page that has hydrated. Without this
+		// gate a fill lands on the DOM while the component's state never sees
+		// it, and the button that never enables reads as a validation bug
+		// rather than as a page that was not ready.
+		await waitForWS(page)
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Auctions: deadline-bounded bid race')
 		await expect(page.getByTestId('inbox-empty')).toBeVisible()
 		await expect(page.getByTestId('active-section')).toBeVisible()
@@ -63,6 +69,17 @@ test.describe('/demos/auctions', () => {
 			'alone semantics require localhost dev server (no real-user presence)'
 		)
 		await page.goto('/demos/auctions')
+		// Nothing this test asserts before it types can tell a live page from a
+		// server-rendered one: the alone badge shows whenever nobody else is
+		// present, the two empty states are what empty lists render, and the
+		// button's own label carries the server-rendered bidder count. So the
+		// readiness has to be asked for outright. `push-ready` is the page's
+		// own marker and means WS open AND the push handler installed, which is
+		// the path a listing actually travels; `waitForWS` runs first so a page
+		// that never booted reports its connection timeline instead of timing
+		// out on a hidden marker.
+		await waitForWS(page)
+		await waitForPushReady(page)
 		await expect(page.getByTestId('alone-badge')).toBeVisible({ timeout: 5_000 })
 		await expect(page.getByTestId('inbox-empty')).toBeVisible()
 		await expect(page.getByTestId('active-empty')).toBeVisible()
