@@ -200,19 +200,84 @@ test.describe('/demos/arena', () => {
 			.evaluate((el) => getComputedStyle(el).fill)
 		expect(npcFill, 'the NPC chip does not match the NPC dots').toBe(swatches.npc)
 
-		// Another visitor is only on screen when a second person is inside this
-		// client's 420-unit interest radius, and spawns are scattered across a
-		// 2400x1600 world - so a single-page run usually has none, and forcing
-		// one would buy a slow, flaky test for a case the structure already
-		// settles: both the chips and the dots read one table in the component,
-		// so the visitor row cannot drift on its own. Any that ARE on screen
-		// are still checked rather than waved through.
+		// Any visitor dot that happens to be on screen is checked here too, but
+		// a single-page run usually has none, so this loop can run zero times
+		// and proves nothing on its own. The test below is what actually
+		// exercises that row, by putting a second visitor inside this client's
+		// interest radius on purpose.
 		const visitors = page.locator('[data-testid="arena-remote"][data-kind="visitor"]')
 		for (let i = 0; i < await visitors.count(); i++) {
 			expect(
 				await visitors.nth(i).evaluate((el) => getComputedStyle(el).fill),
 				'a visitor dot does not match the "another visitor" chip'
 			).toBe(swatches.visitor)
+		}
+	})
+
+	// The third row of the legend is the one the finding was actually about -
+	// "a teal dot (another live visitor - the multiplayer payoff) passes
+	// unexplained" - so leaving its colour checked only when a visitor happens
+	// to be on screen leaves the headline case unexercised. Spawns are
+	// hash-scattered across a 2400x1600 world and the interest radius is 420,
+	// so two visitors essentially never share a neighbourhood by luck. Rather
+	// than hope for one, this brings them together: spectate pans the area of
+	// interest independently of the entity, which is precisely the control the
+	// demo provides for looking somewhere else.
+	test('another visitor drawn on screen carries the colour its legend chip advertises', async ({ browser }) => {
+		test.setTimeout(120_000)
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await open(a)
+			await open(b)
+			// B idles; only NPCs drift, so its entity stays where it spawned
+			// and remains a fixed target to pan onto.
+			const target = await position(b)
+
+			await a.getByTestId('arena-spectate-toggle').click()
+			await expect(a.getByTestId('arena-spectate-toggle')).toBeChecked()
+
+			// Closed loop on the camera readout rather than a computed number
+			// of clicks: pan steps clamp at the world edges, so counting clicks
+			// from the starting distance silently under-shoots near a border.
+			// 200 units on each axis puts the camera about 283 away at worst,
+			// inside the 420 the server culls by.
+			const NEAR = 200
+			for (let i = 0; i < 60; i++) {
+				const cam = await camera(a)
+				const dx = target.x - cam.x
+				const dy = target.y - cam.y
+				if (Math.abs(dx) <= NEAR && Math.abs(dy) <= NEAR) break
+				if (Math.abs(dx) > NEAR) await a.getByTestId(dx > 0 ? 'arena-pan-right' : 'arena-pan-left').click()
+				if (Math.abs(dy) > NEAR) await a.getByTestId(dy > 0 ? 'arena-pan-down' : 'arena-pan-up').click()
+			}
+			const cam = await camera(a)
+			expect(
+				Math.hypot(target.x - cam.x, target.y - cam.y),
+				'the camera never got within the interest radius of the other visitor'
+			).toBeLessThan(420)
+
+			// Unconditional: if no visitor dot is drawn, this fails rather than
+			// skipping the assertion it exists to make.
+			const visitor = a.locator('[data-testid="arena-remote"][data-kind="visitor"]').first()
+			await expect(visitor, 'no other visitor was drawn inside the interest radius').toBeVisible({ timeout: 20_000 })
+
+			const chip = a.getByTestId('arena-kind-swatch').and(a.locator('[data-kind="visitor"]'))
+			const chipColour = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+			const dotColour = await visitor.evaluate((el) => getComputedStyle(el).fill)
+			expect(dotColour, 'the "another visitor" chip does not match a real visitor dot').toBe(chipColour)
+
+			// The same dot must not be painted like the other two kinds, or the
+			// equality above would hold for a legend that says nothing.
+			const meColour = await a.getByTestId('arena-me').evaluate((el) => getComputedStyle(el).fill)
+			const npcColour = await a.locator('[data-testid="arena-remote"][data-kind="npc"]').first()
+				.evaluate((el) => getComputedStyle(el).fill)
+			expect(dotColour).not.toBe(meColour)
+			expect(dotColour).not.toBe(npcColour)
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
 	})
 

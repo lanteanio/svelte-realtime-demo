@@ -49,6 +49,28 @@ async function selectRecipient(a, bId) {
 }
 
 test.describe('/demos/notifications', () => {
+	// The worker chip and the delivery badge report two DIFFERENT pieces of
+	// cluster machinery, and the note credited the wrong one: it said that a
+	// schedule and its fire landing on different workers was the connection
+	// registry at work. It is not. That is the cluster-shared queue and the
+	// leader-gated cron distributing a job; the registry's job is reaching a
+	// recipient's socket wherever it is connected. Teaching the registry
+	// through an unrelated mechanism leaves the visitor with a confident
+	// wrong model, which is worse than the original complaint of showing
+	// nothing - so the attribution is pinned rather than left to prose.
+	test('the activity note credits each cluster mechanism to the evidence that actually shows it', async ({ page }) => {
+		await open(page)
+		const note = page.getByTestId('activity-wiring-note')
+		// Differing worker ids belong to the queue and the cron.
+		await expect(note).toContainText('cluster-shared queue')
+		await expect(note).toContainText('leader-gated cron')
+		// The registry's evidence is the delivery badge, named by its labels.
+		await expect(note).toContainText('relayed via cluster')
+		await expect(note).toContainText('same instance')
+		// And it must not go back to crediting the worker ids for the hop.
+		await expect(note).not.toContainText(/ids\s+is\s+the\s+cluster\s+connection\s+registry/i)
+	})
+
 	test('alone on the page: recipient dropdown shows the no-users state and Send is disabled', async ({ page, baseURL }) => {
 		// "Alone" requires zero entries in the global presence channel.
 		// Achievable against a freshly-started localhost dev server with no

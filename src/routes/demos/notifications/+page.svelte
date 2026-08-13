@@ -392,10 +392,17 @@
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Recent activity ({activityList.length})</h2>
 			<p class="text-xs opacity-70" data-testid="activity-wiring-note">
-				Each entry names the worker that handled that step. On a
-				multi-replica deployment a schedule and its fire can land on
-				different workers - the hop between their ids is the cluster
-				connection registry at work. (One local instance shows one id.)
+				Each entry names the worker that handled that step, and marks how
+				the push reached its recipient. Those are two different pieces of
+				cluster machinery. Differing worker ids on a schedule and its
+				fire mean the cluster-shared queue and the leader-gated cron did
+				their job: one instance enqueued it, another drained it. The
+				connection registry is not involved in that - its job is
+				reaching a recipient's socket wherever it happens to be
+				connected, and the badge is what reports it: <em>relayed via
+				cluster</em> when the recipient was on another instance,
+				<em>same instance</em> when no hop was needed. (One local
+				instance shows one worker id and no relays.)
 			</p>
 			{#if activityList.length === 0}
 				<p class="opacity-70 text-sm" data-testid="activity-empty">Nothing yet.</p>

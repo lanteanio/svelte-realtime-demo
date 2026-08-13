@@ -81,10 +81,14 @@ async function listActivity() {
  * evicted entry instead of a silent disappearance.
  */
 async function appendActivity(entry, ctx) {
-	// Stamp the worker that handled this step. On a multi-replica
-	// deployment a schedule and its fire routinely land on different
-	// workers - the differing ids are the only visible evidence of the
-	// cluster registry doing its relay work.
+	// Stamp the worker that handled this step. On a multi-replica deployment
+	// a schedule and its fire routinely land on different workers, and the
+	// differing ids are what shows the cluster-shared queue and the
+	// leader-gated cron distributing that work.
+	//
+	// This is NOT evidence of the connection registry relaying anything: it
+	// says which instance ran a step, not how a push reached its recipient.
+	// The delivery path recorded alongside is what reports that.
 	entry.instance = (leader.instanceId ?? 'local').slice(0, 8)
 	const raw = JSON.stringify(entry)
 	const pipeline = redis.redis.multi()
