@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, getCanvas, waitForBoardReady } from './helpers.js';
+import { createBoard, getCanvas, waitForBoardReady, waitForWS } from './helpers.js';
 
 let boardUrl;
 
@@ -10,6 +10,7 @@ test.describe.serial('Board Settings', () => {
 
 	test('board title is displayed in header', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await expect(page.locator('h1')).toBeVisible();
 		const title = await page.locator('h1').textContent();
@@ -18,6 +19,7 @@ test.describe.serial('Board Settings', () => {
 
 	test('double-click title opens edit input', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await page.locator('h1').dblclick();
 		await expect(page.locator('input.input.input-sm')).toBeVisible();
@@ -25,6 +27,7 @@ test.describe.serial('Board Settings', () => {
 
 	test('editing title and pressing Enter saves it', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await page.locator('h1').dblclick();
 
@@ -38,12 +41,14 @@ test.describe.serial('Board Settings', () => {
 
 	test('title persists after refresh', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await expect(page.locator('h1')).toHaveText('Renamed Board');
 	});
 
 	test('background color buttons are visible', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		const bgButtons = page.getByLabel(/Set background to #/);
 		expect(await bgButtons.count()).toBe(6);
@@ -51,6 +56,7 @@ test.describe.serial('Board Settings', () => {
 
 	test('clicking background color changes canvas background', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const canvas = getCanvas(page);
@@ -66,6 +72,7 @@ test.describe.serial('Board Settings', () => {
 
 	test('background persists after refresh', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await page.waitForTimeout(1000);
 

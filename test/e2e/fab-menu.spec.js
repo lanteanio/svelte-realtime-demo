@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, createNote, getNotes, waitForBoardReady } from './helpers.js';
+import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 let boardUrl;
 
@@ -20,6 +20,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('FAB trigger button is visible', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		const fab = page.locator('.fab-trigger');
 		await expect(fab).toBeVisible();
@@ -27,6 +28,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('focusing FAB reveals action buttons', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const fab = page.locator('.fab-trigger');
@@ -41,6 +43,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('tidy notes rearranges z-order', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const fab = page.locator('.fab-trigger');
@@ -55,6 +58,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('rearrange by color moves notes into columns', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const positionsBefore = await getNotes(page).evaluateAll((notes) =>
@@ -79,6 +83,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('shuffle scatters notes randomly', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const positionsBefore = await getNotes(page).evaluateAll((notes) =>
@@ -103,6 +108,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('group by author rearranges notes', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const positionsBefore = await getNotes(page).evaluateAll((notes) =>
@@ -127,6 +133,7 @@ test.describe.serial('FAB Menu Actions', () => {
 
 	test('close button dismisses FAB menu', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const fab = page.locator('.fab-trigger');

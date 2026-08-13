@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, getCanvas, createNote, getNotes, waitForBoardReady } from './helpers.js';
+import { createBoard, createNote, getCanvas, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 let boardUrl;
 
@@ -10,6 +10,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('double-click creates a note at cursor position', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await createNote(page, 200, 200);
 		expect(await getNotes(page).count()).toBe(1);
@@ -17,12 +18,14 @@ test.describe.serial('Note Operations', () => {
 
 	test('note shows "Double-click to edit" placeholder', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await expect(page.getByText('Double-click to edit')).toBeVisible();
 	});
 
 	test('note shows creator name', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		// The creator_name is shown in a small footer text
 		const footer = page.locator('.absolute.w-52 .text-xs.opacity-40');
@@ -33,6 +36,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('double-click note opens textarea for editing', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
@@ -42,6 +46,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('typing in textarea and blurring saves content', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
@@ -56,6 +61,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('Escape key closes the editor', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
@@ -68,6 +74,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('hover shows delete and color picker buttons', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
@@ -78,6 +85,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('color picker opens and changes note color', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
@@ -100,6 +108,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('drag note to a new position', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const note = getNotes(page).first();
@@ -124,6 +133,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('clicking a note brings it to front (z-order)', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		// Create a second note
@@ -141,6 +151,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('delete a note', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const countBefore = await getNotes(page).count();
@@ -155,6 +166,7 @@ test.describe.serial('Note Operations', () => {
 
 	test('notes persist after page refresh', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const countBefore = await getNotes(page).count();

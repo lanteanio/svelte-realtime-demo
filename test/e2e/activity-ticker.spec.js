@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, createNote, getNotes, waitForBoardReady } from './helpers.js';
+import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 let boardUrl;
 
@@ -10,6 +10,7 @@ test.describe.serial('Activity Ticker', () => {
 
 	test('empty board shows "No activity yet" message', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		// Two copies of this line ship - one per pointer type, switched by CSS -
 		// so the bare substring is ambiguous. Assert the fine-pointer variant,
@@ -19,6 +20,7 @@ test.describe.serial('Activity Ticker', () => {
 
 	test('activity ticker is fixed at bottom of page', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const ticker = page.locator('.fixed.bottom-0');
@@ -27,6 +29,7 @@ test.describe.serial('Activity Ticker', () => {
 
 	test('creating a note produces an activity entry', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		await createNote(page, 300, 300);
@@ -39,6 +42,7 @@ test.describe.serial('Activity Ticker', () => {
 
 	test('activity entries show user name and action', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await page.waitForTimeout(1500);
 
@@ -53,6 +57,7 @@ test.describe.serial('Activity Ticker', () => {
 
 	test('activity entries have colored dots', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 		await page.waitForTimeout(1500);
 
@@ -65,6 +70,7 @@ test.describe.serial('Activity Ticker', () => {
 
 	test('deleting a note adds activity entry', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		// Count existing activity entries

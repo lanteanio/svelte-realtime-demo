@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, createNote, getNotes, waitForBoardReady } from './helpers.js';
+import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 
 let boardUrl;
 
@@ -10,6 +10,7 @@ test.describe.serial('Undo / Redo', () => {
 
 	test('Ctrl+Z undoes note creation', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		// Create a note
@@ -24,6 +25,7 @@ test.describe.serial('Undo / Redo', () => {
 
 	test('Ctrl+Shift+Z redoes undone action', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const before = await getNotes(page).count();
@@ -45,6 +47,7 @@ test.describe.serial('Undo / Redo', () => {
 
 	test('Ctrl+Y also redoes', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		await createNote(page, 300, 300);
@@ -61,6 +64,7 @@ test.describe.serial('Undo / Redo', () => {
 
 	test('undo does nothing when editing a textarea', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		// Make sure we have a note
@@ -87,6 +91,7 @@ test.describe.serial('Undo / Redo', () => {
 
 	test('undo note deletion restores the note', async ({ page }) => {
 		await page.goto(boardUrl);
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		if (await getNotes(page).count() === 0) {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick } from './helpers.js'
+import { confirmAndClick, waitForWS } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -8,6 +8,7 @@ const LABELS = ['Alpha counter', 'Beta counter', 'Gamma counter']
 
 async function open(page) {
 	await page.goto('/demos/schema-evolution')
+	await waitForWS(page)
 	await expect(page.getByTestId('v2-card')).toHaveCount(3, { timeout: 8_000 })
 	await expect(page.getByTestId('v1mig-card')).toHaveCount(3, { timeout: 8_000 })
 }
