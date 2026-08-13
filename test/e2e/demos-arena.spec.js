@@ -119,6 +119,50 @@ test.describe('/demos/arena', () => {
 		expect(errors).toEqual([])
 	})
 
+	// The finding asked for three labelled chips "using the same fills as the
+	// dots". Naming the labels proves the chips exist; it says nothing about
+	// the colours, and a legend that names the wrong colour is worse than no
+	// legend, because the visitor believes it. Compare the RESOLVED colours -
+	// a class-name comparison could not do this anyway, since the chips paint
+	// with `bg-*` and the dots with `fill-*`.
+	test('the kind legend paints the same colours the dots do', async ({ page }) => {
+		await open(page)
+		await expect(page.getByTestId('arena-remote').first()).toBeVisible()
+
+		const swatches = await page.getByTestId('arena-kind-swatch').evaluateAll((els) =>
+			Object.fromEntries(els.map((el) => [el.dataset.kind, getComputedStyle(el).backgroundColor]))
+		)
+		expect(Object.keys(swatches).sort()).toEqual(['npc', 'visitor', 'you'])
+		// A legend that paints two kinds the same colour distinguishes nothing,
+		// and would otherwise satisfy every equality below.
+		expect(
+			new Set(Object.values(swatches)).size,
+			`the three legend swatches are not three distinct colours: ${JSON.stringify(swatches)}`
+		).toBe(3)
+
+		const meFill = await page.getByTestId('arena-me').evaluate((el) => getComputedStyle(el).fill)
+		expect(meFill, 'the "you" chip does not match your own dot').toBe(swatches.you)
+
+		const npcFill = await page.locator('[data-testid="arena-remote"][data-kind="npc"]').first()
+			.evaluate((el) => getComputedStyle(el).fill)
+		expect(npcFill, 'the NPC chip does not match the NPC dots').toBe(swatches.npc)
+
+		// Another visitor is only on screen when a second person is inside this
+		// client's 420-unit interest radius, and spawns are scattered across a
+		// 2400x1600 world - so a single-page run usually has none, and forcing
+		// one would buy a slow, flaky test for a case the structure already
+		// settles: both the chips and the dots read one table in the component,
+		// so the visitor row cannot drift on its own. Any that ARE on screen
+		// are still checked rather than waved through.
+		const visitors = page.locator('[data-testid="arena-remote"][data-kind="visitor"]')
+		for (let i = 0; i < await visitors.count(); i++) {
+			expect(
+				await visitors.nth(i).evaluate((el) => getComputedStyle(el).fill),
+				'a visitor dot does not match the "another visitor" chip'
+			).toBe(swatches.visitor)
+		}
+	})
+
 	test('WASD and arrow aliases move the predicted own dot in all four directions', async ({ page }) => {
 		const errors = collectErrors(page)
 		await open(page)

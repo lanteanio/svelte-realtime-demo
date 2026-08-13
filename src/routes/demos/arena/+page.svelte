@@ -28,6 +28,27 @@
 	const STEP = 6
 	const PAN = 160
 
+	// One table, two consumers: the legend chips below and the dots in the
+	// scene. The legend is not a DESCRIPTION of the dot colours, it is the
+	// same data rendered twice, so a kind's swatch cannot drift away from its
+	// dot without both moving together. That drift is the whole risk here - a
+	// legend that names the wrong colour is worse than no legend, because the
+	// visitor believes it.
+	//
+	// The class strings are written out in full rather than composed from a
+	// token, because the CSS build only emits classes it can see literally in
+	// the source; a `fill-${kind.token}` would be correct here and absent from
+	// the stylesheet.
+	const KINDS = [
+		{ id: 'you', label: 'you', swatch: 'bg-primary', dot: 'fill-primary' },
+		{ id: 'npc', label: 'NPC', swatch: 'bg-secondary', dot: 'fill-secondary' },
+		{ id: 'visitor', label: 'another visitor', swatch: 'bg-accent', dot: 'fill-accent' }
+	]
+	const KIND_YOU = KINDS[0]
+	const KIND_NPC = KINDS[1]
+	const KIND_VISITOR = KINDS[2]
+	const remoteKind = (npc) => (npc ? KIND_NPC : KIND_VISITOR)
+
 	// The client factory takes the SAME pure apply the server declared.
 	// `initial` here is the pre-sync placeholder state; the first sync
 	// reply replaces it with the server's authoritative spawn.
@@ -247,15 +268,16 @@
 						{#if inView(s)}
 							<circle
 								cx={toX(s.x)} cy={toY(s.y)} r={s.npc ? 5 : 7}
-								class={s.npc ? 'fill-secondary' : 'fill-accent'}
+								class={remoteKind(s.npc).dot}
 								opacity={opacityFor(view.freshness(key))}
 								data-testid="arena-remote"
+								data-kind={remoteKind(s.npc).id}
 							/>
 						{/if}
 					{/each}
 					<circle
 						cx={toX(view.local.x)} cy={toY(view.local.y)} r="8"
-						class="fill-primary stroke-primary-content" stroke-width="2"
+						class="{KIND_YOU.dot} stroke-primary-content" stroke-width="2"
 						data-testid="arena-me"
 						data-x={Math.round(view.local.x)}
 						data-y={Math.round(view.local.y)}
@@ -267,7 +289,7 @@
 					<g transform="translate({VIEW_W - MAP_W - 10}, 10)" data-testid="arena-minimap">
 						<rect width={MAP_W} height={MAP_H} rx="3" class="fill-base-100/80 stroke-base-content/30" />
 						{#each [...view.remote] as [key, s] (key)}
-							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={s.npc ? 'fill-secondary' : 'fill-accent'} data-testid="arena-minimap-entity" />
+							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={remoteKind(s.npc).dot} data-testid="arena-minimap-entity" data-kind={remoteKind(s.npc).id} />
 						{/each}
 						<rect
 							x={Math.max(0, Math.min(MAP_W - mapX(VIEW_W), mapX(cam.x - VIEW_W / 2)))}
@@ -327,9 +349,9 @@
 				</p>
 				<div class="text-xs space-y-1 opacity-70">
 					<p class="flex flex-wrap gap-x-3 gap-y-1 items-center" data-testid="arena-kind-legend">
-						<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-primary"></span> you</span>
-						<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-secondary"></span> NPC</span>
-						<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full bg-accent"></span> another visitor</span>
+						{#each KINDS as kind (kind.id)}
+							<span class="inline-flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-full {kind.swatch}" data-testid="arena-kind-swatch" data-kind={kind.id}></span> {kind.label}</span>
+						{/each}
 					</p>
 					<p class="flex flex-wrap gap-x-3 gap-y-1 items-center" data-testid="arena-radius-legend">
 						<span class="inline-flex items-center gap-1"><span class="inline-block w-5 border-t-2 border-dashed border-secondary"></span> fringe starts at 300</span>
