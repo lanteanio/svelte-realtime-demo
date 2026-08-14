@@ -2,6 +2,8 @@
 
 A collaborative sticky notes app built with [svelte-realtime](https://github.com/lanteanio/svelte-realtime), [svelte-adapter-uws](https://github.com/lanteanio/svelte-adapter-uws), and [svelte-adapter-uws-extensions](https://github.com/lanteanio/svelte-adapter-uws-extensions).
 
+**Official links:** [GitHub owner](https://github.com/lanteanio) | [Documentation](https://svelte-realtime.dev/) | [Live demo](https://svelte-realtime-demo.lantean.io/) | `svti.me` is the ecosystem-owned runtime-help redirect domain.
+
 Open the page, get a random name, drop notes on a shared canvas. Every note, cursor, and color change syncs across all browsers in real time. No login, no friction.
 
 **Try it now:** [svelte-realtime-demo.lantean.io](https://svelte-realtime-demo.lantean.io/) -- open two tabs and watch the magic. Runs on a Hetzner CPX22 (2 shared vCPUs, 4 GB RAM, 6.49/month).
