@@ -24,11 +24,12 @@
  * replica's idempotency store.
  *
  * Three headline primitives in one page: `live.lock` for atomic
- * read-modify-write under contention (cluster-wide via
- * `createDistributedLock`), `live.idempotent` for per-user dedup,
- * and atomic Redis `DECR` for the actual inventory rule (the lock
- * gives the demo its serialization behavior; the atomic DECR gives
- * the system its correctness).
+ * read-modify-write under contention (in-process per replica, which a
+ * multi-instance deployment swaps for `createDistributedLock` without
+ * changing the caller-facing API), `live.idempotent` for per-user
+ * dedup, and atomic Redis `DECR` for the actual inventory rule (the
+ * lock gives the demo its serialization behavior; the atomic DECR
+ * gives the system its correctness).
  *
  * Storage is cluster-shared via Redis. Recent sales feed capped at
  * SALES_CAP, FIFO-evicted via LTRIM.

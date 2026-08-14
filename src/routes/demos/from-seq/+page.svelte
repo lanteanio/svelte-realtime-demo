@@ -325,7 +325,7 @@
 				<ul class="space-y-1 text-xs font-mono @2xl:pointer-fine:max-h-96 @2xl:pointer-fine:overflow-y-auto @2xl:pointer-fine:overscroll-contain" data-testid="events-list">
 					{#each entries as e (e.id)}
 						<li class="flex items-center gap-2" data-testid="event-row">
-							<span class="opacity-50 w-20">{timeOf(e.ts)}</span>
+							<span class="opacity-50 w-20" data-testid="event-time">{timeOf(e.ts)}</span>
 							<span class="opacity-50 w-12 text-right">#{e.seq}</span>
 							<span class="badge badge-xs {tierBadgeClass(e.tier)}" data-testid={'event-tier-' + e.id}>{e.tier}</span>
 							{#if replayFillSeqs.has(e.seq)}

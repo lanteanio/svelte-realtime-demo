@@ -46,9 +46,21 @@ test.describe('cluster: /demos/flash-sales', () => {
 				a.getByTestId('stress-go').click(),
 				b.getByTestId('stress-go').click()
 			])
+			// The tally element appears the moment the burst STARTS - the page
+			// zeroes it before firing so the FIFO drain is visible while it runs -
+			// so its presence times the click, not the outcome. Reading the badges
+			// here sampled a burst still in flight and scored the shared stock at
+			// whatever had settled so far. Completion is the button returning from
+			// "Running..." to its rest label; wait for the tally first so the
+			// rest label being asserted is the one AFTER the run rather than the
+			// one still standing before Svelte has applied the click.
 			await Promise.all([
 				expect(a.getByTestId('stress-result')).toBeVisible({ timeout: 20_000 }),
 				expect(b.getByTestId('stress-result')).toBeVisible({ timeout: 20_000 })
+			])
+			await Promise.all([
+				expect(a.getByTestId('stress-go')).not.toHaveText('Running...', { timeout: 30_000 }),
+				expect(b.getByTestId('stress-go')).not.toHaveText('Running...', { timeout: 30_000 })
 			])
 
 			const ok = (await tally(a, 'stress-ok')) + (await tally(b, 'stress-ok'))

@@ -15,7 +15,15 @@ async function openAt(page, origin) {
 }
 
 async function clear(page) {
-	await confirmAndClick(page.getByTestId('clear-shed'))
+	// The clear control is honestly disabled when the log is already empty, so
+	// clicking it unconditionally waits out the timeout on a control that can
+	// never become actionable. Each tier starts on a flushed keyspace, which is
+	// exactly the empty case. Assert the empty state either way, so skipping the
+	// click still has to prove the precondition rather than assume it.
+	if (await page.getByTestId('shed-row').count() > 0) {
+		await confirmAndClick(page.getByTestId('clear-shed'))
+	}
+	await expect(page.getByTestId('shed-log')).toContainText('No shed decisions yet')
 	await expect(page.getByTestId('shed-row')).toHaveCount(0)
 }
 

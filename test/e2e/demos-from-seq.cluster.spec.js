@@ -16,7 +16,8 @@ async function rows(page) {
 	return page.getByTestId('event-row').evaluateAll((nodes) => nodes.map((node) => {
 		const seq = Number(node.textContent?.match(/#(\d+)/)?.[1] ?? NaN)
 		const message = node.querySelector('[data-testid="event-message"]')?.textContent?.trim() ?? ''
-		return { seq, message }
+		const time = node.querySelector('[data-testid="event-time"]')?.textContent?.trim() ?? ''
+		return { seq, message, time }
 	}))
 }
 
@@ -30,9 +31,18 @@ async function readCount(page, id) {
 
 function assertIntegrity(entries) {
 	expect(entries.length).toBeGreaterThan(0)
+	expect(entries.every((entry) => Number.isFinite(entry.seq))).toBe(true)
 	expect(new Set(entries.map((entry) => entry.seq)).size).toBe(entries.length)
 	for (let i = 1; i < entries.length; i++) expect(entries[i - 1].seq).toBeGreaterThan(entries[i].seq)
-	for (const entry of entries) expect(entry.message).toContain(`#${entry.seq}`)
+	for (const entry of entries) {
+		// The seq owns a dedicated column, so the message renders as the bare
+		// phrase with its redundant "#NNNN" suffix stripped. Requiring the
+		// suffix here asserted a wire field against an element that never
+		// carried it, which fails on every row the page has ever rendered.
+		expect(entry.message.length).toBeGreaterThan(0)
+		expect(entry.message).not.toMatch(/#\d+\s*$/)
+		expect(entry.time).not.toBe('')
+	}
 }
 
 test.describe('cluster: /demos/from-seq', () => {
@@ -46,10 +56,20 @@ test.describe('cluster: /demos/from-seq', () => {
 			const [rowsA, rowsB] = await Promise.all([rows(a), rows(b)])
 			assertIntegrity(rowsA)
 			assertIntegrity(rowsB)
-			const bySeqB = new Map(rowsB.map((entry) => [entry.seq, entry.message]))
+			const bySeqB = new Map(rowsB.map((entry) => [entry.seq, entry]))
 			const overlap = rowsA.filter((entry) => bySeqB.has(entry.seq))
 			expect(overlap.length).toBeGreaterThan(0)
-			for (const entry of overlap) expect(bySeqB.get(entry.seq)).toBe(entry.message)
+			for (const entry of overlap) {
+				const mirror = bySeqB.get(entry.seq)
+				expect(mirror.message).toBe(entry.message)
+				// The stored timestamp is the one rendered field a replica cannot
+				// recompute from the seq in front of it: the phrase is a pure
+				// function of the seq, so comparing only that would agree even if
+				// the two replicas were reading different stores. The time comes
+				// from the durable row, so matching it is what makes this an
+				// agreement check rather than two pages running the same function.
+				expect(mirror.time).toBe(entry.time)
+			}
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
