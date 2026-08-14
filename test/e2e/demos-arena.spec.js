@@ -119,7 +119,7 @@ test.describe('/demos/arena', () => {
 		expect(errors).toEqual([])
 	})
 
-	// The finding asked the map to show four things; the interest circle was
+	// The map is meant to show four things; the interest circle was
 	// the one still missing. It is also the only one that carries the demo's
 	// actual claim - culling follows where the CAMERA looks, not where the
 	// entity is - so drawing it is half the job and pinning that it tracks the
@@ -172,8 +172,8 @@ test.describe('/demos/arena', () => {
 		expect(me1.cx, 'the entity dot moved, so spectate is not leaving the entity alone').toBeCloseTo(world.x * scale, 0)
 	})
 
-	// The finding asked for three labelled chips "using the same fills as the
-	// dots". Naming the labels proves the chips exist; it says nothing about
+	// The legend is three labelled chips using the same fills as the
+	// dots. Naming the labels proves the chips exist; it says nothing about
 	// the colours, and a legend that names the wrong colour is worse than no
 	// legend, because the visitor believes it. Compare the RESOLVED colours -
 	// a class-name comparison could not do this anyway, since the chips paint
@@ -214,10 +214,10 @@ test.describe('/demos/arena', () => {
 		}
 	})
 
-	// The third row of the legend is the one the finding was actually about -
-	// "a teal dot (another live visitor - the multiplayer payoff) passes
-	// unexplained" - so leaving its colour checked only when a visitor happens
-	// to be on screen leaves the headline case unexercised. Spawns are
+	// The third row of the legend is the one that matters most: a teal dot,
+	// another live visitor, which is the multiplayer payoff and passes
+	// unexplained. Leaving its colour checked only when a visitor happens
+	// to be on screen leaves that case unexercised. Spawns are
 	// hash-scattered across a 2400x1600 world and the interest radius is 420,
 	// so two visitors essentially never share a neighbourhood by luck. Rather
 	// than hope for one, this brings them together: spectate pans the area of
@@ -411,7 +411,7 @@ test.describe('/demos/arena', () => {
 
 	// The geometry pin above asserts up.height >= 30 on a FINE pointer, where
 	// btn-sm already clears 30 - so the coarse-pointer floor, which is the
-	// whole size half of this control's finding, went unmeasured. Strip the
+	// whole size half of this control's contract, went unmeasured. Strip the
 	// pointer-coarse classes and that pin still passes; this one does not.
 	test('the pan d-pad meets the 44px floor on a coarse-pointer rung', async ({ browser }) => {
 		const { context, page } = await openTouchPage(browser)

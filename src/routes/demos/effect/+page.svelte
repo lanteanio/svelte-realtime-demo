@@ -209,8 +209,8 @@
 	<!-- @2xl, not @3xl: below 1024 there is no sidebar, so the content container
 	     is the viewport minus padding. Mapping the old md: (768px viewport)
 	     straight to @3xl (768px container) pushed three-up past the 768 rung it
-	     is supposed to engage at. The finding this grid answers was about 640,
-	     where a 672px container still stacks. -->
+	     is supposed to engage at. The case this grid answers is 640, where a
+	     672px container still stacks. -->
 	<section class="grid @2xl:grid-cols-3 gap-3" data-testid="columns" bind:this={columnsEl}>
 		<div class="card bg-base-100 border border-base-300" data-testid="orders-column">
 			<div class="card-body py-3 space-y-2">

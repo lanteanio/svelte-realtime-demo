@@ -102,8 +102,8 @@ test.describe('/demos/chaos', () => {
 		// regression. And it does not compare the two buttons to each other:
 		// daisyUI mixes the border colour from --btn-bg, which hover and its
 		// 200ms transition both move, so cross-element equality fails for
-		// reasons that have nothing to do with the finding. What the finding is
-		// actually about is one button painting a visible edge, so that is what
+		// reasons that have nothing to do with the regression. What matters is
+		// each button painting a visible edge, so that is what
 		// each is asked for on its own.
 		const paintsAnEdge = (id) => page.getByTestId(id).evaluate((el) => {
 			const style = getComputedStyle(el)

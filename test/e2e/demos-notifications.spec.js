@@ -56,8 +56,8 @@ test.describe('/demos/notifications', () => {
 	// leader-gated cron distributing a job; the registry's job is reaching a
 	// recipient's socket wherever it is connected. Teaching the registry
 	// through an unrelated mechanism leaves the visitor with a confident
-	// wrong model, which is worse than the original complaint of showing
-	// nothing - so the attribution is pinned rather than left to prose.
+	// wrong model, which is worse than showing nothing at all - so the
+	// attribution is pinned rather than left to prose.
 	test('the activity note credits each cluster mechanism to the evidence that actually shows it', async ({ page }) => {
 		await open(page)
 		const note = page.getByTestId('activity-wiring-note')
@@ -94,7 +94,7 @@ test.describe('/demos/notifications', () => {
 		// On a fresh database this instructional copy is most of the page's
 		// content and the visitor's only in-place guidance, so it has to be
 		// READABLE and not merely present. toBeVisible() passes identically at
-		// the opacity-40 the finding was about, so assert the computed value:
+		// an opacity of 0.4, so assert the computed value:
 		// the class is not the claim, the rendered contrast is.
 		for (const id of ['inbox-empty', 'scheduled-empty', 'activity-empty']) {
 			const opacity = await page.getByTestId(id)
@@ -193,8 +193,8 @@ test.describe('/demos/notifications', () => {
 			// The activity entry names the worker that handled it - the
 			// cluster-wiring surface this page was missing.
 			// /^on \S+$/ proves only that a chip exists - a literal placeholder
-			// satisfies it while surfacing nothing about the cluster, which is
-			// exactly the finding. Instance ids are hex (the same identity
+			// satisfies it while surfacing nothing about the cluster.
+			// Instance ids are hex (the same identity
 			// cluster-cron and ops render), so require that shape instead.
 			await expect(a.getByTestId('activity-item').filter({ hasText: text }).first().getByTestId('activity-instance')).toHaveText(/^on [0-9a-f]{6,}$/i, { timeout: 8_000 })
 

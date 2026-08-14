@@ -218,9 +218,9 @@ test.describe('/demos/privacy', () => {
 	// was ever exercised.
 	//
 	// Asserting the lede's TEXT proves the copy changed; it does not prove the
-	// action became reachable, which is what the finding actually claimed. So
-	// this measures the action itself, at the three rungs the finding named.
-	test('the primary action is above the fold on every phone rung named in the finding', async ({ browser }) => {
+	// action became reachable, which is what actually matters. So this
+	// measures the action itself, at three phone rungs.
+	test('the primary action is above the fold on every phone rung', async ({ browser }) => {
 		for (const [width, height] of [[360, 640], [320, 568], [844, 390]]) {
 			const context = await browser.newContext({ viewport: { width, height } })
 			const page = await context.newPage()

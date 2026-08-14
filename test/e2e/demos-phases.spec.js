@@ -118,7 +118,7 @@ test.describe('/demos/phases', () => {
 	})
 
 	// A raw "CODE: message" tells a visitor what broke internally and nothing
-	// about what to do, so the framing and the recovery hint are the finding.
+	// about what to do, so the framing and the recovery hint are what matter.
 	// This branch was recorded as unreachable, which left the copy unpinned and
 	// free to be deleted silently. It is reachable: an attach in flight when the
 	// socket drops fails for real, which is a genuine failure rather than a

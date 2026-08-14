@@ -242,7 +242,7 @@ test.describe('/demos/shooter', () => {
 			y: Number(node.getAttribute('cy'))
 		}))
 		// The receipt is on screen while the shot is still inside its send
-		// delay. That window is the whole finding: 400ms of silence on the
+		// delay. That window is the whole point: 400ms of silence on the
 		// reported path is what trains a visitor to click again.
 		expect((await shooterStats(page)).shots).toBe(0)
 		expect(

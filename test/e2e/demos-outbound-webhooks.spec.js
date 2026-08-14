@@ -134,8 +134,8 @@ test.describe('/demos/outbound-webhooks', () => {
 		await waitForDlq(page, tracked)
 	})
 
-	// The rungs the finding measured at, where an unbroken token lost characters
-	// off the content edge - "demos:outbo" at 320.
+	// The rungs where an unbroken token loses characters off the content edge:
+	// the topic renders as "demos:outbo" at 320.
 	const NARROW_RUNGS = [[412, 915], [390, 844], [360, 640], [320, 568]]
 
 	/**
@@ -151,7 +151,7 @@ test.describe('/demos/outbound-webhooks', () => {
 	 *
 	 * Asserting the `break-all` CLASS instead is what let this regress before:
 	 * a `whitespace-nowrap` sitting beside it satisfies the class check while
-	 * clipping exactly as the finding described. Only the geometry settles it.
+	 * clipping the token all the same. Only the geometry settles it.
 	 */
 	async function expectTokenFits(locator, label, width, height) {
 		const size = await locator.evaluate((el) => {
@@ -206,7 +206,7 @@ test.describe('/demos/outbound-webhooks', () => {
 
 	// The suite pinned btn-sm and btn-outline as CLASSES, on a fine pointer.
 	// Both survive deleting the coarse-pointer floor, which is the entire
-	// finding - these were the smallest targets on the page and they are the
+	// point - these were the smallest targets on the page and they are the
 	// last step of the stated success line.
 	test('the replay controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
 		const { context, page } = await openTouchPage(browser)
@@ -214,7 +214,7 @@ test.describe('/demos/outbound-webhooks', () => {
 			await openOutbound(page)
 			await expectTouchTarget(page.getByTestId('ow-replay-all'))
 			// The per-row control exists only once there are dead letters, so
-			// earn one rather than quietly skip the half of the finding it
+			// earn one rather than quietly skip the half of the surface it
 			// belongs to. Waiting for the ROW is enough - the full waitForDlq
 			// helper also pins the retry state (attempts: 3, HTTP 500), which
 			// this test does not need and which would make a geometry

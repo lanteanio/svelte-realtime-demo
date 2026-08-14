@@ -177,9 +177,9 @@ test.describe('/demos/cluster-cron', () => {
 			expect(footnote.opacity, `aside link opacity at ${viewport.width}px`).toBeLessThan(1)
 			expect(prominent.opacity, `jobs-pointer opacity at ${viewport.width}px`).toBe(1)
 
-			// "Normal-size line" from the finding: body text, not the metadata
-			// size. The finding also called the footnote the smallest target on
-			// the page; that half is already closed globally by the demos-layout
+			// A normal-size line: body text, not the metadata size. The
+			// footnote being the smallest target on
+			// the page is already handled globally by the demos-layout
 			// rule that lifts every closing aside to 0.875rem, so size parity
 			// here is correct and only the floor is worth pinning.
 			expect(prominent.fontSize, `jobs-pointer font-size at ${viewport.width}px`).toBeGreaterThanOrEqual(14)

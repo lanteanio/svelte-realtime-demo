@@ -71,7 +71,7 @@ test.describe('/demos/pagination', () => {
 		const button = page.getByTestId('load-more')
 		// Measured against the DOCUMENT, not the viewport: a click can scroll
 		// the page, and a viewport-relative box reports that as the control
-		// moving when the layout never changed. What this finding is about is
+		// moving when the layout never changed. What matters here is
 		// the button being pushed down the page by rows inserted above it.
 		const docTop = () => button.evaluate((el) => el.getBoundingClientRect().top + window.scrollY)
 		const before = await docTop()

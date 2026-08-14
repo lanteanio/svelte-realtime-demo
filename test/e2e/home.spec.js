@@ -87,8 +87,8 @@ test.describe('home + gallery', () => {
 		await openHome(page)
 		const realtime = page.getByTestId('framing-link-realtime')
 		const adapter = page.getByTestId('framing-link-adapter')
-		// Textual destinations, not a bare icon: the finding's requirement is
-		// that a first-time visitor has a readable path off the page.
+		// Textual destinations, not a bare icon, so that a first-time visitor
+		// has a readable path off the page.
 		await expect(realtime).toHaveText('svelte-realtime')
 		await expect(realtime).toHaveAttribute('href', 'https://github.com/lanteanio/svelte-realtime')
 		await expect(adapter).toHaveText('svelte-adapter-uws')
