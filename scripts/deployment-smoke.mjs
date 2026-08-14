@@ -66,6 +66,11 @@ function websocketHandshake(url) {
 			socket.write([
 				`GET ${url.pathname}${url.search} HTTP/1.1`,
 				`Host: ${url.host}`,
+				// A browser stamps Origin on a handshake itself; a raw socket has
+				// to send it, and a deployment that pins its origin refuses a
+				// handshake that arrives without one. Derived from the target so
+				// the probe is correct against whatever host it was aimed at.
+				`Origin: ${secure ? 'https' : 'http'}://${url.host}`,
 				'Connection: Upgrade',
 				'Upgrade: websocket',
 				'Sec-WebSocket-Version: 13',

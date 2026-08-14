@@ -58,3 +58,54 @@ test('legacy rollback smoke skips only readiness and still requires page plus We
 		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
 	}
 })
+
+test('the handshake carries an Origin matching its target, so an origin-pinned deployment admits it', async () => {
+	let observedOrigin
+	const server = http.createServer((request, response) => {
+		if (request.url === '/') {
+			response.writeHead(200).end('ok')
+			return
+		}
+		response.writeHead(404).end('missing')
+	})
+	// Mirrors a deployment that has declared its origin: a handshake arriving
+	// without a matching Origin is refused, exactly as the WebSocket layer
+	// refuses one. A probe that sends no Origin fails here rather than in a
+	// rollout.
+	server.on('upgrade', (request, socket) => {
+		observedOrigin = request.headers.origin ?? null
+		const address = server.address()
+		if (request.headers.origin !== `http://127.0.0.1:${address.port}`) {
+			socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
+			return
+		}
+		const accept = createHash('sha1')
+			.update(`${request.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+			.digest('base64')
+		socket.end([
+			'HTTP/1.1 101 Switching Protocols',
+			'Upgrade: websocket',
+			'Connection: Upgrade',
+			`Sec-WebSocket-Accept: ${accept}`,
+			'',
+			''
+		].join('\r\n'))
+	})
+
+	await new Promise((resolve, reject) => {
+		server.once('error', reject)
+		server.listen({ port: 0, host: '127.0.0.1' }, () => resolve())
+	})
+
+	try {
+		const address = server.address()
+		assert.ok(address && typeof address !== 'string')
+		const url = `http://127.0.0.1:${address.port}`
+
+		const result = await execFileAsync(process.execPath, [smokeScript, url, '--skip-readiness'])
+		assert.match(result.stdout, /Legacy rollback smoke passed/)
+		assert.equal(observedOrigin, url)
+	} finally {
+		await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+	}
+})
