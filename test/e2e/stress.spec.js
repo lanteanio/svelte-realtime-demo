@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
-import { resolveE2EBaseURL, toWebSocketURL } from '../../scripts/test-target.mjs';
+import { resolveE2EBaseURL, toWebSocketURL, toHandshakeOrigin } from '../../scripts/test-target.mjs';
 import { joinBoardWithRetry } from './ws-rpc.js';
 
 const WS_URL = toWebSocketURL(resolveE2EBaseURL());
+const WS_ORIGIN = toHandshakeOrigin(WS_URL);
 const BOARD_URL = '/board/stress-me-out';
 
 /**
@@ -18,6 +19,7 @@ function connectUser(index) {
 
 		const ws = new WebSocket(WS_URL, {
 			headers: { Cookie: cookie },
+			origin: WS_ORIGIN,
 			rejectUnauthorized: false
 		});
 

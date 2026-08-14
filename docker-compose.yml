@@ -11,6 +11,10 @@ services:
         # The stub satisfies the check during build; the runtime value below
         # is what actually verifies webhook signatures in production.
         DEMO_NEWS_WEBHOOK_SECRET: build-stub
+        # Only needed when the deployment answers to more than one hostname.
+        # Unset leaves the adapter on its same-origin default, pinned to the
+        # runtime ORIGIN below.
+        ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
     # Host networking is load-bearing here: both replicas bind host:443 via
     # SO_REUSEPORT clustering, and the host kernel distributes inbound
     # connections across them at the network-stack level. Bridge networking
@@ -60,6 +64,10 @@ services:
       NODE_ENV: production
       PORT: "443"
       ORIGIN: https://${DOMAIN:?required}
+      # Set to 1 only if a non-browser client has to hold a WebSocket here.
+      # Browsers always send Origin on a handshake, so leaving this unset
+      # costs no visitor a connection.
+      WS_ALLOW_ORIGINLESS: ${WS_ALLOW_ORIGINLESS:-}
       SSL_CERT: /etc/letsencrypt/live/${DOMAIN}/fullchain.pem
       SSL_KEY: /etc/letsencrypt/live/${DOMAIN}/privkey.pem
       # Cert renewal here is restart-based: entrypoint.sh fingerprints the

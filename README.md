@@ -291,6 +291,9 @@ The normal target is always a dynamically allocated loopback port. Assertion-fre
 | `DEMO_NEWS_WEBHOOK_SECRET` | _(dev fallback)_ | HMAC secret for the inbound newsroom webhook. Required in production. |
 | `HOST` | `0.0.0.0` | Server bind address. |
 | `PORT` | `3000` | Server port. |
+| `ORIGIN` | _(none)_ | The deployment's canonical public origin, e.g. `https://example.com`. When set it is the authority for WebSocket admission: a handshake whose `Origin` does not match is refused with 403, a handshake carrying no `Origin` is refused with 401, and a request whose `Host` is neither this name nor a loopback name is refused with 400. Unset (a bare checkout) leaves all three inert. The compose file derives it from `DOMAIN`. |
+| `ALLOWED_ORIGINS` | _(none)_ | **Build-time.** Comma-separated extra origins for a deployment reachable under more than one name, e.g. `https://example.com,https://www.example.com`. Read when the bundle is built, not when the container starts. A single-hostname deployment leaves this unset and relies on `ORIGIN`. |
+| `WS_ALLOW_ORIGINLESS` | _(none)_ | Set to `1` to re-admit WebSocket handshakes that carry no `Origin` header on a deployment that has `ORIGIN` set. Browsers always send `Origin`, so this is only for non-browser clients. |
 
 ---
 
@@ -305,7 +308,8 @@ test/
 src/
 ├── hooks.ws.js                     -- WebSocket lifecycle: identity, presence, cursors,
 │                                      tenant resolver, admin plane, coordinator wiring
-├── hooks.server.js                 -- Stress-board bootstrap + error handler
+├── hooks.server.js                 -- Stress-board bootstrap, Host check, framing header,
+│                                      error handler
 ├── app.html                        -- HTML shell with Svelte favicon
 ├── app.css                         -- Tailwind + DaisyUI setup
 ├── routes/

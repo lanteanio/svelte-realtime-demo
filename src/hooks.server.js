@@ -10,6 +10,15 @@
 
 import { ensureBoard } from '$lib/server/db'
 import { live } from 'svelte-realtime/server'
+import { env } from '$env/dynamic/private'
+import { deploymentHosts, isAcceptableHost } from '$lib/server/origin-policy'
+
+/**
+ * Every hostname this deployment answers to, read once at startup. Empty for
+ * a checkout that declares none, which leaves the Host check inert so a fresh
+ * clone serves normally with no configuration.
+ */
+const acceptedHosts = deploymentHosts(env)
 
 // Dev-mode safety net: warn once if a stream subscribes to a topic and
 // no events arrive within 30 seconds. Catches "I forgot ctx.publish"
@@ -45,13 +54,27 @@ export async function handle({ event, resolve }) {
 	if (event.url.pathname === '/healthz' || event.url.pathname.startsWith('/healthz/')) {
 		return resolve(event)
 	}
+	const hostHeader = event.request.headers.get('host')
+	if (!isAcceptableHost(hostHeader, acceptedHosts)) {
+		console.warn(
+			`[host-check] refused host=${hostHeader ?? '(absent)'}` +
+			` path=${event.url.pathname} ip=${event.getClientAddress()}`
+		)
+		return new Response('Bad Request', { status: 400, headers: { 'content-type': 'text/plain' } })
+	}
 	// Steady state: the one-time init promise is already resolved, so skip the
 	// await entirely. If the schema migration was skipped or Postgres is
 	// unavailable, fail closed instead of serving a partially initialized app.
 	if (!applicationInitialized) {
 		await initializeApplicationData()
 	}
-	return resolve(event)
+	const response = await resolve(event)
+	// Only the framing directive. A full policy would have to enumerate every
+	// script, style and connect source the demo pages use, and getting that
+	// wrong breaks the app; this one directive stands on its own and is the
+	// piece that stops the pages being embedded under another name.
+	response.headers.set('content-security-policy', "frame-ancestors 'self'")
+	return response
 }
 
 export function handleError({ error }) {

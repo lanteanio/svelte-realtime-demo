@@ -25,7 +25,8 @@ import { WebSocket } from 'ws';
 import {
 	assertSafeE2ETarget,
 	resolveE2EBaseURL,
-	toWebSocketURL
+	toWebSocketURL,
+	toHandshakeOrigin
 } from '../../scripts/test-target.mjs';
 
 const args = process.argv.slice(2);
@@ -43,6 +44,7 @@ httpTarget.pathname = '';
 httpTarget.search = '';
 httpTarget.hash = '';
 const HTTP_URL = httpTarget.href.replace(/\/$/, '');
+const WS_ORIGIN = toHandshakeOrigin(WS_URL);
 const BOARD_SLUG = 'stress-me-out';
 
 // Multi-process: WORKERS=N forks N child Node processes that each handle
@@ -170,7 +172,7 @@ function connectUser(index) {
 			id, name: `X${SHARD_BASE + index}`, color: '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
 		}))}`;
 
-		const ws = new WebSocket(WS_URL, { headers: { Cookie: cookie }, rejectUnauthorized: false });
+		const ws = new WebSocket(WS_URL, { headers: { Cookie: cookie }, origin: WS_ORIGIN, rejectUnauthorized: false });
 		const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 60000);
 
 		ws.on('open', () => { clearTimeout(timer); resolve({ ws, index }); });

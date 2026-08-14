@@ -18,6 +18,19 @@
  */
 import adapter from 'svelte-adapter-uws'
 
+// Optional multi-hostname allowlist, for a deployment reachable under more
+// than one name (an apex plus www, a staging alias). Comma-separated, each
+// entry a full origin: ALLOWED_ORIGINS=https://example.com,https://www.example.com
+//
+// This is build-time adapter configuration, so it is read when the bundle is
+// built rather than when the container starts. A deployment reachable under a
+// single hostname needs none of it: left unset, the policy stays 'same-origin'
+// and the runtime ORIGIN env is the authoritative pin.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+	.split(',')
+	.map((value) => value.trim())
+	.filter(Boolean)
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	kit: {
@@ -30,6 +43,19 @@ const config = {
 			healthCheckPath: false,
 			readinessCheckPath: '/readyz',
 			websocket: {
+				// `metrics: './src/lib/server/metrics.js'` is deliberately NOT
+				// set. Pointing the adapter at that module makes it bundle a
+				// second, standalone copy: `platform.metrics` and the registry
+				// the app imports become different objects, so the adapter's
+				// counters never reach /metrics, and the module's own
+				// `live.metrics(...)` registration runs a second time at boot.
+				// The refusals the adapter makes before the upgrade hook runs
+				// are therefore visible in its log output rather than as a
+				// counter; the hook's own refusals are counted by the app.
+				//
+				// Present only when ALLOWED_ORIGINS was set at build time;
+				// otherwise the adapter keeps its 'same-origin' default.
+				...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
 				upgradeRateLimit: 0,
 				// Same rationale as upgradeRateLimit: the stress harness drives
 				// 1000+ connections from one IP, and the auth-preflight door

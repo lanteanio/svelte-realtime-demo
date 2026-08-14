@@ -25,6 +25,12 @@ COPY . .
 # start.
 ARG DEMO_NEWS_WEBHOOK_SECRET
 ENV DEMO_NEWS_WEBHOOK_SECRET=$DEMO_NEWS_WEBHOOK_SECRET
+# WebSocket origin policy is adapter configuration, which is serialized into
+# the bundle, so a multi-hostname allowlist has to be present at build time
+# rather than at container start. Empty means the deployment is reachable
+# under one name and the runtime ORIGIN is the pin.
+ARG ALLOWED_ORIGINS=
+ENV ALLOWED_ORIGINS=$ALLOWED_ORIGINS
 RUN npm run build
 
 # --- Production stage ---

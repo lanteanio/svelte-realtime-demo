@@ -35,6 +35,7 @@ import { forgetDraftIdempotency } from '$lib/server/forget-demo'
 import { TOPICS } from '$lib/server/topics'
 import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
+import { evaluateUpgradeOrigin, upgradeOriginPolicy } from '$lib/server/origin-policy'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface at boot.
@@ -204,6 +205,19 @@ live.configurePush({
 })
 
 /**
+ * Refusals issued by the upgrade hook below, labelled by policy reason.
+ * The adapter keeps its own `upgrade_rejected_total` for the refusals it
+ * makes before the hook runs (a mismatched Origin among them); both are
+ * exposed on the same registry, so /metrics shows the whole admission
+ * picture rather than only the half the application can see.
+ */
+const upgradeRefusals = metrics.counter(
+	'ws_upgrade_refused_total',
+	'WebSocket upgrades refused by the application upgrade hook',
+	['reason']
+)
+
+/**
  * Called when a client wants to upgrade from HTTP to WebSocket.
  * Whatever this function returns becomes `ws.getUserData()` for the
  * lifetime of that connection. We attach the user's identity (looked up
@@ -219,8 +233,29 @@ live.configurePush({
  * organizations (`acme` or `globex`); used by /demos/denials to gate
  * access to org-scoped audit-log streams. Unset is treated as "no org"
  * and denies every audit:* subscribe.
+ *
+ * Admission runs before any of that. A handshake that carries an `Origin`
+ * has already been matched against the deployment's canonical origin by the
+ * adapter and refused with a 403 if it did not match, so the only decision
+ * left here is the Origin-less handshake - see `$lib/server/origin-policy` for
+ * why that one lands on the application. Returning `false` refuses the
+ * upgrade; the adapter answers it with a 401 (it reserves 403 for its own
+ * origin comparison). See `$lib/server/origin-policy`.
  */
-export async function upgrade({ cookies }) {
+export async function upgrade({ headers, cookies, remoteAddress }) {
+	const admission = evaluateUpgradeOrigin(headers?.origin, upgradeOriginPolicy(env))
+	if (!admission.allowed) {
+		upgradeRefusals.inc({ reason: admission.reason })
+		// Source address is recorded here and deliberately not turned into a
+		// metric label: it is unbounded, and a per-address time series would
+		// retain far more than a refusal count needs.
+		console.warn(
+			`[ws-upgrade] refused reason=${admission.reason}` +
+			` origin=${headers?.origin ?? '(absent)'} ip=${remoteAddress ?? '(unknown)'}`
+		)
+		return false
+	}
+
 	const raw = cookies.identity
 
 	// Fast path: session exists in Redis.

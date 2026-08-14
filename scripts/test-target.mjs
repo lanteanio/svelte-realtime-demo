@@ -52,4 +52,24 @@ export function toWebSocketURL(baseURL, pathname = '/ws', env = process.env) {
 	return url.href
 }
 
+/**
+ * Handshake `Origin` for a node-side WebSocket client aimed at `wsURL`.
+ *
+ * A browser stamps this header itself; the `ws` package sends none unless
+ * told to, and a handshake without one is refused wherever the server has a
+ * canonical origin configured. Deriving it from the target rather than from
+ * configuration is what keeps one load generator correct against a local
+ * instance and against a deployment without being told which it is talking
+ * to: the value always matches the host it is actually connecting to.
+ *
+ * @param {string} wsURL - a ws:// or wss:// endpoint
+ * @returns {string} the matching http(s) origin
+ */
+export function toHandshakeOrigin(wsURL, env = process.env) {
+	const url = assertSafeE2ETarget(wsURL, env)
+	if (url.protocol === 'ws:') url.protocol = 'http:'
+	else if (url.protocol === 'wss:') url.protocol = 'https:'
+	return url.origin
+}
+
 export { DEFAULT_BASE_URL }
