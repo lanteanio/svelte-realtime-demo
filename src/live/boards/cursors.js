@@ -8,8 +8,8 @@
  * joinBoard/leaveBoard: manage per-board presence (who's on this board).
  * moveCursor: update this user's cursor position on the board.
  *
- * All three are in the THROTTLED_RPCS set in hooks.ws.js, meaning they
- * bypass rate limiting (they fire too frequently to be rate-limited).
+ * All three carry per-frame transport, so `$lib/server/rpc-limits` keeps them
+ * off the abuse budget: they fire too often to be counted as user actions.
  */
 
 import { live, LiveError } from 'svelte-realtime/server'

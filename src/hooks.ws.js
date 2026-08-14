@@ -36,6 +36,7 @@ import { TOPICS } from '$lib/server/topics'
 import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { evaluateUpgradeOrigin, upgradeOriginPolicy } from '$lib/server/origin-policy'
+import { isPerFrameRpc } from '$lib/server/rpc-limits'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface at boot.
@@ -593,12 +594,9 @@ export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	chaosOnClose(ws)
 })
 
-/**
- * RPCs that should bypass rate limiting. These fire very frequently
- * during normal use (every mouse move, every drag frame) and would
- * instantly exhaust the rate limit budget if counted.
- */
-const THROTTLED_RPCS = new Set(['boards/notes/moveNote', 'boards/cursors/moveCursor', 'boards/cursors/joinBoard'])
+// Which RPCs carry per-frame transport, and so must not be charged to the
+// abuse budget, lives in $lib/server/rpc-limits - matched by family rather
+// than by a list of paths. See that module for why the line is drawn there.
 
 /**
  * The message handler processes all incoming RPC calls from clients.
@@ -619,7 +617,7 @@ export const message = createMessage({
 	// (the 0.5.6 audit / notifications counted 2x in /demos/effect on a
 	// two-replica deploy).
 	async beforeExecute(ws, rpcPath) {
-		if (THROTTLED_RPCS.has(rpcPath)) return
+		if (isPerFrameRpc(rpcPath)) return
 		const { allowed, resetMs } = await limiter.consume(ws)
 		if (!allowed) throw new LiveError('RATE_LIMITED', `Retry in ${Math.ceil(resetMs / 1000)}s`)
 	},
