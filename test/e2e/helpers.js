@@ -245,8 +245,8 @@ export async function waitForWS(page, timeout = WS_CONNECT_TIMEOUT) {
 		for (let reloads = 0; ; reloads++) {
 			const attempt = await attemptConnectionWait(page, timeout);
 			// Reload only on PROOF that the client bundle never loaded, and only
-			// within the budget. Two things make this a recovery rather than the
-			// masking this card already rejected once. It fires on a fact - a
+			// within the budget. Two things make this a recovery rather than a
+			// failure mask. It fires on a fact - a
 			// failed script request - not on a bare timeout, so a genuine 15s
 			// connect stall still fails as loudly as before. And a page whose
 			// bundle never ran has no client-side state to lose, so reloading is
