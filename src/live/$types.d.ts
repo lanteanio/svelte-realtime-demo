@@ -190,6 +190,7 @@ declare module "$live/demos/flash-sales" {
   export const myFlashState: (...args: any[]) => Promise<any>;
   export const resetSale: (...args: any[]) => Promise<any>;
   export type ErrorCode = "SOLD_OUT" | "VALIDATION";
+  export const couponPool: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const productList: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const recentSales: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const buyProduct: (...args: any[]) => Promise<any>;

@@ -22,7 +22,8 @@
 		claimCoupon,
 		resetSale,
 		productList,
-		recentSales
+		recentSales,
+		couponPool
 	} from '$live/demos/flash-sales'
 
 	let { data } = $props()
@@ -59,6 +60,21 @@
 		})
 		return () => off()
 	})
+
+	// The pool a claim RETURNS is only ever this caller's own view of it. A
+	// claim made on another replica moves the number with no reply to carry it
+	// here, so the displayed value comes from the stream once it has one, and
+	// falls back to the page-load probe only until then.
+	let poolLive = $state(/** @type {number | null} */ (null))
+
+	$effect(() => {
+		const off = couponPool.subscribe((v) => {
+			if (v && typeof v.poolRemaining === 'number') poolLive = v.poolRemaining
+		})
+		return () => off()
+	})
+
+	const poolRemaining = $derived(poolLive ?? state.couponPoolRemaining)
 
 	// --- Wall clock for time-ago labels ---
 	let nowMs = $state(Date.now())
@@ -259,7 +275,7 @@
 					{couponBusy ? 'Claiming...' : (state.alreadyClaimed ? 'Re-check coupon' : 'Claim coupon')}
 				</button>
 				<span class="text-xs opacity-60">
-					Pool remaining: <strong data-testid="coupon-pool">{state.couponPoolRemaining}</strong> / {state.couponPoolInitial}
+					Pool remaining: <strong data-testid="coupon-pool">{poolRemaining}</strong> / {state.couponPoolInitial}
 				</span>
 				{#if couponResult}
 					{#if couponResult.kind === 'ok'}

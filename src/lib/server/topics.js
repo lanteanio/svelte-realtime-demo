@@ -54,6 +54,7 @@ export const TOPICS = defineTopics({
 	demoSchemaCounter: 'demos:schema-evolution:counter',
 	demoFlashProducts: 'demos:flash-sales:products',
 	demoFlashSales: 'demos:flash-sales:sales',
+	demoFlashCoupons: 'demos:flash-sales:coupons',
 	demoPaginationLog: 'demos:pagination:log',
 	demoEffectOrders: 'demos:effect:orders',
 	demoEffectAudit: 'demos:effect:audit',

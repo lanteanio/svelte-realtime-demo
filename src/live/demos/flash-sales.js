@@ -240,23 +240,33 @@ export const claimCoupon = live.idempotent(
 		if (typeof userId !== 'string') {
 			throw new LiveError('VALIDATION', 'no identity')
 		}
-		const already = await redis.redis.sismember(HOLDERS_KEY, userId)
-		if (already === 1) {
+		// SADD is itself an atomic test-and-set, so making it the gate means
+		// exactly one caller in the cluster can ever reach the decrement.
+		// Reading membership first and adding last let both replicas pass the
+		// read and decrement twice, leaving the pool transiently short and
+		// relying on the loser's compensating INCR to restore it - so a worker
+		// that dies between its decrement and that INCR retires a coupon that
+		// nobody holds. Gating on the add removes the window instead of
+		// compensating for it.
+		const added = await redis.redis.sadd(HOLDERS_KEY, userId)
+		if (added === 0) {
 			return { ok: true, code: COUPON_CODE, poolRemaining: await getPool() }
 		}
 		const newPool = await redis.redis.decr(POOL_KEY)
 		if (newPool < 0) {
 			await redis.redis.incr(POOL_KEY)
+			// Release the gate. The claim did not happen, so this user must not
+			// be recorded as a holder, or a later refill could never reach them.
+			await redis.redis.srem(HOLDERS_KEY, userId)
 			throw new LiveError('SOLD_OUT', 'coupon pool exhausted')
 		}
-		const added = await redis.redis.sadd(HOLDERS_KEY, userId)
-		if (added === 0) {
-			// Cross-replica race: another claim from the same user landed
-			// after our SISMEMBER but before our SADD. Restore the pool
-			// we wrongly decremented and return the cached-shape success.
-			const restored = await redis.redis.incr(POOL_KEY)
-			return { ok: true, code: COUPON_CODE, poolRemaining: restored }
-		}
+		// The reply reaches only the caller, so without this the OTHER tab keeps
+		// whatever it last believed. That tab is not merely stale, it is stale in
+		// both directions: before this publish existed it read its own duplicate
+		// claim's GET, which races this decrement and returns the pre-claim
+		// number. Publishing lets the replica that actually performed the
+		// decrement be the one that reports it.
+		ctx.publish(TOPICS.demoFlashCoupons, 'set', { poolRemaining: newPool })
 		return { ok: true, code: COUPON_CODE, poolRemaining: newPool }
 	}
 )
@@ -290,6 +300,7 @@ export const resetSale = live(async (ctx) => {
 			ctx.publish(TOPICS.demoFlashSales, 'deleted', { id: s.id })
 		} catch { /* corrupt entry already gone */ }
 	}
+	ctx.publish(TOPICS.demoFlashCoupons, 'set', { poolRemaining: COUPON_POOL_INITIAL })
 	for (const p of PRODUCTS_INITIAL) {
 		ctx.publish(TOPICS.demoFlashProducts, 'updated', {
 			id: p.id,
@@ -304,6 +315,21 @@ export const resetSale = live(async (ctx) => {
 	}
 	return { ok: true }
 })
+
+/**
+ * The coupon pool as a live value rather than an RPC reply.
+ *
+ * A claim on another replica moves this number, and a tab that did not make
+ * that claim has no other way to learn it moved: the reply only reaches the
+ * caller. Publishing it is also what makes the answer self-correcting, since
+ * the authoritative number arrives from whichever replica actually performed
+ * the decrement rather than from each tab's own view of the race.
+ */
+export const couponPool = live.stream(
+	TOPICS.demoFlashCoupons,
+	async () => ({ poolRemaining: await getPool() }),
+	{ merge: 'set' }
+)
 
 /** Live stream of product cards (stock + sold updates per buy). */
 export const productList = live.stream(
