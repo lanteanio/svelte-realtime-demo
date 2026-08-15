@@ -481,9 +481,26 @@ export function getNotes(page) {
  * Wait for the board to be fully loaded (spinner gone, board header visible).
  */
 export async function waitForBoardReady(page) {
+	// A gate that can fail. The previous version could not: both of its waits
+	// ended in `.catch(() => {})`, so a timeout was swallowed and it returned as
+	// though it had succeeded; the element it waited on was the `h1`, which is
+	// server-rendered and therefore says nothing about whether the client ever
+	// booted; and what remained was an unconditional 500ms sleep. A page whose
+	// bundle never ran passed through in half a second, and the failure surfaced
+	// thirty seconds later on whatever locator the test happened to touch first.
+	//
+	// The connection wait is the part that proves a live client, and it carries
+	// the probe diagnostics, so a dead bundle is named here rather than inferred
+	// from a canvas that never appeared.
+	await waitForWS(page);
+	// Best-effort by design: the spinner is transient and a fast board may never
+	// show one, so its absence is not a failure. It stays because when it IS
+	// present, leaving early would race the render.
 	await page.locator('.loading').waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
-	await page.locator('h1').waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-	await page.waitForTimeout(500);
+	// The canvas is client-rendered, which is what makes this the assertion the
+	// old `h1` wait only looked like. Not swallowed: if the board never paints,
+	// that is the failure, reported here at the gate.
+	await getCanvas(page).waitFor({ state: 'visible', timeout: 15000 });
 }
 
 /**
