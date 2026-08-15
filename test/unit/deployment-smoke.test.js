@@ -74,8 +74,16 @@ test('the handshake carries an Origin matching its target, so an origin-pinned d
 	// rollout.
 	server.on('upgrade', (request, socket) => {
 		observedOrigin = request.headers.origin ?? null
+		// address() is an AddressInfo for a TCP listener and a string for a Unix
+		// socket, and only the former carries a port. This server is always TCP,
+		// so the string case cannot arise - but narrowing to null and refusing is
+		// the safe reading of it either way, since the alternative is comparing
+		// against the literal "undefined".
 		const address = server.address()
-		if (request.headers.origin !== `http://127.0.0.1:${address.port}`) {
+		const expected = typeof address === 'object' && address !== null
+			? `http://127.0.0.1:${address.port}`
+			: null
+		if (expected === null || request.headers.origin !== expected) {
 			socket.end('HTTP/1.1 401 Unauthorized\r\n\r\n')
 			return
 		}
