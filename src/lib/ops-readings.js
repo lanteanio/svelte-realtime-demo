@@ -11,19 +11,30 @@
  *     into measured zeros; `reading()` reports them as no reading and
  *     leaves a genuine measured 0 intact.
  *
- *  2. PLACEHOLDER zeros. The adapter initialises its pressure snapshot
- *     with `memoryMB: 0` and overwrites it on the first ~1Hz sampler
- *     tick, so RSS is always present and reads 0 until sampling starts
- *     - which is exactly the window a freshly opened dashboard is read
- *     in. No live process occupies 0 MB, so `rssReading()` treats zero
- *     as "not sampled yet". That impossibility rule is specific to RSS
- *     and deliberately not generalised: publish rate, backpressured
- *     connections and the rest are legitimately zero all the time.
- *     Filed upstream so consumers stop needing rules like this one.
+ *  2. UNSAMPLED snapshots. The transport pressure snapshot exists from
+ *     process start with every field at 0 and is overwritten when the
+ *     ~1Hz sampler folds, so inside that window the whole object is
+ *     placeholders. No per-field rule can find that out: 0 is the
+ *     honest steady-state reading for publish rate, buffered bytes and
+ *     backpressured connections on an idle worker. `sampledAt` dates
+ *     the snapshot instead - null before the first fold, wall-clock ms
+ *     after - so one branch qualifies every field at once. Being a
+ *     timestamp, it also separates a fresh reading from the stale one
+ *     a wedged sampler leaves behind, which `pressureState()` reports
+ *     as its own state rather than folding into either neighbour.
  */
 
 /** Rendered in place of a number nobody measured. */
 export const NO_READING = '-'
+
+/**
+ * How old the newest pressure sample may be before the sampler counts
+ * as wedged rather than merely between ticks. The adapter folds at ~1Hz
+ * and this page polls every 3s, so a healthy age is well under a
+ * second and the margin here is wide enough that a tick delayed by a
+ * busy event loop is not reported as a fault.
+ */
+export const SAMPLE_STALE_MS = 5000
 
 /** True when `value` is an actual finite numeric reading. */
 export function isReading(value) {
@@ -44,9 +55,37 @@ export function statReading(value, digits = 0) {
 }
 
 /**
- * RSS in MB. Zero means the sampler has not run yet, not that the
- * process is weightless, so it reports as no reading.
+ * Which of four states the admission-posture panel is in:
+ *
+ *   'missing'   - no pressure snapshot at all (adapter without one).
+ *   'unsampled' - a snapshot whose fields are still placeholders.
+ *   'stale'     - real readings, but older than the sampler's period.
+ *   'live'      - measured within the last sampling period.
+ *
+ * `ageMs` must be measured on the worker that took the sample, because
+ * `sampledAt` is that worker's wall clock and a browser's clock has no
+ * fixed relation to it; a client-side subtraction reports clock skew as
+ * staleness. Pass null when there is no age to hand over, which keeps a
+ * dated snapshot 'live' rather than inventing a fault.
+ *
+ * An undated snapshot reads as 'unsampled' whether the field is null or
+ * absent: an adapter old enough not to stamp its samples cannot vouch
+ * for the numbers in them either, and "nobody measured this" is the
+ * honest rendering of both.
  */
-export function rssReading(memoryMB) {
-	return isReading(memoryMB) && memoryMB > 0 ? statReading(memoryMB) : NO_READING
+export function pressureState(pressure, ageMs) {
+	if (!pressure) return 'missing'
+	if (!isReading(pressure.sampledAt)) return 'unsampled'
+	return isReading(ageMs) && ageMs > SAMPLE_STALE_MS ? 'stale' : 'live'
+}
+
+/**
+ * A sample age in tenths of a second, for the freshness caption. Not
+ * clamped at zero: an age below it means the stamp and the clock that
+ * aged it came from different processes, and a caption reading "-0.4s
+ * ago" is the visible form of that. Clamping would present the same
+ * broken pairing as a perfectly fresh sample.
+ */
+export function ageReading(ageMs) {
+	return isReading(ageMs) ? statReading(ageMs / 1000, 1) : NO_READING
 }

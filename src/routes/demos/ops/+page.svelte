@@ -13,7 +13,7 @@
 -->
 <script>
 	import { snapshot, dlqSummary } from '$live/demos/ops'
-	import { NO_READING, reading, rssReading, statReading } from '$lib/ops-readings'
+	import { NO_READING, ageReading, pressureState, reading, statReading } from '$lib/ops-readings'
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -61,6 +61,10 @@
 	})
 
 	const pressure = $derived(snap?.transport?.pressure ?? null)
+	// Aged by the worker that took the sample - see the RPC in ops.js for why
+	// the browser must not do this subtraction itself.
+	const pressureAgeMs = $derived(snap?.pressureAgeMs ?? null)
+	const posture = $derived(pressureState(pressure, pressureAgeMs))
 	const byKind = $derived(snap?.handlers?.byKind ?? null)
 	const modifiers = $derived(snap?.handlers?.modifiers ?? null)
 	const dlqTopics = $derived(Object.entries(dlq?.byTopic ?? {}))
@@ -74,12 +78,12 @@
 		return ts ? new Date(ts).toLocaleTimeString() : '-'
 	}
 
-	// Reading rules live in $lib/ops-readings so they can be unit-tested:
-	// the pre-sample window that makes the RSS rule necessary is not
-	// reachable from a browser test against a warm server.
+	// Reading rules live in $lib/ops-readings so they can be unit-tested: the
+	// pre-sample window they exist for is not reachable from a browser test
+	// against a warm server, which has always sampled by the time the browser
+	// looks.
 	const stat = statReading
 	const count = reading
-	const rss = $derived(rssReading(pressure?.memoryMB))
 
 	let copied = $state(false)
 	let copyTimer = null
@@ -260,7 +264,25 @@
 	<section class="card bg-base-100 border border-base-300" data-testid="ops-pressure-card">
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Admission posture (transport)</h2>
-			{#if pressure}
+			{#if posture === 'unsampled'}
+				<!-- The snapshot exists but nothing in it has been measured: the
+				     adapter populates every field with 0 at process start and
+				     overwrites them on the first ~1Hz sampler fold. The panel used
+				     to render those placeholders and single out RSS with a "no live
+				     process weighs 0 MB" rule, which is true and covers exactly one
+				     field - publish rate, buffered bytes and backpressured
+				     connections are legitimately 0 on an idle worker, so the same
+				     trick cannot reach them. sampledAt dates the snapshot, so one
+				     branch withholds all of it. -->
+				<p class="text-xs opacity-40" data-testid="ops-pressure-unsampled">
+					Not sampled yet - the transport snapshot is present but the
+					sampler has not folded, so every field is still its startup
+					placeholder rather than a reading. Under <code>npm run dev</code>
+					this is the permanent state: the dev plugin runs no sampler at
+					all, so the dashboard shows the same state here that it must
+					handle in production before the first tick.
+				</p>
+			{:else if pressure}
 				<div class="flex items-center gap-3">
 					<!-- The healthy state used to read "NONE" beside
 					     "protection: normal", which binds to protection and
@@ -281,6 +303,23 @@
 						protection: <span class="font-mono" data-testid="ops-protection">{snap?.transport?.protection ?? NO_READING}</span>
 					</span>
 				</div>
+				<!-- Every number below is only as good as the fold that produced
+				     it, so the panel says when that was. A sampler that stops
+				     leaves real readings behind, which is neither "no data" nor
+				     healthy; dating them is what tells the two apart, and it is the
+				     same condition the pressure_sample_timestamp_seconds metric
+				     alerts on. -->
+				{#if posture === 'stale'}
+					<p class="text-xs text-warning" data-testid="ops-sample-age" data-sample-age-ms={pressureAgeMs}>
+						Sampler wedged: these readings are {ageReading(pressureAgeMs)}s
+						old and the sampler folds about once a second. They were
+						measured - just not recently.
+					</p>
+				{:else}
+					<p class="text-xs opacity-50" data-testid="ops-sample-age" data-sample-age-ms={pressureAgeMs}>
+						sampled {ageReading(pressureAgeMs)}s ago
+					</p>
+				{/if}
 				<!-- Units live in the labels, so every value is a bare number
 				     of the same shape and the four stats keep one baseline
 				     even where the column is narrow. -->
@@ -291,7 +330,7 @@
 					</div>
 					<div>
 						<dt class="opacity-60">RSS MB</dt>
-						<dd class="font-bold tabular-nums" data-testid="ops-memory-mb">{rss}</dd>
+						<dd class="font-bold tabular-nums" data-testid="ops-memory-mb">{stat(pressure.memoryMB)}</dd>
 					</div>
 					{#if pressure.backpressuredConnections != null}
 						<div>

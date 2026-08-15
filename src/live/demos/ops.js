@@ -56,10 +56,21 @@ import { leader } from '$lib/server/redis'
  * id - the same `leader.instanceId` the cluster-cron demo shows - turns
  * that swing from "is this broken?" into "you are reading replica X". It
  * is null only before init / during build analysis (fail-closed facade).
+ *
+ * `pressureAgeMs` ages the transport pressure sample HERE rather than in
+ * the browser. `transport.pressure.sampledAt` is this worker's wall clock,
+ * and a visitor's clock has no fixed relation to it, so subtracting one
+ * from the other on the client reports the skew between two machines as
+ * the age of a measurement. Both halves of this subtraction come from the
+ * same process, which is what makes the number mean what it says. It is
+ * null while the sampler has not folded, which is also when every other
+ * field of the snapshot is still a placeholder.
  */
 export const snapshot = live(async () => {
 	const snap = await introspect()
-	return { ...snap, replica: leader.instanceId }
+	const sampledAt = snap?.transport?.pressure?.sampledAt
+	const pressureAgeMs = Number.isFinite(sampledAt) ? Date.now() - sampledAt : null
+	return { ...snap, replica: leader.instanceId, pressureAgeMs }
 })
 
 /**

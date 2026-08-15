@@ -50,11 +50,13 @@ test.describe('/demos/ops', () => {
 		await expect(page.getByTestId('ops-reactive')).toHaveText(/^\d+ \/ \d+ \/ \d+$/)
 		await expect(page.getByTestId('ops-wired')).toHaveText('yes / yes')
 
-		// The pressure card is absent only where the adapter reports no snapshot
-		// (vite dev). Against a real server it must be present, so the branch is
-		// pinned to the environment rather than to the page: otherwise a
-		// regression that stops rendering the card silently downgrades this test
-		// to the trivial arm and keeps reporting green.
+		// The posture readings are absent where the adapter reports no snapshot
+		// at all, and withheld where it reports one whose sampler has not folded
+		// (vite dev, permanently - the dev plugin runs no sampler). Against a
+		// real server neither holds, so the branch is pinned to the environment
+		// rather than to the page: otherwise a regression that stops rendering
+		// the readings silently downgrades this test to a trivial arm and keeps
+		// reporting green.
 		const pressureCard = await page.getByTestId('ops-pressure-reason').count()
 		if (process.env.LOCAL_E2E === '1' || process.env.CI) expect(pressureCard).toBeGreaterThan(0)
 		if (pressureCard > 0) {
@@ -69,10 +71,30 @@ test.describe('/demos/ops', () => {
 			await expect(page.getByTestId('ops-publish-rate')).toHaveText(/^\d+$/)
 			// A reading or an honest blank - never a fabricated zero. If the
 			// adapter reports RSS at all it is a live process, so a plain 0
-			// would itself be the bug this assertion exists to catch.
+			// would itself be the bug this assertion exists to catch. The panel
+			// does not single RSS out any more - it withholds every field until
+			// the snapshot is dated - which is exactly why this stays: it catches
+			// a placeholder reaching the page by some route other than the
+			// undated snapshot, which is the only one the panel closes.
 			const rss = (await page.getByTestId('ops-memory-mb').textContent())?.trim()
 			expect(rss, 'RSS must be a real reading or an explicit no-reading dash').toMatch(/^(\d+|-)$/)
 			if (rss !== '-') expect(Number(rss), 'a reported RSS cannot be 0 MB for a live process').toBeGreaterThan(0)
+			// Freshness is measured on the worker that took the sample, so this
+			// number is a duration and not the skew between two machines' clocks.
+			// A browser-side subtraction would land wherever this host's clock
+			// happens to sit relative to the server's, which on the deployed
+			// cluster is an arbitrary offset in either direction - so the bound
+			// below is what separates a real age from that.
+			// Read the attribute as text before converting it. An age the server
+			// never sent leaves the attribute off the element entirely, and
+			// Number(null) is 0 - which would satisfy every bound below and turn
+			// this whole check into a pin on nothing.
+			const ageAttr = await page.getByTestId('ops-sample-age').getAttribute('data-sample-age-ms')
+			expect(ageAttr, 'the pressure sample must carry a server-measured age').toMatch(/^-?\d+$/)
+			const ageMs = Number(ageAttr)
+			expect(ageMs, 'a sample cannot be newer than the clock that aged it').toBeGreaterThanOrEqual(0)
+			expect(ageMs, 'a warm server folds its pressure sampler about once a second').toBeLessThan(5_000)
+			await expect(page.getByTestId('ops-sample-age')).toContainText('sampled')
 			// Units belong to the LABEL, never glued to the value. This card
 			// rendered "0KB" while its siblings put the unit in the label
 			// ("RSS MB", "publish/s"), which broke the scan rhythm on the last
@@ -88,7 +110,16 @@ test.describe('/demos/ops', () => {
 					.toMatch(/^(\d+(\.\d+)?|-)$/)
 			}
 		} else {
-			await expect(page.getByTestId('ops-pressure-missing')).toBeVisible()
+			// No readings means one of two different things, and the panel must
+			// say which: no snapshot on this platform at all, or a snapshot whose
+			// sampler has not folded. Exactly one, never both and never neither -
+			// a panel that renders no readings and explains nothing is the state
+			// this card set out to remove.
+			const missing = await page.getByTestId('ops-pressure-missing').count()
+			const unsampled = await page.getByTestId('ops-pressure-unsampled').count()
+			expect(missing + unsampled, 'a panel with no readings must name which state it is in').toBe(1)
+			if (unsampled) await expect(page.getByTestId('ops-pressure-unsampled')).toContainText('Not sampled yet')
+			else await expect(page.getByTestId('ops-pressure-missing')).toBeVisible()
 		}
 
 		await replicaId(page)
