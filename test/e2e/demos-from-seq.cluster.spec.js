@@ -16,8 +16,13 @@ async function rows(page) {
 	return page.getByTestId('event-row').evaluateAll((nodes) => nodes.map((node) => {
 		const seq = Number(node.textContent?.match(/#(\d+)/)?.[1] ?? NaN)
 		const message = node.querySelector('[data-testid="event-message"]')?.textContent?.trim() ?? ''
-		const time = node.querySelector('[data-testid="event-time"]')?.textContent?.trim() ?? ''
-		return { seq, message, time }
+		// The RAW stored epoch-ms, not the rendered clock text. `timeOf` formats
+		// with toLocaleTimeString, which drops milliseconds, so two genuinely
+		// different durable rows written inside the same second render as the
+		// same string - an equality on that text would agree across replicas
+		// that had loaded different rows.
+		const ts = Number(node.querySelector('[data-testid="event-time"]')?.getAttribute('data-ts') ?? NaN)
+		return { seq, message, ts }
 	}))
 }
 
@@ -41,8 +46,17 @@ function assertIntegrity(entries) {
 		// carried it, which fails on every row the page has ever rendered.
 		expect(entry.message.length).toBeGreaterThan(0)
 		expect(entry.message).not.toMatch(/#\d+\s*$/)
-		expect(entry.time).not.toBe('')
+		// A stored timestamp, not a placeholder: finite, and inside a plausible
+		// epoch-ms window. A missing attribute is NaN and fails here rather than
+		// reaching the cross-replica equality, where it would compare NaN to NaN.
+		expect(Number.isFinite(entry.ts)).toBe(true)
+		expect(entry.ts).toBeGreaterThan(1_700_000_000_000)
+		expect(entry.ts).toBeLessThan(Date.now() + 60_000)
 	}
+	// One writer at 1Hz, so every retained row carries its own timestamp. A
+	// constant that happens to be finite and in range would survive every check
+	// above on its own; it cannot survive this one.
+	expect(new Set(entries.map((entry) => entry.ts)).size).toBe(entries.length)
 }
 
 test.describe('cluster: /demos/from-seq', () => {
@@ -58,17 +72,18 @@ test.describe('cluster: /demos/from-seq', () => {
 			assertIntegrity(rowsB)
 			const bySeqB = new Map(rowsB.map((entry) => [entry.seq, entry]))
 			const overlap = rowsA.filter((entry) => bySeqB.has(entry.seq))
-			expect(overlap.length).toBeGreaterThan(0)
+			// More than one, so a single coincidental row cannot carry the claim.
+			expect(overlap.length).toBeGreaterThan(1)
 			for (const entry of overlap) {
 				const mirror = bySeqB.get(entry.seq)
 				expect(mirror.message).toBe(entry.message)
-				// The stored timestamp is the one rendered field a replica cannot
-				// recompute from the seq in front of it: the phrase is a pure
-				// function of the seq, so comparing only that would agree even if
-				// the two replicas were reading different stores. The time comes
-				// from the durable row, so matching it is what makes this an
-				// agreement check rather than two pages running the same function.
-				expect(mirror.time).toBe(entry.time)
+				// The stored epoch-ms is the one field a replica cannot recompute
+				// from the seq in front of it: the phrase is a pure function of the
+				// seq, so comparing only that would agree even between replicas
+				// reading entirely different stores. This value is written once, by
+				// the leader-elected cron, into the shared durable row, so matching
+				// it to the millisecond is what makes this an agreement check.
+				expect(mirror.ts).toBe(entry.ts)
 			}
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
