@@ -1,22 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage } from './helpers.js'
+import { switchTenant, waitForWsConfirmed } from './tenants-helpers.js'
 
 test.describe.configure({ mode: 'serial' })
-
-/**
- * The tenant readout is confirmed over the socket, so this wait is a
- * connection wait wearing an app-level costume: when the socket never
- * comes up, `tn-ws-pending` simply never clears and the failure reports
- * a selector, naming nothing about why. Route the connection half
- * through `waitForWS` first so a dead socket or a page that never
- * hydrated reports its own timeline, and keep the tenant confirmation
- * as the app-level gate behind it.
- */
-async function waitForWsConfirmed(page) {
-	await waitForWS(page)
-	await expect(page.getByTestId('tn-ws-pending')).toHaveCount(0, { timeout: 15_000 })
-	await expect(page.getByTestId('tn-whoami-error')).toHaveCount(0)
-}
 
 async function open(page) {
 	await page.goto('/demos/tenants')
@@ -26,10 +12,7 @@ async function open(page) {
 const opacityOf = (locator) => locator.evaluate((el) => Number(getComputedStyle(el).opacity))
 
 async function switchTo(page, tenant) {
-	const id = tenant === 'acme' ? 'tn-set-acme' : tenant === 'globex' ? 'tn-set-globex' : 'tn-clear'
-	await page.getByTestId(id).click()
-	await expect(page.getByTestId('tn-active-tenant')).toHaveText(tenant ?? 'none', { timeout: 15_000 })
-	await waitForWsConfirmed(page)
+	await switchTenant(page, tenant)
 	await expect(page.getByTestId('tn-wire-topic')).toHaveText(
 		tenant ? `@t/${tenant}/demos:tenants:pad` : 'demos:tenants:pad'
 	)

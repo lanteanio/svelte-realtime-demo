@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
-import { waitForWS } from './helpers.js'
+import { switchTenant, waitForWsConfirmed } from './tenants-helpers.js'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
@@ -8,21 +8,18 @@ const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localho
 test.skip(!process.env.INSTANCE_B, 'tenants cluster coverage requires two explicit replica targets')
 test.describe.configure({ mode: 'serial' })
 
-// Same reasoning as the single-instance spec: the pending marker is a
-// connection wait in app clothing, so the connection half reports its
-// own timeline before the tenant confirmation is asked for.
+// Both waits come from the shared tenants helper, so this spec cannot drift
+// away from the single-instance one again. It had: the post-switch wait here
+// sat on the app-level marker with no connection wait in front of it, and a
+// switch RELOADS the page - the resolver runs once per connection at upgrade -
+// so it was the least diagnosable connection wait in the file rather than a
+// cheap re-check of a socket that was already up.
 async function openAt(page, origin) {
 	await page.goto(`${origin}/demos/tenants`)
-	await waitForWS(page)
-	await expect(page.getByTestId('tn-ws-pending')).toHaveCount(0, { timeout: 15_000 })
+	await waitForWsConfirmed(page)
 }
 
-async function switchTo(page, tenant) {
-	const id = tenant === 'acme' ? 'tn-set-acme' : 'tn-set-globex'
-	await page.getByTestId(id).click()
-	await expect(page.getByTestId('tn-active-tenant')).toHaveText(tenant, { timeout: 15_000 })
-	await expect(page.getByTestId('tn-ws-pending')).toHaveCount(0, { timeout: 15_000 })
-}
+const switchTo = switchTenant
 
 async function post(page, text) {
 	await page.getByTestId('tn-note-input').fill(text)
