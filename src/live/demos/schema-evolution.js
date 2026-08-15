@@ -50,6 +50,44 @@ const COLORS = {
 const VALUES_KEY = 'demos:schema:values'
 const TIMES_KEY = 'demos:schema:times'
 
+/**
+ * The increment and its timestamp, from one ordering.
+ *
+ * Taking `Date.now()` in the handler and HINCRBY over the wire puts the value
+ * and the stamp on two independent orderings: a replica that reads its clock
+ * early and lands late writes the HIGHER value under the EARLIER time, so the
+ * pair the page displays is not a fact about any single moment. Two replicas
+ * make it worse than a reordering, because their wall clocks are not the same
+ * clock at all and the stamps are not comparable.
+ *
+ * Redis is the one thing both replicas share, so both halves come from it:
+ * `TIME` inside the script is read between the increment and the write, and
+ * the script is atomic, so the value and the stamp are one observation. That
+ * also means every timestamp on this page comes from a single clock however
+ * many replicas are serving it.
+ *
+ * Redis has permitted a write after a non-deterministic read since script
+ * effects replication became the default in 5.0; this deployment is on 7.
+ */
+const INCREMENT_SCRIPT = `
+local value = redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
+local now = redis.call('TIME')
+local ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+redis.call('HSET', KEYS[2], ARGV[1], tostring(ms))
+return { value, ms }
+`
+
+/** The same single clock for the reset, which stamps every counter at once. */
+const RESET_SCRIPT = `
+local now = redis.call('TIME')
+local ms = tonumber(now[1]) * 1000 + math.floor(tonumber(now[2]) / 1000)
+for i = 1, #ARGV do
+  redis.call('HSET', KEYS[1], ARGV[i], 0)
+  redis.call('HSET', KEYS[2], ARGV[i], tostring(ms))
+end
+return ms
+`
+
 function v2Shape(c) {
 	return {
 		id: c.id,
@@ -128,25 +166,18 @@ export const incrementCounter = live(async (ctx, id) => {
 	if (typeof id !== 'string' || !SEED_IDS.includes(id)) {
 		throw new LiveError('VALIDATION', 'unknown counter')
 	}
-	const modifiedAt = Date.now()
 	// HINCRBY is atomic per field, so two concurrent increments from
 	// different replicas never lose a count. The timestamp goes into a
-	// parallel hash because HINCRBY only works on integer values.
-	const value = await redis.redis.hincrby(VALUES_KEY, id, 1)
-	await redis.redis.hset(TIMES_KEY, id, String(modifiedAt))
+	// parallel hash because HINCRBY only works on integer values, and into
+	// the same script so it is the same observation as the value.
+	const [value, modifiedAt] = await redis.redis.eval(INCREMENT_SCRIPT, 2, VALUES_KEY, TIMES_KEY, id)
 	const payload = v2Shape({ id, value, modifiedAt })
 	ctx.publish(TOPICS.demoSchemaCounter, 'updated', payload)
 	return payload
 })
 
 export const resetCounters = live(async (ctx) => {
-	const modifiedAt = Date.now()
-	const pipeline = redis.redis.multi()
-	for (const id of SEED_IDS) {
-		pipeline.hset(VALUES_KEY, id, 0)
-		pipeline.hset(TIMES_KEY, id, String(modifiedAt))
-	}
-	await pipeline.exec()
+	const modifiedAt = await redis.redis.eval(RESET_SCRIPT, 2, VALUES_KEY, TIMES_KEY, ...SEED_IDS)
 	for (const id of SEED_IDS) {
 		ctx.publish(TOPICS.demoSchemaCounter, 'updated', v2Shape({ id, value: 0, modifiedAt }))
 	}
