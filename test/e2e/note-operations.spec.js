@@ -172,6 +172,11 @@ test.describe.serial('Note Operations', () => {
 		const countBefore = await getNotes(page).count();
 
 		await page.reload();
+		// A reload is a full navigation and can leave the client bundle dead
+		// exactly as a goto can, so it needs the same gate. waitForBoardReady is
+		// not that gate: both of its waits swallow their own timeouts, so it
+		// returns just as happily against a page that never booted.
+		await waitForWS(page);
 		await waitForBoardReady(page);
 
 		const countAfter = await getNotes(page).count();

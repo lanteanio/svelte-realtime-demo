@@ -34,6 +34,14 @@ async function reset(page) {
 
 async function reloadMigrated(page) {
 	await page.reload()
+	// A reload is a full navigation and can leave the client bundle dead
+	// exactly as a goto can, and callers click as soon as this returns. The
+	// count below does eventually notice, but it reports the wrong thing: a
+	// dead bundle surfaces as "v2-card expected 3, received 0" after the full
+	// eight seconds, naming a content selector rather than the asset that
+	// failed to load. Gating first turns that into a readiness failure that
+	// names the dead chunk.
+	await waitForWS(page)
 	await expect(page.getByTestId('v2-card')).toHaveCount(3, { timeout: 8_000 })
 	await expectV1Provenance(page, 'migrate[1]')
 }
