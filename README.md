@@ -296,6 +296,7 @@ The normal target is always a dynamically allocated loopback port. Assertion-fre
 | `ORIGIN` | _(none)_ | The deployment's canonical public origin, e.g. `https://example.com`. When set it is the authority for WebSocket admission: a handshake whose `Origin` does not match is refused with 403, a handshake carrying no `Origin` is refused with 401, and a request whose `Host` is neither this name nor a loopback name is refused with 400. Unset (a bare checkout) leaves all three inert. The compose file derives it from `DOMAIN`. |
 | `ALLOWED_ORIGINS` | _(none)_ | **Build-time.** Comma-separated extra origins for a deployment reachable under more than one name, e.g. `https://example.com,https://www.example.com`. Read when the bundle is built, not when the container starts. A single-hostname deployment leaves this unset and relies on `ORIGIN`. |
 | `WS_ALLOW_ORIGINLESS` | _(none)_ | Set to `1` to re-admit WebSocket handshakes that carry no `Origin` header on a deployment that has `ORIGIN` set. Browsers always send `Origin`, so this is only for non-browser clients. |
+| `BUILD_OUT_DIR` | `build` | **Build-time.** Where the built server is written. The e2e harness sets it per run so a concurrent build in the same checkout cannot rewrite the tree a live run is serving from; deployments leave it alone. |
 
 ---
 

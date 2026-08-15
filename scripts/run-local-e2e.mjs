@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { readdir, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { selectOrphans } from './orphan-sweep.mjs'
@@ -14,6 +15,19 @@ if (!TIERS.has(tier)) {
 const suffix = `${process.pid}-${Date.now()}`
 const postgresName = `srd-test-postgres-${suffix}`
 const redisName = `srd-test-redis-${suffix}`
+// The build this run serves, owned by this run alone. Inside the repo rather
+// than the OS temp dir on purpose: the built server imports bare specifiers
+// (uWebSockets.js, svelte-realtime/server, the extensions entry points), so it
+// only resolves from a directory that has this checkout's node_modules above
+// it. `srd-build-<pid>-<timestamp>` matches the container naming, which is
+// what lets the startup sweep reclaim one left by a killed run.
+const BUILD_RUNS = 'build-runs'
+const buildDir = `${BUILD_RUNS}/srd-build-${suffix}`
+// Windows holds a handle on a module file for a moment after the process that
+// loaded it exits, so removing 700 of them straight after a SIGTERM can fail
+// on a file that is about to be released. Retrying is the difference between
+// reclaiming the tree now and leaving it for the next run's startup sweep.
+const REMOVE_TREE = { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }
 const postgresImage = process.env.TEST_POSTGRES_IMAGE
 	|| 'postgres:17-alpine@sha256:5a6fcbc5d93831991d2386fa634509b3c49a1ac5ffb70c13c2322840f821d7e7'
 const redisImage = process.env.TEST_REDIS_IMAGE
@@ -51,6 +65,12 @@ try {
 	// flake, and that is how a real regression gets merged. A pre-built bundle
 	// cannot fail this way, and it has the larger benefit of making the gate
 	// test the artifact that actually ships.
+	//
+	// Into this run's own directory, and served from there for the whole tier.
+	// The containers have been per-run for a while; the build was the half
+	// still shared, which is why a second session's rebuild could void a live
+	// run with nothing in its output to say so.
+	await sweepOrphanedBuilds()
 	await ensureProductionBuild()
 	await provisionDependencies()
 
@@ -147,7 +167,8 @@ function commonEnvironment() {
 async function ensureProductionBuild() {
 	await runChecked('production build', process.execPath, ['scripts/build.mjs'], {
 		...process.env,
-		DEMO_NEWS_WEBHOOK_SECRET: 'local-e2e-webhook-secret'
+		DEMO_NEWS_WEBHOOK_SECRET: 'local-e2e-webhook-secret',
+		BUILD_OUT_DIR: buildDir
 	})
 }
 
@@ -185,12 +206,13 @@ async function resetState() {
 }
 
 async function startApp(port) {
-	// Production build only. The dev-server path this used to take is what
-	// made the gate flaky; see the ensureProductionBuild call above for the
-	// mechanism. Debugging against `vite dev` is still available by running
-	// `npm run dev` and pointing playwright at it through BASE_URL, which
-	// keeps that option without letting the gate reach for it by accident.
-	const child = spawn(process.execPath, ['build/index.js'], {
+	// Production build only, out of this run's own directory. The dev-server
+	// path this used to take is what made the gate flaky; see the
+	// ensureProductionBuild call above for the mechanism. Debugging against
+	// `vite dev` is still available by running `npm run dev` and pointing
+	// playwright at it through BASE_URL, which keeps that option without
+	// letting the gate reach for it by accident.
+	const child = spawn(process.execPath, [`${buildDir}/index.js`], {
 		env: {
 			...commonEnvironment(),
 			HOST: '127.0.0.1',
@@ -270,6 +292,11 @@ async function cleanup() {
 	// every run left one behind invisibly; they had reached 677 volumes and
 	// about 16GB of reclaimable space before anyone looked.
 	await run('docker', ['rm', '--force', '--volumes', postgresName, redisName], process.env, 'ignore').catch(() => {})
+	// After stopApps, so nothing is still reading out of it. A failure here is
+	// reported and not fatal: the run's result is already decided, and the
+	// startup sweep reclaims what is left either way.
+	await rm(buildDir, REMOVE_TREE)
+		.catch((error) => console.error(`could not remove ${buildDir}: ${error.message}`))
 }
 
 /**
@@ -302,6 +329,28 @@ async function sweepOrphanedContainers() {
 	if (!orphans.length) return
 	console.log(`orphaned containers: removing ${orphans.length} left by dead harness runs`)
 	await run('docker', ['rm', '--force', '--volumes', ...orphans], process.env, 'ignore').catch(() => {})
+}
+
+/**
+ * Remove per-run build directories left behind by runs that died without
+ * cleanup(). Same ownership rule and the same startup placement as the
+ * containers above, for the same reason: a teardown-side fix has the hole that
+ * a hard kill skips it, and each of these is about 8 MB across 700 files.
+ */
+async function sweepOrphanedBuilds() {
+	let listed
+	try {
+		listed = await readdir(BUILD_RUNS)
+	} catch {
+		return
+	}
+	const orphans = selectOrphans(listed)
+	if (!orphans.length) return
+	console.log(`orphaned builds: removing ${orphans.length} left by dead harness runs`)
+	for (const orphan of orphans) {
+		await rm(`${BUILD_RUNS}/${orphan}`, REMOVE_TREE)
+			.catch((error) => console.error(`could not remove ${orphan}: ${error.message}`))
+	}
 }
 
 

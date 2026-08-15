@@ -31,10 +31,21 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 	.map((value) => value.trim())
 	.filter(Boolean)
 
+// Where the built server is written. `build/` for everything that ships; the
+// e2e harness overrides it per run, because Node ESM lazy-loads a route's
+// server chunk on the FIRST request to that route, which makes the on-disk
+// tree a live dependency of the running server for the whole tier rather than
+// only at boot. A second build in the same checkout rewrites the chunk
+// filenames the running server's manifest already points at, and the next cold
+// route dies with ERR_MODULE_NOT_FOUND while warm routes keep passing out of
+// the module cache. Nothing in the tier's output says a rebuild happened.
+const out = process.env.BUILD_OUT_DIR || 'build'
+
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	kit: {
 		adapter: adapter({
+			out,
 			// The app ships its own /healthz route with per-dependency readiness
 			// (Postgres incl. applied migrations, Redis) - the adapter's built-in
 			// liveness probe would shadow it, so it is disabled. /readyz stays on:

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { selectOrphans, pidAlive, HARNESS_CONTAINER } from '../../scripts/orphan-sweep.mjs'
+import { selectOrphans, ownerPid, pidAlive, HARNESS_BUILD_DIR, HARNESS_CONTAINER } from '../../scripts/orphan-sweep.mjs'
 
 const dead = () => false
 const alive = () => true
@@ -30,6 +30,35 @@ test('containers this rule does not recognise are never swept', () => {
 	// world is dead, because the pid it would parse does not exist.
 	const foreign = ['postgres', 'srd-test-postgres', 'srd-test-mysql-1-2', 'other-srd-test-redis-1-2', '']
 	assert.deepEqual(selectOrphans(foreign, dead), [])
+})
+
+test('a build directory left by a dead run is swept, and a live run keeps its own', () => {
+	// The build tree is a live dependency of the server serving out of it for
+	// the whole tier, not just at boot, so removing one out from under a
+	// running harness has the same weight as removing its database.
+	const orphan = 'srd-build-400-1785481676633'
+	const live = 'srd-build-500-1785482486622'
+	assert.deepEqual(selectOrphans([orphan, live], (pid) => pid === 500), [orphan])
+	assert.deepEqual(selectOrphans([live], alive), [])
+})
+
+test('directories this rule does not recognise are never swept', () => {
+	// build-runs/ is the harness's own directory, but anything a person put
+	// there by hand outlives the sweep.
+	const foreign = ['build', 'srd-build', 'srd-build-abc-1', 'my-notes', 'srd-builder-1-2']
+	assert.deepEqual(selectOrphans(foreign, dead), [])
+})
+
+test('one ownership rule reads both kinds of artifact', () => {
+	assert.equal(ownerPid('srd-test-postgres-64708-1785482486622'), 64708)
+	assert.equal(ownerPid('srd-build-64708-1785482486622'), 64708)
+	assert.equal(ownerPid('srd-build-abc-1'), null)
+	assert.equal(ownerPid('unrelated'), null)
+	assert.equal(HARNESS_BUILD_DIR.exec('srd-build-7-1')[1], '7')
+	// The two patterns stay disjoint: a container name must not read as a
+	// build directory, or the wrong sweep would claim it.
+	assert.equal(HARNESS_BUILD_DIR.exec('srd-test-redis-7-1'), null)
+	assert.equal(HARNESS_CONTAINER.exec('srd-build-7-1'), null)
 })
 
 test('blank docker output selects nothing', () => {
