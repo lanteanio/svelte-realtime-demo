@@ -139,6 +139,49 @@ test.describe('/demos/collab-editor', () => {
 		await expect(page.getByTestId('collab-error')).toHaveCount(0)
 	})
 
+	test('a remote prefix edit leaves the actor\'s own CRDT row glued, the same way every other tab renders it', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([open(a), open(b)])
+			await clear(a)
+			await expectDocument(b, '')
+			const value = 'alpha TARGET omega'
+			await a.getByTestId('collab-crdt-textarea').fill(value)
+			await Promise.all([expectDocument(a, value), expectDocument(b, value)])
+			await selectRange(a.getByTestId('collab-crdt-textarea'), 6, 12)
+
+			const ownRow = a.locator('[data-testid="collab-crdt-selection-row"][data-local="true"]')
+			const peerRow = b.locator('[data-testid="collab-crdt-selection-row"][data-local="false"]')
+			await expect(ownRow).toContainText('[6, 12)')
+			await expect(peerRow).toContainText('[6, 12)')
+
+			// B inserts three characters in front of the range. The anchor travels
+			// with the text, so the selection still names TARGET everywhere.
+			await b.getByTestId('collab-crdt-textarea').fill(`XX ${value}`)
+			await Promise.all([expectDocument(a, `XX ${value}`), expectDocument(b, `XX ${value}`)])
+
+			// The peer's view is the CONTROL: it resolved from the anchor before
+			// this fix too. If it ever drifts, the test is wrong about the
+			// mechanism rather than catching the defect it was written for.
+			await expect(peerRow).toContainText('[9, 15)')
+			await expect(peerRow).toContainText('"TARGET"')
+
+			// The row under test. Rendering the offsets captured at publish time
+			// left this one at [6, 12) covering "ha TAR" - the acting visitor was
+			// the only participant whose own row drifted, on the panel whose whole
+			// claim is that CRDT selections do not.
+			await expect(ownRow).toContainText('[9, 15)')
+			await expect(ownRow).toContainText('"TARGET"')
+			await expect(a.getByTestId('collab-crdt-selection-drift')).toHaveCount(0)
+			await expect(a.getByTestId('collab-error')).toHaveCount(0)
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
 	test('a remote prefix edit maps the focused caret with the text while the published offsets stay frozen and drift on both sides', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()

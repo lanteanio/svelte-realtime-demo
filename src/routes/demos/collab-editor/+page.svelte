@@ -174,7 +174,13 @@
 				localSelections[mode] = null
 			} else if (mode === 'crdt') {
 				room.setSelection({ field: 'body', start, end })
-				localSelections[mode] = { start, end }
+				// Keep the ANCHOR, not the offsets. The numbers are only true of
+				// the document as it stands at this instant; an edit in front of
+				// the range moves the characters and leaves them behind. Every
+				// other tab re-resolves this selection from its anchor on each
+				// edit, so storing raw offsets here made the acting visitor the
+				// one participant whose own row drifted.
+				localSelections[mode] = { anchor: Array.from(body.anchorRange(start, end)) }
 			} else {
 				const snippet = body.value.slice(start, end)
 				room.setSelection({ start, end, snippet })
@@ -210,20 +216,32 @@
 		const rows = []
 		const local = localSelections[mode]
 		if (local) {
-			const start = Math.max(0, Math.min(local.start, text.length))
-			const end = Math.max(start, Math.min(local.end, text.length))
-			if (end > start) {
-				const covers = text.slice(start, end)
-				rows.push({
-					key: `local:${mode}`,
-					name: me?.name ?? 'You',
-					color: me?.color ?? '#888',
-					start,
-					end,
-					snippet: covers,
-					published: typeof local.snippet === 'string' ? local.snippet : undefined,
-					local: true
-				})
+			// The crdt row resolves from its anchor on every render, which is
+			// exactly what the room does for every peer - so the acting visitor
+			// sees their own selection behave the way the other tabs render it.
+			// Before this it was the one row in the panel that drifted, which
+			// made the proof contradict itself for the person most likely to be
+			// watching. The offset row keeps its frozen numbers deliberately:
+			// that drift is the thing that panel exists to show.
+			const resolved = mode === 'crdt' && Array.isArray(local.anchor)
+				? body.resolveRange(new Uint8Array(local.anchor))
+				: local
+			if (resolved) {
+				const start = Math.max(0, Math.min(resolved.start, text.length))
+				const end = Math.max(start, Math.min(resolved.end, text.length))
+				if (end > start) {
+					const covers = text.slice(start, end)
+					rows.push({
+						key: `local:${mode}`,
+						name: me?.name ?? 'You',
+						color: me?.color ?? '#888',
+						start,
+						end,
+						snippet: covers,
+						published: typeof local.snippet === 'string' ? local.snippet : undefined,
+						local: true
+					})
+				}
 			}
 		}
 		for (const [key, sel] of Object.entries(room.selections)) {
