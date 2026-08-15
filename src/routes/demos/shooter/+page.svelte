@@ -8,23 +8,16 @@
 	uplink + interpolation measurement, capped at maxRewindMs 400) and
 	tests the ray there.
 
-	The latency slider is what makes the cap observable. The page stamps the
-	render-time when the shot is AIMED and passes it to shoot() as `rt`, so
-	the artificial wait widens the rewind the server is asked for instead of
-	merely ageing the aim. Below 400ms the server covers the whole gap and
-	the shot lands where the world looked when you clicked; past it the ask
-	exceeds maxRewindMs, the server clamps the rewind to the cap, and the
-	remainder of the drift is yours - the targets have moved on and shots
-	start to miss. Not all of them: a target drifting ALONG the ray still
-	connects, so the cap shows up as a hit rate that falls rather than as a
-	wall. Measured at the top of the slider, roughly a fifth to a half of
-	aimed shots stop landing, against none inside the cap. That is the cap
-	taught by behaviour rather than by prose.
-
-	Fairness is unaffected, because the cap is the thing enforcing it: a
-	client can ask to be rewound as far as it likes, and the server refuses
-	past maxRewindMs. Stamping an older instant buys nothing beyond the
-	window; it only stops covering you sooner.
+	The compensation covers the legs the server measures itself, your real
+	uplink and interpolation, and nothing else: a shot's render-time is
+	stamped inside shoot() when the send leaves, so the latency slider's
+	setTimeout ages your aim instead of widening the rewind. Shots still
+	land through most of the slider's travel, but that is the orbit speeds
+	being slow enough to keep the drift inside the hitbox (see orbitFor in
+	shooter.js), NOT the rewind absorbing the wait. Fairness holds for the
+	same reason the slider cannot cheat: a client can inflate its measured
+	latency only by genuinely lagging, and the window is capped by
+	maxRewindMs.
 -->
 <script>
 	import MovePad from '$lib/components/MovePad.svelte'
@@ -49,16 +42,8 @@
 	}
 
 	function scheduleFire(angle) {
-		// Stamp the instant the shot was AIMED, on the same server axis the
-		// smoothing runs on, and hand it to shoot() when the send finally
-		// leaves. `view.now() - view.delay` is exactly what shoot() computes
-		// for itself, only taken here rather than after the wait: left to its
-		// own devices it stamps at send time, so the artificial latency aged
-		// the aim instead of widening the rewind, and the cap could never be
-		// crossed from this page at any slider value.
-		const aimedAt = view.now() - view.delay
 		const send = () => {
-			view.shoot({ angle }, { rt: aimedAt })
+			view.shoot({ angle })
 			shotsFired += 1
 			addFlash(angle)
 		}
@@ -91,8 +76,7 @@
 
 	// Immediate click receipt, separate from the shot itself: with lag on the
 	// slider the muzzle flash honestly waits for the delayed send, which
-	// leaves the click with no acknowledgment for as long as the slider's
-	// travel allows - two full seconds at the top of it - and a control
+	// leaves the click with no acknowledgment for up to 600ms - and a control
 	// that feels dead gets clicked again. The ring says "click received, send
 	// queued" at the click point the moment it happens; the flash still says
 	// "sent" when the send leaves.
@@ -235,11 +219,11 @@
 			Click inside the arena to shoot. The server rewinds every candidate to
 			the instant you rendered it and tests the ray there
 			(<code>live.smooth(&#123; hitTest &#125;)</code>) - so a shot that
-			landed on your screen lands on the server. That window is capped by
-			<code>maxRewindMs: 400</code>. Crank the latency slider past the mark
-			and watch the cap bite: the shot still carries the instant you
-			clicked, but the server refuses to rewind further than 400ms, so the
-			targets have moved on and aimed shots start to miss.
+			landed on your screen lands on the server. The window it covers is the
+			one it measured itself - your real uplink and interpolation - capped by
+			<code>maxRewindMs: 400</code>. Crank the latency slider and the
+			compensation does not follow it: a shot is stamped when its send
+			leaves, so the wait ages your aim rather than widening the rewind.
 		</p>
 	</header>
 
@@ -338,39 +322,37 @@
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
 					<h2 class="card-title text-sm">Extra latency: {lagMs}ms</h2>
-					<!-- The mark is a real threshold in this slider's behaviour, not
-					     a label: the page stamps the render-time at aim and passes it
-					     to shoot(), so the wait invented here lands in the rewind the
-					     server is asked for. Left of the mark the ask fits inside
-					     maxRewindMs and shots land; right of it the server clamps and
-					     they start to miss. -->
+					<!-- The mark labels what maxRewindMs IS; it is not a threshold in
+					     this slider's behaviour, and the caption must not imply one.
+					     The transport stamps a shot's render-time inside shoot(), at
+					     send time, so a delay invented here never enters the server's
+					     rewind age and the cap cannot be crossed from the app side at
+					     all. Making it crossable needs an app-supplied render stamp
+					     the public API does not expose. -->
 					<input
 						type="range"
 						class="range range-sm"
-						min="0" max="2000" step="50"
+						min="0" max="600" step="50"
 						bind:value={lagMs}
 						data-testid="sh-lag"
 					/>
 					<div class="relative h-4 text-[10px] font-mono opacity-60" aria-hidden="true">
 						<span class="absolute left-0">0</span>
-						<span class="absolute -translate-x-1/2" style="left: 20%" data-testid="sh-lag-cap-mark">400 = cap</span>
-						<span class="absolute right-0">2000</span>
+						<span class="absolute -translate-x-1/2" style="left: 66.67%" data-testid="sh-lag-cap-mark">400 = cap</span>
+						<span class="absolute right-0">600</span>
 					</div>
 					<p class="text-xs opacity-60">
 						Delays your command/shoot sends with a
 						<code>setTimeout</code> wrapper. The shot fires (and the
-						muzzle flash draws) when the send actually leaves, but the
-						render-time it carries is stamped when you <em>clicked</em>
-						and handed to <code>shoot()</code> as <code>rt</code> - so
-						the server is asked to rewind across the whole wait. Up to
-						400ms it does, and your shots land where the world looked
-						when you clicked. Past 400ms the ask exceeds
-						<code>maxRewindMs</code>, the server clamps the rewind to
-						the cap, and the leftover drift is yours: the targets have
-						moved on and aimed shots start to miss. That is the cap
-						doing its job, and it is why an invented delay cannot buy
-						an advantage - asking to be rewound further than the window
-						only makes the server stop covering you sooner.
+						muzzle flash draws) when the send actually leaves, and the
+						render-time it carries is stamped at that moment - so the
+						server rewinds to when the send left, not to when you
+						clicked. Your aim keeps ageing during the wait while the
+						compensation does not grow to match, so aimed shots start
+						to miss as you drag this up. That is the honest half of
+						the fairness rule: the rewind is measured from your real
+						uplink and interpolation, and a delay you invent locally
+						is not latency you earned.
 					</p>
 				</div>
 			</div>

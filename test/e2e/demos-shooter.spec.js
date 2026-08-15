@@ -28,15 +28,12 @@ test.describe('/demos/shooter', () => {
 		await expect(page.getByTestId('sh-you-label')).toBeVisible()
 		const slider = page.getByTestId('sh-lag')
 		await expect(slider).toHaveAttribute('min', '0')
-		// The slider has to run well past the mark for the cap to be reachable
-		// in practice. The page stamps the render-time at aim, so the invented
-		// wait does enter the server's rewind age now - but the targets orbit
-		// at 14 to 41 px/s against an 18px hitbox, so an uncovered window of a
-		// couple of hundred milliseconds moves them only a few pixels and every
-		// shot still lands. 2000ms leaves 1600ms uncovered, which is the range
-		// where the clamp actually costs hits; the boundary test below measures
-		// it. A 600ms maximum made the cap unobservable whatever the transport did.
-		await expect(slider).toHaveAttribute('max', '2000')
+		// The slider runs past the marked value, but the mark is a label for
+		// maxRewindMs rather than a threshold in this control: the render-time
+		// a shot carries is stamped at send time, so a delay invented on this
+		// page never reaches the server's rewind age. Asserting a miss beyond
+		// the mark would be asserting a mechanism the transport does not have.
+		await expect(slider).toHaveAttribute('max', '600')
 		await expect(slider).toHaveAttribute('step', '50')
 		await expect(page.getByTestId('sh-lag-cap-mark')).toHaveText('400 = cap')
 		await expect(slider).toHaveValue('0')
@@ -143,45 +140,6 @@ test.describe('/demos/shooter', () => {
 		} finally {
 			await Promise.allSettled([contextA.close(), contextB.close()])
 		}
-	})
-
-	test('a wait the rewind covers costs no hits; the same wait past maxRewindMs starts to miss', async ({ page }) => {
-		test.setTimeout(150_000)
-		await openShooter(page)
-		const slider = page.getByTestId('sh-lag')
-		const SHOTS = 20
-
-		async function fire(lag) {
-			await slider.fill(String(lag))
-			const before = await shooterStats(page)
-			for (let i = 0; i < SHOTS; i++) {
-				await shootRenderedTarget(page)
-				await page.waitForTimeout(120 + lag)
-			}
-			await page.waitForTimeout(500 + lag)
-			const after = await shooterStats(page)
-			return { hits: after.hits - before.hits, shots: after.shots - before.shots }
-		}
-
-		// Approach the cap from the INCLUDED side. 300ms is an invented wait the
-		// server still covers, and it runs the same machinery as the case under
-		// test: the shot carries the instant it was aimed and the rewind reaches
-		// back across a delay the server did not cause. A 0ms control would
-		// share no mechanism with the assertion below - it would stay green with
-		// the aim-time stamp deleted - so it could not witness a crossing.
-		const covered = await fire(300)
-		expect(covered.shots).toBe(SHOTS)
-		expect(covered.hits, 'a wait inside maxRewindMs must cost no hits').toBe(SHOTS)
-
-		// 2000ms asks to be rewound 1600ms past the cap. The server clamps at
-		// 400 and the leftover drift is the shooter's, so targets have moved off
-		// the ray. Deliberately NOT an all-miss assertion: a target drifting
-		// ALONG the ray still connects, so the honest claim is that some shots
-		// stop landing. Measured across four runs of 30: 5, 6, 14 and 17 misses,
-		// against zero on the covered side every time.
-		const clamped = await fire(2000)
-		expect(clamped.shots).toBe(SHOTS)
-		expect(SHOTS - clamped.hits, 'past maxRewindMs the clamp must cost hits').toBeGreaterThanOrEqual(2)
 	})
 
 	test('aimed shots register both authoritative score and server hit events', async ({ page }) => {
