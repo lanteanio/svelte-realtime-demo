@@ -36,8 +36,10 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
+import { createIdempotencyStore } from 'svelte-adapter-uws-extensions/redis/idempotency'
 import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { redis, breaker } from '$lib/server/redis'
+import { metrics } from '$lib/server/metrics'
 
 const PRODUCT_LOCK_MAX_WAIT_MS = 1500
 const PER_BUY_DELAY_MS = 80
@@ -50,6 +52,30 @@ const PRODUCTS_INITIAL = [
 	{ id: 'watch', name: 'Smart watch', originalPrice: 299, salePrice: 119, stockInitial: 3 },
 	{ id: 'speaker', name: 'Bluetooth speaker', originalPrice: 149, salePrice: 59, stockInitial: 8 }
 ]
+
+/**
+ * Cluster-shared idempotency store for the coupon claim, in a key namespace
+ * this demo owns outright.
+ *
+ * Two reasons it is not the framework's in-process default. It is per-replica,
+ * so a retry landing elsewhere would cold-miss and re-run the claim. And it
+ * cannot be emptied: `resetSale` restores the coupon pool and the holders set,
+ * but a cache it does not own keeps replaying each visitor's first reply, so
+ * the claim body never runs again and the pool never moves - a reset that
+ * looks complete and is not.
+ *
+ * The exclusive `keyPrefix` is what makes the reset honest rather than
+ * destructive: `clear()` empties the prefix, so nothing else may be filed
+ * under it. The other demos that take a store follow the same rule with their
+ * own prefixes.
+ */
+const idempotencyStore = createIdempotencyStore(redis, {
+	keyPrefix: 'demos:flash:idemp:',
+	ttl: 3600,
+	acquireTtl: 30,
+	breaker,
+	metrics
+})
 
 const SALES_KEY = 'demos:flash:sales'
 const HOLDERS_KEY = 'demos:flash:coupons:holders'
@@ -234,7 +260,11 @@ export const buyProduct = live.lock(
  * coupon from the new replica's empty idempotency cache.
  */
 export const claimCoupon = live.idempotent(
-	{ keyFrom: (ctx) => typeof ctx.user?.id === 'string' ? 'flash:coupon:' + ctx.user.id : null, ttl: 3600 },
+	{
+		keyFrom: (ctx) => typeof ctx.user?.id === 'string' ? 'flash:coupon:' + ctx.user.id : null,
+		ttl: 3600,
+		store: idempotencyStore
+	},
 	async (ctx) => {
 		const userId = ctx.user?.id
 		if (typeof userId !== 'string') {
@@ -276,6 +306,14 @@ export const claimCoupon = live.idempotent(
  * pool so the e2e suite starts each test from a known baseline. Resets
  * are cluster-wide via straight SET / DEL (no SETNX) so they overwrite
  * whatever state the prior test left behind.
+ *
+ * That includes the cached claim replies. Restoring the pool and emptying the
+ * holders set is not enough on its own: a visitor who already claimed would
+ * have their first reply replayed, so the claim body would not run, no SADD
+ * and no DECR would happen, and the pool would sit at its reset value while
+ * the page reported a fresh claim. The cache is cleared LAST, after the
+ * pipeline: a claim arriving in between lands on the already-restored holders
+ * set and pool, and only its now-redundant cache entry is dropped.
  */
 export const resetSale = live(async (ctx) => {
 	// Capture sales before delete so we can publish 'deleted' per id. A
@@ -293,6 +331,7 @@ export const resetSale = live(async (ctx) => {
 	pipeline.del(HOLDERS_KEY)
 	pipeline.del(SALES_KEY)
 	await pipeline.exec()
+	await idempotencyStore.clear()
 
 	for (const raw of salesRaws) {
 		try {

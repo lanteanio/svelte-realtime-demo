@@ -173,16 +173,16 @@ test.describe('/demos/flash-sales', () => {
 	})
 
 	test('reset permits a fresh claim', async ({ page }) => {
-		// The claim is wrapped in live.idempotent keyed on the visitor, and the
-		// reset clears the holders set but not that cache. A visitor who has
-		// already claimed therefore gets their FIRST response replayed without
-		// the body running at all, so no decrement happens and the pool stays
-		// where the reset left it. This used to read as a pass because the page
-		// displayed the replayed number; it now displays what Redis actually
-		// holds, so the discrepancy is visible instead of masked.
-		// EXPECTED to fail until the reset also drops the cached replies; it then
-		// reports 'passed unexpectedly' - remove the test.fail() at that point.
-		test.fail(true, 'resetSale clears the holders set but not the coupon idempotency cache, so a repeat claimant replays a cached reply and the pool never moves')
+		// The claim is wrapped in live.idempotent keyed on the visitor, so the
+		// reset has to drop the cached replies as well as the holders set. Miss
+		// that and a visitor who already claimed gets their FIRST response
+		// replayed without the body running at all: no SADD, no DECR, and the
+		// pool sits at exactly where the reset left it.
+		//
+		// The second claim below is what pins it, and it is only a real check
+		// because the page now displays what Redis holds rather than what the
+		// claim RPC returned - a replayed reply carries the ORIGINAL 49, so the
+		// assertion passed against a number nobody had measured.
 		await reset(page)
 		await page.getByTestId('coupon-claim').click()
 		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
@@ -191,6 +191,13 @@ test.describe('/demos/flash-sales', () => {
 		await expect(page.getByTestId('coupon-pool')).toHaveText('50')
 		await expect(page.getByTestId('coupon-claim')).toHaveText('Claim coupon')
 		await page.getByTestId('coupon-claim').click()
+		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
+		// A claim is one per visitor per reset, not one per click: the fresh
+		// claim above must still be deduped afterwards, or the reset has traded
+		// a stale cache for no cache at all.
+		await expect(page.getByTestId('coupon-claim')).toHaveText('Re-check coupon')
+		await page.getByTestId('coupon-claim').click()
+		await expect(page.getByTestId('coupon-result')).toHaveText(/Already claimed:.*SAVE20/)
 		await expect(page.getByTestId('coupon-pool')).toHaveText('49')
 	})
 
