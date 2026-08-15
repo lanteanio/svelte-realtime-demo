@@ -36,6 +36,19 @@ async function selectRange(locator, start, end) {
 }
 
 test.describe('/demos/collab-editor', () => {
+	test('the intro names the panels rather than placing them, so it still reads once they stack', async ({ page }) => {
+		await open(page)
+		const intro = page.getByTestId('intro')
+		// Naming both panels is the requirement, so assert both names are there.
+		await expect(intro).toContainText('Offset')
+		await expect(intro).toContainText('CRDT')
+		// The positional wording is what breaks below lg, where the panels stack
+		// and "left" and "right" refer to nothing. Asserting its ABSENCE is the
+		// half that fails if the old copy comes back - naming the panels alone
+		// would still pass with "the left room" restored alongside the names.
+		await expect(intro).not.toContainText(/\b(left|right)\b/i)
+	})
+
 	test('renders both exact modes, the run script, sync/readout state, empty selection guidance, and control constraints', async ({ page }) => {
 		await open(page)
 		await clear(page)

@@ -270,7 +270,7 @@
 <div class="max-w-6xl mx-auto p-8 space-y-4">
 	<header>
 		<h1 class="text-2xl font-bold mt-2">Collab editor: selections that survive edits</h1>
-		<p class="text-sm opacity-70 mt-1">
+		<p class="text-sm opacity-70 mt-1" data-testid="intro">
 			Both panels edit the <em>same</em> <code>live.doc</code> text; only the
 			selection layer differs. The <strong>Offset</strong> panel declares
 			<code>selections: 'offset'</code>: raw <code>&#123; start, end &#125;</code>
