@@ -29,23 +29,10 @@
 
 import { test } from '@playwright/test';
 import { waitForWS } from './helpers.js';
+import { readRoster } from './multiplayer-helpers.js';
 
 const PAIRS = Number(process.env.MP_PROBE_PAIRS ?? 40);
 const PEER_TIMEOUT = Number(process.env.MP_PROBE_PEER_TIMEOUT ?? 15_000);
-
-/** Read one page's roster: its own name plus every other entry it renders. */
-async function readRoster(page) {
-	return page.evaluate(() => {
-		const roster = document.querySelector('[data-testid="mp-roster"]');
-		if (!roster) return { self: null, others: [], present: false };
-		const selfNode = [...roster.querySelectorAll('li')].find((li) => li.textContent.includes('(you)'));
-		return {
-			present: true,
-			self: selfNode ? selfNode.textContent.replace(/\s*\(you\)\s*$/, '').trim() : null,
-			others: [...document.querySelectorAll('[data-testid="mp-roster-other"]')].map((li) => li.textContent.trim())
-		};
-	}).catch(() => ({ self: null, others: [], present: false, evaluateFailed: true }));
-}
 
 test.describe('multiplayer presence probe', () => {
 	test.describe.configure({ timeout: Math.max(15 * 60 * 1000, PAIRS * 30_000) });

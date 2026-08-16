@@ -213,6 +213,53 @@ test.describe('/demos/multiplayer', () => {
 		await expectNoMultiplayerErrors(page)
 	})
 
+	// The peer wait's failure description is a triage instrument: it is read
+	// only when the suite is already red, so nothing else in the suite can
+	// exercise it and a wrong one would be believed. This forces it, and pins
+	// WHICH side it blames - naming the wrong side sends the reader at the
+	// wrong process, and an assertion on the word "asymmetric" alone passes
+	// happily with the two sides swapped.
+	test('a one-sided roster is reported as asymmetric against the side that lost the join', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([openMultiplayer(a), openMultiplayer(b)])
+			// Converge for real first, so what follows removes a peer that was
+			// demonstrably delivered rather than one that never arrived.
+			const { nameA, nameB } = await waitForPeers(a, b)
+
+			// Blind A to B in the rendered roster only. B still sees A, which is
+			// the asymmetric shape the description has to recognise.
+			await a.evaluate(() => {
+				for (const li of document.querySelectorAll('[data-testid="mp-roster-other"]')) li.textContent = 'Blinded Peer'
+			})
+
+			let message = null
+			try {
+				await waitForPeers(a, b, 2_000)
+			} catch (error) {
+				message = error.message
+			}
+			expect(message, 'describing the failure must not turn it into a pass').not.toBeNull()
+			expect(message).toContain(`VERDICT: asymmetric. ${nameB} received the other join, ${nameA} never received it`)
+			// The dumped rosters have to be checkable, not decorative. Assert the
+			// two facts the verdict rests on and nothing more: this room is the
+			// one fixed lounge every test in this file shares, so earlier
+			// visitors can still be draining out of it and the entry LIST is not
+			// a stable thing to pin.
+			const lineFor = (side) => message.split('\n').find((l) => l.startsWith(`${side}: `))
+			expect(lineFor('a')).toContain(`self="${nameA}"`)
+			expect(lineFor('a'), 'the blinded side must be dumped without its peer').not.toContain(nameB)
+			expect(lineFor('b')).toContain(`self="${nameB}"`)
+			expect(lineFor('b'), 'the sighted side must be dumped still holding its peer').toContain(nameA)
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
 	test('reaction buttons meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
 		const { context, page } = await openTouchPage(browser)
 		try {
