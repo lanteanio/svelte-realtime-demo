@@ -23,6 +23,13 @@ const redisName = `srd-test-redis-${suffix}`
 // what lets the startup sweep reclaim one left by a killed run.
 const BUILD_RUNS = 'build-runs'
 const buildDir = `${BUILD_RUNS}/srd-build-${suffix}`
+// Playwright's artifact staging, per run for the same reason the build is.
+// Two runs sharing test-results/ share the .playwright-artifacts staging
+// directory, and one run's cleanup deletes trace resources the other is still
+// writing - which surfaces as ENOENT on a .css resource and a truncated zip at
+// context.close(), on a test whose assertions all passed.
+const TEST_RESULTS = 'test-results'
+const outputDir = `${TEST_RESULTS}/srd-build-${suffix}`
 // Windows holds a handle on a module file for a moment after the process that
 // loaded it exits, so removing 700 of them straight after a SIGTERM can fail
 // on a file that is about to be released. Retrying is the difference between
@@ -150,6 +157,7 @@ function commonEnvironment() {
 	return {
 		...process.env,
 		LOCAL_E2E: '1',
+		PLAYWRIGHT_OUTPUT_DIR: outputDir,
 		DATABASE_URL: databaseURL,
 		REDIS_URL: redisURL,
 		TEST_POSTGRES_CONTAINER: postgresName,
@@ -297,6 +305,13 @@ async function cleanup() {
 	// startup sweep reclaims what is left either way.
 	await rm(buildDir, REMOVE_TREE)
 		.catch((error) => console.error(`could not remove ${buildDir}: ${error.message}`))
+	// The artifacts are the run's evidence on a failure, so they are kept when
+	// anything failed and swept on a clean run; the startup sweep reclaims what
+	// a killed run leaves either way.
+	if (results.every((result) => result.status === 0)) {
+		await rm(outputDir, REMOVE_TREE)
+			.catch((error) => console.error(`could not remove ${outputDir}: ${error.message}`))
+	}
 }
 
 /**
@@ -338,18 +353,20 @@ async function sweepOrphanedContainers() {
  * a hard kill skips it, and each of these is about 8 MB across 700 files.
  */
 async function sweepOrphanedBuilds() {
-	let listed
-	try {
-		listed = await readdir(BUILD_RUNS)
-	} catch {
-		return
-	}
-	const orphans = selectOrphans(listed)
-	if (!orphans.length) return
-	console.log(`orphaned builds: removing ${orphans.length} left by dead harness runs`)
-	for (const orphan of orphans) {
-		await rm(`${BUILD_RUNS}/${orphan}`, REMOVE_TREE)
-			.catch((error) => console.error(`could not remove ${orphan}: ${error.message}`))
+	for (const root of [BUILD_RUNS, TEST_RESULTS]) {
+		let listed
+		try {
+			listed = await readdir(root)
+		} catch {
+			continue
+		}
+		const orphans = selectOrphans(listed)
+		if (!orphans.length) continue
+		console.log(`orphaned run directories: removing ${orphans.length} from ${root}, left by dead harness runs`)
+		for (const orphan of orphans) {
+			await rm(`${root}/${orphan}`, REMOVE_TREE)
+				.catch((error) => console.error(`could not remove ${orphan}: ${error.message}`))
+		}
 	}
 }
 

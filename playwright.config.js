@@ -118,8 +118,25 @@ if (optionalProject === 'resilience') {
 	});
 }
 
+// Where a run writes its traces, screenshots and videos.
+//
+// Playwright streams trace resources into `<outputDir>/.playwright-artifacts-N`
+// and zips them when a context closes. Two runs sharing one directory therefore
+// share that staging area, and a second run's startup cleaning removes files the
+// first is still writing - which surfaces at `context.close()` as
+// `ENOENT ... traces/resources/<hash>.css` followed by "not a zip file, or file
+// is truncated", on a test whose assertions all passed. It reads as a product
+// failure on whichever spec happened to be closing a context, and it names a
+// file nobody has heard of.
+//
+// The harness gives each run its own, keyed on the creating pid like the
+// containers and the build directory. An ad-hoc `npx playwright test` keeps the
+// default.
+const outputDir = process.env.PLAYWRIGHT_OUTPUT_DIR || undefined;
+
 export default defineConfig({
 	testDir: './test/e2e',
+	...(outputDir ? { outputDir } : {}),
 	timeout: 30_000,
 	expect: { timeout: 10_000 },
 	fullyParallel: false,
