@@ -19,41 +19,78 @@
 
 	let { children } = $props()
 
-	const DEMOS = [
-		{ slug: 'checkout',          title: 'Idempotency' },
-		{ slug: 'counter-resume',    title: 'Reconnect-resume' },
-		{ slug: 'chat',              title: 'Chat rooms' },
-		{ slug: 'todos-rollback',    title: 'Optimistic rollback' },
-		{ slug: 'denials',           title: 'Subscribe denials' },
-		{ slug: 'pressure',          title: 'Admission-shedding' },
-		{ slug: 'chaos',             title: 'Deterministic chaos' },
-		{ slug: 'notifications',     title: 'Notifications' },
-		{ slug: 'topk',              title: 'Top-K windows' },
-		{ slug: 'news',              title: 'Newsroom' },
-		{ slug: 'jobs',              title: 'Jobs / task runner' },
-		{ slug: 'cluster-cron',      title: 'Cluster cron' },
-		{ slug: 'upload',            title: 'Upload streaming' },
-		{ slug: 'auctions',          title: 'Auctions' },
-		{ slug: 'schema-evolution',  title: 'Schema evolution' },
-		{ slug: 'flash-sales',       title: 'Flash sales' },
-		{ slug: 'pagination',        title: 'Pagination' },
-		{ slug: 'effect',            title: 'live.effect / one publish, three streams' },
-		{ slug: 'from-seq',          title: 'Reconnect / fromSeq' },
-		{ slug: 'collab-editor',     title: 'Collab selections' },
-		{ slug: 'multiplayer',       title: 'Multiplayer lounge' },
-		{ slug: 'kanban',            title: 'Kanban CRDT' },
-		{ slug: 'offline',           title: 'Offline queue' },
-		{ slug: 'arena',             title: 'Arena / AoI' },
-		{ slug: 'shooter',           title: 'Shooter / lag-comp' },
-		{ slug: 'lobbies',           title: 'Lobbies' },
-		{ slug: 'tenants',           title: 'Multi-tenancy' },
-		{ slug: 'flags',             title: 'Feature flags' },
-		{ slug: 'alarms',            title: 'Durable alarms' },
-		{ slug: 'forget',            title: 'Right to erasure' },
-		{ slug: 'privacy',           title: 'Aggregate privacy' },
-		{ slug: 'ops',               title: 'Ops dashboard' },
-		{ slug: 'outbound-webhooks', title: 'Outbound webhooks' },
-		{ slug: 'phases',            title: 'Phases + batch' }
+	// Grouped, not flat. Thirty-four entries under one faded label is a linear
+	// read whose ordering principle is invisible - the labels mix concepts
+	// ("Idempotency"), API names ("live.effect"), and products ("Ops
+	// dashboard"), so nothing about a row tells you where you are in the list.
+	// The curated order is pedagogical and is preserved exactly: every group is
+	// a contiguous run of it, so the groups name the districts the order
+	// already had without reordering a single entry.
+	const GROUPS = [
+		{
+			label: 'Delivery basics',
+			demos: [
+				{ slug: 'checkout',          title: 'Idempotency' },
+				{ slug: 'counter-resume',    title: 'Reconnect-resume' },
+				{ slug: 'chat',              title: 'Chat rooms' },
+				{ slug: 'todos-rollback',    title: 'Optimistic rollback' },
+				{ slug: 'denials',           title: 'Subscribe denials' },
+				{ slug: 'pressure',          title: 'Admission-shedding' },
+				{ slug: 'chaos',             title: 'Deterministic chaos' }
+			]
+		},
+		{
+			label: 'Streams and jobs',
+			demos: [
+				{ slug: 'notifications',     title: 'Notifications' },
+				{ slug: 'topk',              title: 'Top-K windows' },
+				{ slug: 'news',              title: 'Newsroom' },
+				{ slug: 'jobs',              title: 'Jobs / task runner' },
+				{ slug: 'cluster-cron',      title: 'Cluster cron' },
+				{ slug: 'upload',            title: 'Upload streaming' }
+			]
+		},
+		{
+			label: 'Stream consistency',
+			demos: [
+				{ slug: 'auctions',          title: 'Auctions' },
+				{ slug: 'schema-evolution',  title: 'Schema evolution' },
+				{ slug: 'flash-sales',       title: 'Flash sales' },
+				{ slug: 'pagination',        title: 'Pagination' },
+				{ slug: 'effect',            title: 'live.effect / one publish, three streams' },
+				{ slug: 'from-seq',          title: 'Reconnect / fromSeq' }
+			]
+		},
+		{
+			label: 'Collaboration',
+			demos: [
+				{ slug: 'collab-editor',     title: 'Collab selections' },
+				{ slug: 'multiplayer',       title: 'Multiplayer lounge' },
+				{ slug: 'kanban',            title: 'Kanban CRDT' },
+				{ slug: 'offline',           title: 'Offline queue' }
+			]
+		},
+		{
+			label: 'Realtime games',
+			demos: [
+				{ slug: 'arena',             title: 'Arena / AoI' },
+				{ slug: 'shooter',           title: 'Shooter / lag-comp' },
+				{ slug: 'lobbies',           title: 'Lobbies' }
+			]
+		},
+		{
+			label: 'Governance and ops',
+			demos: [
+				{ slug: 'tenants',           title: 'Multi-tenancy' },
+				{ slug: 'flags',             title: 'Feature flags' },
+				{ slug: 'alarms',            title: 'Durable alarms' },
+				{ slug: 'forget',            title: 'Right to erasure' },
+				{ slug: 'privacy',           title: 'Aggregate privacy' },
+				{ slug: 'ops',               title: 'Ops dashboard' },
+				{ slug: 'outbound-webhooks', title: 'Outbound webhooks' },
+				{ slug: 'phases',            title: 'Phases + batch' }
+			]
+		}
 	]
 
 	const currentSlug = $derived.by(() => {
@@ -77,6 +114,39 @@
 	// it the list is a horizontal strip and the rail does not scroll. Walking
 	// the ancestors and testing each axis covers both without encoding the
 	// breakpoint here a third time.
+	// Below 1024 the nav is a horizontal strip about 4.5 viewports wide with no
+	// scrollbar, no fade, and no chevron: the only hint that 30 more entries
+	// exist is whether a label happens to be cut mid-word at the edge, which is
+	// an accident of viewport width against label widths. A phone visitor can
+	// read three items as the whole catalog. `data-overflow` says which
+	// directions have more, and the mask below turns that into something
+	// visible on every width rather than on the lucky ones.
+	let strip = $state(/** @type {HTMLElement | null} */ (null))
+	let overflow = $state('none')
+
+	function measureOverflow() {
+		if (!strip) return
+		// Sub-pixel layout makes an exactly-scrolled-to-the-end strip report a
+		// fractional remainder, so a bare `>` would leave the fade on forever at
+		// the end of the strip - which says "there is more" when there is not.
+		const slack = 1
+		const max = strip.scrollWidth - strip.clientWidth
+		if (max <= slack) { overflow = 'none'; return }
+		const more = { left: strip.scrollLeft > slack, right: strip.scrollLeft < max - slack }
+		overflow = more.left && more.right ? 'both' : more.left ? 'left' : more.right ? 'right' : 'none'
+	}
+
+	$effect(() => {
+		if (!strip) return
+		measureOverflow()
+		// The strip's own resize matters as much as the window's: it is the
+		// element that stops scrolling at 1024, and a window listener alone
+		// would leave a stale mask after the breakpoint change.
+		const observer = new ResizeObserver(measureOverflow)
+		observer.observe(strip)
+		return () => observer.disconnect()
+	})
+
 	$effect(() => {
 		if (!currentSlug) return
 		const link = document.querySelector(`[data-testid="demos-nav-link-${currentSlug}"]`)
@@ -101,23 +171,38 @@
 	<aside class="demos-aside" data-testid="demos-nav">
 		<nav class="demos-nav">
 			<a href="/" class="demos-home-link">&larr; Home</a>
-			<div class="demos-section-label">Demos</div>
-			<ul class="demos-list">
-				{#each DEMOS as d (d.slug)}
-					{@const isActive = d.slug === currentSlug}
-					<li>
-						<a
-							href="/demos/{d.slug}"
-							class="demos-link"
-							class:active={isActive}
-							data-testid="demos-nav-link-{d.slug}"
-							aria-current={isActive ? 'page' : undefined}
-						>
-							{d.title}
-						</a>
-					</li>
+			<div
+				class="demos-list"
+				data-testid="demos-nav-list"
+				data-overflow={overflow}
+				bind:this={strip}
+				onscroll={measureOverflow}
+			>
+				{#each GROUPS as group (group.label)}
+					<!-- display:contents, so the label and the list join the strip's
+					     own flex row below 1024 and its column above. A nested box
+					     here would make the groups scroll independently. -->
+					<div class="demos-group">
+						<div class="demos-section-label" data-testid="demos-nav-group">{group.label}</div>
+						<ul class="demos-group-list">
+							{#each group.demos as d (d.slug)}
+								{@const isActive = d.slug === currentSlug}
+								<li>
+									<a
+										href="/demos/{d.slug}"
+										class="demos-link"
+										class:active={isActive}
+										data-testid="demos-nav-link-{d.slug}"
+										aria-current={isActive ? 'page' : undefined}
+									>
+										{d.title}
+									</a>
+								</li>
+							{/each}
+						</ul>
+					</div>
 				{/each}
-			</ul>
+			</div>
 		</nav>
 	</aside>
 
@@ -159,11 +244,31 @@
 		display: flex;
 		gap: 0.25rem;
 		overflow-x: auto;
+	}
+	.demos-group { display: contents; }
+	.demos-group-list {
+		display: flex;
+		gap: 0.25rem;
 		list-style: none;
 		padding: 0;
 		margin: 0;
 	}
-	.demos-list > li { flex-shrink: 0; }
+	.demos-group-list > li { flex-shrink: 0; }
+	/*
+	 * The clipped edge, made visible. Fading the strip's own content is what
+	 * says "this continues" on every width, rather than only on the widths
+	 * where a label happens to be cut mid-word. Driven by measurement, so it
+	 * is absent at the end of the strip instead of promising more forever.
+	 */
+	.demos-list[data-overflow='right'] {
+		mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+	}
+	.demos-list[data-overflow='left'] {
+		mask-image: linear-gradient(to left, #000 calc(100% - 2rem), transparent);
+	}
+	.demos-list[data-overflow='both'] {
+		mask-image: linear-gradient(to right, transparent, #000 2rem, #000 calc(100% - 2rem), transparent);
+	}
 	.demos-link {
 		display: block;
 		padding: 0.25rem 0.5rem;
@@ -247,7 +352,10 @@
 			flex-direction: column;
 			overflow-x: visible;
 		}
-		.demos-list > li { flex-shrink: 1; }
+		.demos-group-list {
+			flex-direction: column;
+		}
+		.demos-group-list > li { flex-shrink: 1; }
 		.demos-link {
 			white-space: normal;
 		}

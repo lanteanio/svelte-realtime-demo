@@ -297,6 +297,62 @@ test.describe('home + gallery', () => {
 		})
 	})
 
+	// Thirty-four entries under one faded label made finding a demo a linear
+	// read of up to 34 rows whose ordering principle was invisible. The groups
+	// name the districts the curated order already had - so the pin that
+	// matters is not that labels exist, it is that NOTHING MOVED: a grouping
+	// that quietly reordered entries would break the pedagogical sequence the
+	// list is built on, and would still show six tidy headings.
+	test('the switcher groups the catalog without reordering a single entry', async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 900 })
+		await page.goto('/demos/checkout')
+		await waitForWS(page)
+
+		const groups = page.getByTestId('demos-nav-group')
+		const labels = await groups.allInnerTexts()
+		expect(labels.length, 'a catalog this size needs districts, and more than six is another flat list')
+			.toBeGreaterThanOrEqual(4)
+		expect(labels.length).toBeLessThanOrEqual(6)
+		for (const label of labels) expect(label.trim().length).toBeGreaterThan(0)
+		await expect(groups.first()).toBeVisible()
+
+		// The full flattened order, read off the DOM, must equal the order the
+		// home page tiles are declared in - which is the curated order.
+		const order = await page.getByTestId('demos-nav').locator('a[data-testid^="demos-nav-link-"]')
+			.evaluateAll((links) => links.map((a) => a.getAttribute('data-testid').replace('demos-nav-link-', '')))
+		expect(order).toEqual(DEMO_SLUGS)
+	})
+
+	// Below 1024 the switcher is a horizontal strip several viewports wide with
+	// no scrollbar. The only hint that more existed was whether a label happened
+	// to be cut mid-word at the edge - an accident of viewport width against
+	// label widths - so a phone visitor could read three items as the whole
+	// catalog. Asserted as transitions, approached from the state that must
+	// change: a pin that only read the resting state would pass against a strip
+	// that never updates at all.
+	test('the narrow switcher says which way it continues, and stops saying it at the end', async ({ page }) => {
+		await page.setViewportSize({ width: 390, height: 844 })
+		await page.goto('/demos/checkout')
+		await waitForWS(page)
+
+		const strip = page.getByTestId('demos-nav-list')
+		await expect(strip).toHaveAttribute('data-overflow', 'right')
+
+		// Scroll into the middle: both edges now have more behind them.
+		await strip.evaluate((el) => { el.scrollLeft = Math.floor((el.scrollWidth - el.clientWidth) / 2) })
+		await expect(strip).toHaveAttribute('data-overflow', 'both')
+
+		// And at the very end it must stop promising more, or the signal means
+		// nothing - a permanently-on fade is the same as no fade.
+		await strip.evaluate((el) => { el.scrollLeft = el.scrollWidth })
+		await expect(strip).toHaveAttribute('data-overflow', 'left')
+
+		// The rail does not scroll at desktop width, so it must claim no overflow
+		// there rather than carrying a stale value across the breakpoint.
+		await page.setViewportSize({ width: 1280, height: 900 })
+		await expect(strip).toHaveAttribute('data-overflow', 'none')
+	})
+
 	test('every gallery tile navigates to its demo with the matching active switcher entry', async ({ page }) => {
 		test.setTimeout(300_000)
 		await openHome(page)
