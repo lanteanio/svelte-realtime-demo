@@ -34,9 +34,17 @@
 					class="card card-compact bg-base-200 hover:bg-base-300 transition-colors"
 					data-testid="room-link-{room.id}"
 				>
-					<div class="card-body">
-						<div class="font-semibold">{room.label}</div>
-						<div class="text-xs opacity-60">{room.desc}</div>
+					<!-- A hover background shift was the only cue that these were
+					     doors, and hover never fires on touch - so on a phone the
+					     lobby read as three descriptions and the page's single
+					     required action had no signifier at all. The arrow is the
+					     door handle, present in a static glance on every input. -->
+					<div class="card-body flex-row items-center gap-3">
+						<div class="min-w-0">
+							<div class="font-semibold">{room.label}</div>
+							<div class="text-xs opacity-60">{room.desc}</div>
+						</div>
+						<span class="ml-auto text-lg opacity-50" aria-hidden="true" data-testid="room-enter-{room.id}">&rarr;</span>
 					</div>
 				</a>
 			</li>

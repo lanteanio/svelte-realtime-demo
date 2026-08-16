@@ -35,6 +35,30 @@ test.describe('/demos/chat picker', () => {
 		await expect(page.getByTestId('room-link-private')).toContainText('Members-only')
 	})
 
+	// A hover background shift was the only cue that the room cards were
+	// navigable, and hover never fires on touch - so on a phone the lobby read
+	// as three descriptions and the page's single required action had no
+	// signifier at all. Asserted on a COARSE-POINTER context, because that is
+	// the modality where the old cue was definitionally absent; a fine-pointer
+	// check would pass on the hover style that was never the problem.
+	test('every room card carries a visible door handle where hover never fires', async ({ browser }) => {
+		const context = await browser.newContext({ hasTouch: true, viewport: { width: 390, height: 844 } })
+		const page = await context.newPage()
+		try {
+			await page.goto('/demos/chat')
+			await waitForWS(page)
+			for (const id of ['general', 'random', 'private']) {
+				const signifier = page.getByTestId(`room-enter-${id}`)
+				await expect(signifier).toBeVisible()
+				// Inside the link, so it reads as part of the door rather than as
+				// decoration parked beside it.
+				await expect(page.getByTestId(`room-link-${id}`).getByTestId(`room-enter-${id}`)).toHaveCount(1)
+			}
+		} finally {
+			await context.close()
+		}
+	})
+
 	test('a room link navigates into the room surface', async ({ page }) => {
 		await page.goto('/demos/chat')
 		await page.getByTestId('room-link-general').click()
