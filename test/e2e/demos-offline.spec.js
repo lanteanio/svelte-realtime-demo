@@ -142,6 +142,11 @@ test.describe('/demos/offline', () => {
 			// The most-pressed control of the scripted flow was btn-sm, a third
 			// smaller than the Post button it sits beside.
 			await expectTouchTarget(page.getByTestId('off-sim-toggle'))
+			// And Post itself, which was a bare `btn`: daisyUI sizes that at
+			// 2.5rem = 40px, under the floor. Fixing the toggle alone left the
+			// two controls of one flow disagreeing about the standard, with the
+			// PRIMARY action being the one that missed it.
+			await expectTouchTarget(page.getByTestId('off-post-button'))
 		} finally {
 			await context.close()
 		}

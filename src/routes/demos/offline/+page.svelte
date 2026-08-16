@@ -240,9 +240,13 @@
 			placeholder="Sign the guestbook..."
 			data-testid="off-input"
 		/>
+		<!-- daisyUI sizes a default btn at 2.5rem = 40px, under the 44pt floor
+		     the rest of the suite holds. The toggle beside this one already
+		     carries it, so the two controls in the demo's scripted flow
+		     disagreed about the standard - and this is the primary action. -->
 		<button
 			type="submit"
-			class="btn btn-primary"
+			class="btn btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 			disabled={!draft.trim()}
 			data-testid="off-post-button"
 		>
