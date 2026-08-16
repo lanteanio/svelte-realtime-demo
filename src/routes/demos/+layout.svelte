@@ -214,10 +214,29 @@
 <style>
 	.demos-shell {
 		display: block;
-		overflow-x: hidden;
+		/*
+		 * `clip`, not `hidden`. `overflow-x: hidden` computes the other axis to
+		 * `auto`, which makes this element a scroll container - and a sticky
+		 * child sticks to its nearest scrolling ancestor, so the switcher would
+		 * have stuck to a box that scrolls with the document and gone off
+		 * screen anyway. `clip` cuts the overflow without creating that
+		 * container, so sticky resolves against the viewport.
+		 */
+		overflow-x: clip;
 	}
 	.demos-aside {
 		background: var(--color-base-100);
+		/*
+		 * Below 1024 the switcher is a single compact row in normal flow at the
+		 * top of the page, and demo pages run 1300-1800px tall - so after one
+		 * screen of reading, "hop to any other demo in one click" meant
+		 * scroll-to-top first. Sticky keeps it where the claim says it is. It
+		 * carries its own background already, and the desktop rule below
+		 * replaces this with `fixed`, so the two do not compete.
+		 */
+		position: sticky;
+		top: 0;
+		z-index: 10;
 	}
 	.demos-nav {
 		padding: 0.5rem;

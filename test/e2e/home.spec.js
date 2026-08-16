@@ -280,14 +280,30 @@ test.describe('home + gallery', () => {
 			}
 		})
 
+		// `sticky`, not `static`: below 1024 the strip is a single compact row
+		// in normal flow, and demo pages run 1300-1800px tall, so it used to
+		// scroll away after one screen and "hop to any other demo in one click"
+		// meant scroll-to-top first. What this test is really about is that the
+		// rail does not go `fixed` and does not reserve the 13rem column until
+		// desktop - the margin below is that half, and it is unchanged.
 		for (const width of [640, 768]) {
 			await page.setViewportSize({ width, height: 900 })
 			await expect.poll(layout).toEqual({
-				asidePosition: 'static',
+				asidePosition: 'sticky',
 				contentMarginLeft: '0px',
 				listDirection: 'row'
 			})
 		}
+
+		// And it stays put: scroll a tall demo page and the switcher is still
+		// on screen, which is the whole claim.
+		await page.setViewportSize({ width: 640, height: 900 })
+		await page.evaluate(() => window.scrollTo(0, 1200))
+		await expect.poll(() => page.evaluate(() => {
+			const box = document.querySelector('.demos-aside').getBoundingClientRect()
+			return box.top >= 0 && box.top < window.innerHeight
+		})).toBe(true)
+		await page.evaluate(() => window.scrollTo(0, 0))
 
 		await page.setViewportSize({ width: 1024, height: 900 })
 		await expect.poll(layout).toEqual({
