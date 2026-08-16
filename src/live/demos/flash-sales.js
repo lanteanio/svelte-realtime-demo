@@ -17,11 +17,12 @@
  * same product never overshoot zero. Sales feed and coupon state both
  * live in Redis so the cluster sees a single shared view.
  *
- * The one-coupon-per-user rule rides `live.idempotent` keyed on the
- * caller's userId for fast same-replica dedup, with a cluster-shared
- * SISMEMBER guard so a user hitting a different replica on a retry
- * does not get a second coupon from a Redis-cache miss on the new
- * replica's idempotency store.
+ * The one-coupon-per-user rule rides `live.idempotent` over a
+ * cluster-shared Redis store, so a retry landing on another replica
+ * still dedupes, and the claim itself is one atomic Redis script: the
+ * SADD that gates it and the DECR that pays for it are a single step,
+ * so no crash can leave a holder recorded against a pool that never
+ * moved.
  *
  * Three headline primitives in one page: `live.lock` for atomic
  * read-modify-write under contention (in-process per replica, which a
@@ -76,6 +77,45 @@ const idempotencyStore = createIdempotencyStore(redis, {
 	breaker,
 	metrics
 })
+
+/**
+ * The whole coupon claim, as one step.
+ *
+ * SADD is an atomic test-and-set, so gating on it means exactly one caller in
+ * the cluster reaches the decrement - but the decrement was a SECOND command,
+ * and the gap between them is a crash window: a worker that dies after the add
+ * and before the decrement leaves a user recorded as a holder against a pool
+ * that never moved, so a coupon is held that nobody paid for and no
+ * compensating write is ever going to run. The exhaustion rollback had the
+ * same shape in reverse.
+ *
+ * Redis runs a script atomically, so there is no gap to die in. The three
+ * outcomes are returned rather than inferred from the pool value, because
+ * "already a holder" and "just claimed" can report the same number.
+ *
+ *   1  claimed, pool decremented
+ *   0  already a holder, pool untouched
+ *  -1  pool exhausted, nothing recorded
+ *
+ * The pool is seeded here as well: DECR on an unset key initialises it to -1,
+ * which would report exhaustion on the first claim of a fresh keyspace.
+ */
+const CLAIM_SCRIPT = `
+local userId = ARGV[1]
+if redis.call('EXISTS', KEYS[2]) == 0 then
+  redis.call('SET', KEYS[2], ARGV[2])
+end
+if redis.call('SADD', KEYS[1], userId) == 0 then
+  return { 0, tonumber(redis.call('GET', KEYS[2])) }
+end
+local pool = redis.call('DECR', KEYS[2])
+if pool < 0 then
+  redis.call('INCR', KEYS[2])
+  redis.call('SREM', KEYS[1], userId)
+  return { -1, tonumber(redis.call('GET', KEYS[2])) }
+end
+return { 1, pool }
+`
 
 const SALES_KEY = 'demos:flash:sales'
 const HOLDERS_KEY = 'demos:flash:coupons:holders'
@@ -270,24 +310,23 @@ export const claimCoupon = live.idempotent(
 		if (typeof userId !== 'string') {
 			throw new LiveError('VALIDATION', 'no identity')
 		}
-		// SADD is itself an atomic test-and-set, so making it the gate means
-		// exactly one caller in the cluster can ever reach the decrement.
-		// Reading membership first and adding last let both replicas pass the
-		// read and decrement twice, leaving the pool transiently short and
-		// relying on the loser's compensating INCR to restore it - so a worker
-		// that dies between its decrement and that INCR retires a coupon that
-		// nobody holds. Gating on the add removes the window instead of
-		// compensating for it.
-		const added = await redis.redis.sadd(HOLDERS_KEY, userId)
-		if (added === 0) {
-			return { ok: true, code: COUPON_CODE, poolRemaining: await getPool() }
+		// The add and the decrement are ONE step. Reading membership first and
+		// adding last let both replicas pass the read and decrement twice;
+		// gating on the add fixed that but left the two writes as separate
+		// commands, so a worker dying between them recorded a holder against a
+		// pool that never moved - a coupon held that nobody paid for, with no
+		// compensating write left to run. A script has no gap to die in.
+		const [outcome, newPool] = await redis.redis.eval(
+			CLAIM_SCRIPT, 2, HOLDERS_KEY, POOL_KEY, userId, String(COUPON_POOL_INITIAL)
+		)
+		if (outcome === 0) {
+			// Already a holder. The pool comes back from the same read, so this
+			// reply cannot report a number that races the caller's own claim.
+			return { ok: true, code: COUPON_CODE, poolRemaining: newPool }
 		}
-		const newPool = await redis.redis.decr(POOL_KEY)
-		if (newPool < 0) {
-			await redis.redis.incr(POOL_KEY)
-			// Release the gate. The claim did not happen, so this user must not
-			// be recorded as a holder, or a later refill could never reach them.
-			await redis.redis.srem(HOLDERS_KEY, userId)
+		if (outcome === -1) {
+			// Nothing was recorded: the script released the gate itself, so this
+			// user stays reachable by a later refill.
 			throw new LiveError('SOLD_OUT', 'coupon pool exhausted')
 		}
 		// The reply reaches only the caller, so without this the OTHER tab keeps

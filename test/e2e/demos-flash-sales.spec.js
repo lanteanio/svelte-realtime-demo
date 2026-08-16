@@ -287,6 +287,40 @@ test.describe('/demos/flash-sales', () => {
 		expect(await tally(), 'every attempt must be accounted for once it finishes').toBe(TOTAL)
 	})
 
+	// The holders set and the pool are written by one atomic script, so they
+	// cannot disagree. Two DIFFERENT identities is what tests that: the pool
+	// must fall by exactly one per holder, and each holder must be recorded
+	// exactly once. A single-identity test cannot see a pool that moved without
+	// a holder being recorded, or the reverse - the two failure directions the
+	// separate SADD and DECR left open between them.
+	test('two visitors take one coupon each, and the pool agrees with the holders', async ({ browser }) => {
+		const first = await browser.newContext()
+		const second = await browser.newContext()
+		try {
+			const a = await first.newPage()
+			await reset(a)
+			const b = await second.newPage()
+			await openSale(b)
+
+			await a.getByTestId('coupon-claim').click()
+			await expect(a.getByTestId('coupon-pool')).toHaveText('49')
+			await b.getByTestId('coupon-claim').click()
+			await expect(b.getByTestId('coupon-pool')).toHaveText('48')
+
+			// Each is recorded, so neither can take a second.
+			for (const page of [a, b]) {
+				await expect(page.getByTestId('coupon-claim')).toHaveText('Re-check coupon')
+				await page.getByTestId('coupon-claim').click()
+				await expect(page.getByTestId('coupon-result')).toHaveText(/Already claimed:.*SAVE20/)
+			}
+			// Two holders, two coupons gone, and the re-checks moved nothing.
+			await expect(a.getByTestId('coupon-pool')).toHaveText('48')
+			await expect(b.getByTestId('coupon-pool')).toHaveText('48')
+		} finally {
+			await Promise.allSettled([first.close(), second.close()])
+		}
+	})
+
 	test('a tab opened before the claim still reads Already claimed, and the pool moves once', async ({ browser }) => {
 		// One context so both tabs carry the SAME identity cookie - the coupon
 		// rule is per user, so two contexts would be two users and prove nothing.
