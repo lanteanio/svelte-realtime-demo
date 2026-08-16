@@ -120,6 +120,53 @@ test.describe('WebSocket Connection', () => {
 		await expect(page.locator('.text-success').first()).toBeVisible();
 	});
 
+	test('a booted page that cannot connect is not relabelled a dead bundle by a stray script', async ({ page }) => {
+		// The false-positive direction, which the two tests above cannot see: both
+		// kill the entry bundle, so both are pages that genuinely never booted.
+		//
+		// The dangerous case is a page whose client IS running and whose SOCKET is
+		// what failed, whilst some unrelated script happened to fail too. The wait
+		// fails either way, so the reload gate is reached - and a predicate that
+		// counts any failed script then calls a genuine connection failure a dead
+		// bundle, reloads a live page mid-test, and burns the budget hiding the
+		// real fault. That is the timeout bump wearing a disguise.
+		//
+		// Both conditions are required to reach the gate at all. A page that
+		// connects normally never fails the wait, so it can never be reloaded no
+		// matter what the predicate says - which is why the script has to be
+		// paired with a broken socket to test anything.
+		let documentLoads = 0;
+		await page.route('**/*', (route) => {
+			const request = route.request();
+			if (request.resourceType() === 'document') documentLoads++;
+			if (/unrelated-script\.js/.test(request.url())) return route.abort('connectionfailed');
+			return route.continue();
+		});
+		// Injected on a timer, not at document start: an init script runs before
+		// <head> exists, and appending there throws instead of requesting
+		// anything. The delay also puts the failed request inside the wait's
+		// window rather than racing the watcher that has to observe it.
+		await page.addInitScript(() => {
+			setTimeout(() => {
+				const tag = document.createElement('script');
+				tag.src = '/unrelated-script.js';
+				(document.head ?? document.documentElement).appendChild(tag);
+			}, 300);
+		});
+		// The client boots and builds its socket; the socket never survives. So
+		// the probe sees a real connection attempt, which is exactly what makes
+		// this page distinguishable from one that never ran.
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => ws.close());
+
+		await page.goto('/', { waitUntil: 'commit' });
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+
+		expect(failure, 'a page that cannot connect must still fail the wait').not.toBeNull();
+		expect(documentLoads, 'a booted page must not be reloaded').toBe(1);
+		expect(failure.rehydrateReloads, 'no retry budget may be spent on a page that booted').toBe(0);
+		expect(failure.message, 'a booted page must not be reported as a dead bundle').not.toContain('PAGE NEVER HYDRATED');
+	});
+
 	test('global online count appears in navbar', async ({ page }) => {
 		await page.goto('/');
 		await page.waitForTimeout(2000);

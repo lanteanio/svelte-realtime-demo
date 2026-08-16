@@ -155,11 +155,24 @@ function isDeliberateAbort(fault) {
  * well, and retrying on that would be the timeout bump wearing a disguise.
  */
 function provenHydrationFailure(faults) {
-	// Scripts only, and never an abort. A stylesheet under /_app/ that fails
-	// does not stop the client booting, and a script aborted by a navigation is
-	// the page moving on rather than a bundle that died.
+	// The ENTRY chunks only, and never an abort. Three exclusions, each of which
+	// would otherwise let a live page be reloaded out from under a running test:
+	//
+	// - Any `script`. A page that is already hydrated can lose an unrelated or
+	//   lazily-injected script and carry on; that is a fact about one request,
+	//   not proof the client never booted.
+	// - Any `/_app/**.js`. A route chunk failing does stop THAT route hydrating,
+	//   but the browser raises "failed to fetch dynamically imported module" when
+	//   it does, and the error branch below already catches it with proof.
+	// - A stylesheet under /_app/, which does not stop the client booting.
+	//
+	// What is left is the one request whose failure cannot mean anything else:
+	// the entry bundle the document loads to start SvelteKit at all. This is
+	// what keeps the reload gated on proof rather than on a symptom, and the
+	// reload's safety argument depends on that exactness - a page whose bundle
+	// never ran has no client state to lose, but a live one does.
 	const assetFailures = faults.requests.filter(
-		(r) => !isDeliberateAbort(r) && (r.type === 'script' || /\/_app\/.*\.js($|\?)/.test(r.url))
+		(r) => !isDeliberateAbort(r) && /\/_app\/immutable\/entry\/[^/]+\.js($|\?)/.test(r.url)
 	);
 	if (assetFailures.length) return `${assetFailures[0].failure} loading ${assetFailures[0].url}`;
 	const importErrors = faults.errors.filter((m) => /dynamically imported module|module script failed/i.test(m));
