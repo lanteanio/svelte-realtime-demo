@@ -60,11 +60,24 @@
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Idempotency under double-click</h1>
+		<h1 class="text-2xl font-bold mt-2">Idempotency under a retry storm</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Click "Retry x5 (same key)" to fire five rapid RPCs with the same
 			idempotencyKey. Only the first runs the handler; the other four
 			return the cached result. One intent, one effect.
+		</p>
+		<!-- The page used to promise "under double-click" and then absorb a
+		     real double-click in a disabled button, so what a visitor could
+		     actually perform was defended by the UI rather than by the
+		     primitive. Naming the lockout is the honest system image: the
+		     button below is the demonstration, and the disabling is not the
+		     guarantee. -->
+		<p class="text-sm opacity-70 mt-1" data-testid="checkout-lockout-note">
+			Both buttons disable while a call is in flight, so a literal
+			double-click is stopped by the page before it reaches the server -
+			that is UI lockout, not idempotency. The burst above is the honest
+			demonstration: five real overlapping RPCs the client never
+			suppressed, deduped by their shared key on the server.
 		</p>
 	</header>
 
@@ -75,12 +88,18 @@
 		</div>
 	</div>
 
+	<!-- Retry leads, in position and in weight. The copy above instructs this
+	     button, and it is the one that shows the page's whole point (five RPCs,
+	     one effect) - but it used to sit second in a warning style beside a
+	     primary Place Order, so the click magnet was the control case, which
+	     increments the counter and demonstrates nothing about idempotency. A
+	     visitor could click, get feedback, and leave having seen none of it. -->
 	<div class="flex flex-wrap gap-3 justify-center">
-		<button class="btn btn-primary" onclick={fireOne} disabled={busy} data-testid="checkout-place">
-			Place Order
-		</button>
-		<button class="btn btn-warning" onclick={fireFive} disabled={busy} data-testid="checkout-retry">
+		<button class="btn btn-primary" onclick={fireFive} disabled={busy} data-testid="checkout-retry">
 			Retry x5 (same key)
+		</button>
+		<button class="btn btn-outline" onclick={fireOne} disabled={busy} data-testid="checkout-place">
+			Place Order
 		</button>
 		<button class="btn btn-outline btn-error" onclick={handleReset} disabled={busy} data-testid="checkout-reset">Reset</button>
 	</div>
@@ -90,7 +109,14 @@
 			<div class="card-body py-4">
 				<h2 class="card-title text-sm">RPC history (newest first)</h2>
 				<ul class="text-xs space-y-1 font-mono" data-testid="checkout-history">
-					{#each history as entry, i (i + entry.key + entry.label)}
+					<!-- Keyed on content alone. The index used to be part of the key,
+				     so every prepend re-keyed every existing row and the whole
+				     list was destroyed and rebuilt on each burst - which is the
+				     opposite of what a keyed each is for. The pair is already
+				     unique within one list: a burst's five rows share one
+				     idempotency key and carry distinct labels, and a fresh order
+				     brings its own key. -->
+				{#each history as entry (entry.key + entry.label)}
 						<li class="flex justify-between gap-3" data-testid="checkout-history-row">
 							<span class="opacity-60 truncate max-w-[18ch]" title={entry.key}>{entry.key.slice(0, 8)}...</span>
 							<span class="opacity-60" data-testid="checkout-history-label">{entry.label}</span>

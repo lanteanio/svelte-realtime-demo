@@ -73,7 +73,7 @@
 	// input. Descriptions hold inline <code> markup, so they render
 	// via {@html}; content is hardcoded here so no XSS concern.
 	const DEMOS = [
-		{ slug: 'checkout',          title: 'Idempotency under double-click',                 desc: 'Five rapid RPCs, one effect. <code>live.idempotent</code>.' },
+		{ slug: 'checkout',          title: 'Idempotency under a retry storm',                desc: 'Five rapid RPCs, one effect. <code>live.idempotent</code>.' },
 		{ slug: 'counter-resume',    title: 'Reconnect-resume with no flicker',               desc: 'Drop network 10s, reconnect, no refetch. Session resume + replay buffer.' },
 		{ slug: 'chat',              title: 'Chat rooms with presence + denials',             desc: '<code>live.room</code> bundles messages and presence; <code>live.idempotent</code> on send; FORBIDDEN banner on the members-only room.' },
 		{ slug: 'todos-rollback',    title: 'Optimistic mutate with rollback',                desc: '<code>rpc.createOptimistic</code> + force-fail toggle. Spam x5 with force-fail on; placeholders roll back independently.' },

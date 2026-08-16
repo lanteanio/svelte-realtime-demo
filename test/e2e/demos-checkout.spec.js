@@ -27,6 +27,39 @@ async function open(page) {
 }
 
 test.describe('/demos/checkout idempotency', () => {
+	// The copy instructs Retry, and Retry is the only control that shows the
+	// page's point - but Place Order was the visual primary and came first, so
+	// the click magnet was the CONTROL case, which increments the counter and
+	// demonstrates nothing about idempotency. Asserted by comparing the two
+	// buttons rather than by naming a class on one: a check for `btn-primary`
+	// on Retry would pass while Place Order kept it too, which is exactly the
+	// state being fixed.
+	test('the instructed control is the visually primary one, and leads', async ({ page }) => {
+		await open(page)
+		const buttons = page.locator('button[data-testid^="checkout-"]')
+		const order = await buttons.evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')))
+		expect(order.indexOf('checkout-retry'), 'the instructed button leads')
+			.toBeLessThan(order.indexOf('checkout-place'))
+		await expect(page.getByTestId('checkout-retry')).toHaveClass(/btn-primary/)
+		await expect(page.getByTestId('checkout-place')).not.toHaveClass(/btn-primary/)
+	})
+
+	// The page promised "under double-click" and then absorbed a real
+	// double-click in a disabled button, so what a visitor could actually
+	// perform was defended by the UI, not by the primitive. The heading and
+	// the note now say what is true; the note is the load-bearing half,
+	// because a heading alone can be read as the lockout being the guarantee.
+	test('the page names the lockout instead of letting it pass for the guarantee', async ({ page }) => {
+		await open(page)
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Idempotency under a retry storm')
+		const note = page.getByTestId('checkout-lockout-note')
+		await expect(note).toContainText('UI lockout, not idempotency')
+		await expect(note).toContainText('five real overlapping RPCs')
+		// And the lockout it describes is real, or the note is the new lie.
+		await page.getByTestId('checkout-retry').click()
+		await expect(page.getByTestId('checkout-place')).toBeDisabled()
+	})
+
 	test('Place Order increments the counter by exactly one per click', async ({ page }) => {
 		await open(page)
 		const before = await readCount(page)
@@ -59,6 +92,28 @@ test.describe('/demos/checkout idempotency', () => {
 		const labels = await page.getByTestId('checkout-history-label').allTextContents()
 		expect(labels.filter((l) => l.includes('effect'))).toHaveLength(1)
 		expect(labels.filter((l) => l.includes('cached'))).toHaveLength(4)
+	})
+
+	// The history each-key embedded the array index, so a prepend re-keyed
+	// every existing row and Svelte destroyed and rebuilt the whole list -
+	// defeating the point of a keyed each. Asserted on IDENTITY, since a
+	// rebuilt list looks identical in the DOM: stamp the existing nodes, add a
+	// row, and require the stamped ones to have survived. Counting rows or
+	// reading their text would pass either way.
+	test('adding history preserves the existing rows instead of rebuilding them', async ({ page }) => {
+		await open(page)
+		await page.getByTestId('checkout-retry').click()
+		await expect(page.getByTestId('checkout-history-row')).toHaveCount(5)
+
+		await page.getByTestId('checkout-history-row').evaluateAll((rows) => {
+			rows.forEach((row, i) => { row.dataset.survivor = String(i) })
+		})
+		await page.getByTestId('checkout-place').click()
+		await expect(page.getByTestId('checkout-history-row')).toHaveCount(6)
+
+		const survivors = await page.getByTestId('checkout-history-row')
+			.evaluateAll((rows) => rows.filter((row) => row.dataset.survivor !== undefined).length)
+		expect(survivors, 'the five pre-existing rows must be the same nodes, not rebuilt copies').toBe(5)
 	})
 
 	test('Reset zeroes the counter and clears the client history', async ({ page }) => {

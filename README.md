@@ -51,7 +51,7 @@ Every page lives at `/demos/<slug>`, backed by one module in
 
 | Route | What it shows |
 |---|---|
-| `checkout` | Idempotency under double-click |
+| `checkout` | Idempotency under a retry storm |
 | `counter-resume` | Reconnect-resume with no flicker |
 | `chat` | Chat rooms with presence + denials |
 | `todos-rollback` | Optimistic mutate with rollback |
