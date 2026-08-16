@@ -47,6 +47,52 @@ async function reloadMigrated(page) {
 }
 
 test.describe('/demos/schema-evolution', () => {
+	// The panels are an equal-height grid and daisyUI gives card-body's <p>
+	// flex-grow, so the descriptions stretched and bottom-anchored the rows.
+	// At the tablet rung the right panel wraps its labels onto two lines, so
+	// the left panel opened a blank band and the same counter sat at different
+	// heights in the two panels - which breaks the row-to-row comparison a
+	// side-by-side layout exists to offer. Asserted at the rung the finding
+	// names, since at wider widths neither panel wraps and it passes anyway.
+	test('the same counter sits at the same height in both panels, at the rung where labels wrap', async ({ page }) => {
+		await page.setViewportSize({ width: 768, height: 900 })
+		await open(page)
+		for (const id of IDS) {
+			const tops = await Promise.all([
+				page.getByTestId(`v2-value-${id}`).evaluate((el) => Math.round(el.getBoundingClientRect().top)),
+				page.getByTestId(`v1mig-value-${id}`).evaluate((el) => Math.round(el.getBoundingClientRect().top))
+			])
+			expect(Math.abs(tops[0] - tops[1]), `${id} must share a baseline across the two panels`).toBeLessThanOrEqual(2)
+		}
+	})
+
+	// A swallowed failure left an empty code box and a version chip still
+	// showing the CLIENT's own default as though the server had confirmed it.
+	// Forced here by dropping the state RPC's reply on the wire, which is the
+	// only way to reach the branch: the call succeeds on every healthy run.
+	test('a state call that never answers withholds the chip and says so, instead of showing an empty box', async ({ page }) => {
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			// Dropped on the way OUT, not on the way back: the reply frame
+			// carries a correlation id rather than the handler name, so
+			// filtering the response would match nothing and the call would
+			// quietly succeed - a test that passes for the wrong reason.
+			// Everything else flows, so the page still connects and both
+			// projections still hydrate; this isolates the one call.
+			ws.onMessage((m) => {
+				if (typeof m === 'string' && m.includes('myCounterState')) return
+				server.send(m)
+			})
+			server.onMessage((m) => ws.send(m))
+		})
+		await open(page)
+		await expect(page.getByTestId('state-pending')).toBeVisible()
+		await expect(page.getByTestId('migrate-source')).toHaveCount(0)
+		// The chip asserted a server fact from a client default. Absent is the
+		// honest reading while nobody has answered.
+		await expect(page.getByTestId('server-version')).toHaveCount(0)
+	})
+
 	test('renders both exact projections, all controls, server version, and migration source', async ({ page }) => {
 		await open(page)
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Schema evolution: subscribe-time migrate hooks')

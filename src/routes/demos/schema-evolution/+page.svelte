@@ -58,10 +58,20 @@
 		migrateSource: ''
 	})
 
+	// A swallowed failure here left an empty <pre> with no explanation and a
+	// version chip still showing the CLIENT's default as though the server had
+	// confirmed it - a readback of a value nobody fetched. Both now wait for
+	// real state, and the failure says what happened.
+	let stateLoaded = $state(false)
+	let stateError = $state('')
+
 	onMount(async () => {
 		try {
 			state = await myCounterState()
-		} catch {}
+			stateLoaded = true
+		} catch (err) {
+			stateError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
+		}
 	})
 
 	let busy = $state(false)
@@ -122,17 +132,25 @@
 				<span class="inline-block w-2 h-2 rounded-full align-middle" style:background={me.color}></span>
 				<strong>{me.name}</strong>
 				<span class="font-mono">({me.id.slice(0, 8)})</span>
-				<span class="ml-2 badge badge-sm badge-outline">server version: {state.serverVersion}</span>
+				{#if stateLoaded}
+					<span class="ml-2 badge badge-sm badge-outline" data-testid="server-version">server version: {state.serverVersion}</span>
+				{/if}
 			</p>
 		{/if}
 	</header>
 
 	<!-- Two panels side by side -->
-	<section class="grid @2xl:grid-cols-2 gap-4" data-testid="panels">
-		<div class="card bg-base-100 border border-base-300" data-testid="v2-panel">
-			<div class="card-body py-3 space-y-2">
+	<section class="grid @2xl:grid-cols-2 @2xl:grid-rows-[auto_auto_1fr] gap-4" data-testid="panels">
+		<div class="card bg-base-100 border border-base-300 @2xl:row-span-3 @2xl:grid @2xl:grid-rows-subgrid" data-testid="v2-panel">
+			<!-- daisyUI card-body gives its <p> flex-grow, so in the equal-height
+			     grid the description stretched and bottom-anchored the rows. At the
+			     tablet rung the right panel wraps its labels onto two lines, so the
+			     left panel opened a blank band and Alpha/Beta/Gamma sat at different
+			     heights in the two panels - which is exactly the row-to-row
+			     comparison a side-by-side layout promises. -->
+			<div class="card-body py-3 space-y-2 justify-start @2xl:grid @2xl:grid-rows-subgrid @2xl:row-span-3 @2xl:space-y-0 @2xl:gap-2">
 				<h2 class="card-title text-sm">Live (v2): subscribed normally</h2>
-				<p class="text-xs opacity-60">no <code>schemaVersion</code> on the wire; migrate chain skipped.</p>
+				<p class="text-xs opacity-60 grow-0">no <code>schemaVersion</code> on the wire; migrate chain skipped.</p>
 				<ul class="space-y-2" data-testid="v2-list">
 					{#each $counter ?? [] as c (c.id)}
 						<li class="flex items-center gap-2" data-testid="v2-card">
@@ -148,10 +166,10 @@
 			</div>
 		</div>
 
-		<div class="card bg-base-100 border border-base-300" data-testid="v1mig-panel">
-			<div class="card-body py-3 space-y-2">
+		<div class="card bg-base-100 border border-base-300 @2xl:row-span-3 @2xl:grid @2xl:grid-rows-subgrid" data-testid="v1mig-panel">
+			<div class="card-body py-3 space-y-2 justify-start @2xl:grid @2xl:grid-rows-subgrid @2xl:row-span-3 @2xl:space-y-0 @2xl:gap-2">
 				<h2 class="card-title text-sm">subscribeAt &#123; schemaVersion: 1 &#125;: migrate chain ran</h2>
-				<p class="text-xs opacity-60">wire envelope claims v1; server runs <code>migrate[1]</code> on the loader output.</p>
+				<p class="text-xs opacity-60 grow-0">wire envelope claims v1; server runs <code>migrate[1]</code> on the loader output.</p>
 				<ul class="space-y-2" data-testid="v1mig-list">
 					{#each v1List as c (c.id)}
 						<li class="flex items-center gap-2" data-testid="v1mig-card">
@@ -202,7 +220,21 @@
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
 			<h2 class="card-title text-sm">Stream registration</h2>
-			<pre class="text-xs font-mono bg-base-200 p-3 rounded overflow-x-auto whitespace-pre" data-testid="migrate-source">{state.migrateSource}</pre>
+			{#if stateError}
+				<p class="text-xs text-error" data-testid="state-error">
+					Could not load the stream registration ({stateError}). The
+					teaching snippet and the server version come from the same
+					call, so both are withheld rather than guessed at.
+				</p>
+			{:else if stateLoaded}
+				<pre class="text-xs font-mono bg-base-200 p-3 rounded overflow-x-auto whitespace-pre" data-testid="migrate-source">{state.migrateSource}</pre>
+			{:else}
+				<!-- Three states, not two. Before this, a call that had not
+				     answered YET and a call that had failed both rendered the
+				     same empty code box, which is the shape the reader cannot
+				     tell from a demo with nothing to show. -->
+				<p class="text-xs opacity-40" data-testid="state-pending">Loading the registration...</p>
+			{/if}
 		</div>
 	</section>
 
