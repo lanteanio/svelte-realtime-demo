@@ -31,19 +31,31 @@
 		}
 	}
 
+	// Each call lands in the history the moment IT settles, rather than all five
+	// arriving together when the last one does. Promise.all made the burst a
+	// single atomic +1 on screen: the copy promises five rapid RPCs and the
+	// visitor saw one event, with nothing but a dimmed button in between - and
+	// on a slow link that inert stretch runs past a second. The remaining count
+	// on the button is the other half, so a burst still in flight says so.
+	let settled = $state(0)
+
 	async function fireFive() {
 		if (busy) return
 		busy = true
+		settled = 0
 		const idempotencyKey = crypto.randomUUID()
 		try {
-			const calls = Array.from({ length: 5 }, () => placeOrder.with({ idempotencyKey })())
-			const results = await Promise.all(calls)
-			const entries = results.map((r, i) => ({
-				key: idempotencyKey,
-				count: r.count,
-				label: i === 0 ? 'first (effect)' : `retry ${i} (cached)`
-			}))
-			history = [...entries.reverse(), ...history].slice(0, 12)
+			const calls = Array.from({ length: 5 }, (_, i) =>
+				placeOrder.with({ idempotencyKey })().then((r) => {
+					history = [{
+						key: idempotencyKey,
+						count: r.count,
+						label: i === 0 ? 'first (effect)' : `retry ${i} (cached)`
+					}, ...history].slice(0, 12)
+					settled += 1
+				})
+			)
+			await Promise.all(calls)
 		} finally {
 			busy = false
 		}
@@ -96,7 +108,7 @@
 	     visitor could click, get feedback, and leave having seen none of it. -->
 	<div class="flex flex-wrap gap-3 justify-center">
 		<button class="btn btn-primary" onclick={fireFive} disabled={busy} data-testid="checkout-retry">
-			Retry x5 (same key)
+			{busy ? `Retry x5 (${settled}/5 settled)` : 'Retry x5 (same key)'}
 		</button>
 		<button class="btn btn-outline" onclick={fireOne} disabled={busy} data-testid="checkout-place">
 			Place Order

@@ -116,6 +116,35 @@ test.describe('/demos/checkout idempotency', () => {
 		expect(survivors, 'the five pre-existing rows must be the same nodes, not rebuilt copies').toBe(5)
 	})
 
+	// The burst's only feedback was a dimmed button, and Promise.all made five
+	// RPCs land as one atomic +1 - so the "five rapid RPCs" the copy promises
+	// were never perceivable as five events, and on a slow link the page looks
+	// inert for the whole round trip. Slowing the server's frames is what makes
+	// the in-flight state observable at all: on localhost every reply settles
+	// within a millisecond or two, so a bare click would sample the finished
+	// state and the pin would be on nothing.
+	test('a burst in flight says so, instead of looking inert until it lands', async ({ page }) => {
+		const SERVER_DELAY = 800
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((m) => server.send(m))
+			server.onMessage((m) => { setTimeout(() => ws.send(m), SERVER_DELAY) })
+		})
+		await open(page)
+
+		await page.getByTestId('checkout-retry').click()
+		// Read both properties atomically, well inside the delay window: a
+		// two-step assertion could race the delayed frames between the checks.
+		await expect
+			.poll(() => page.getByTestId('checkout-retry')
+				.evaluate((el) => ({ disabled: el.disabled, text: el.textContent.trim() })))
+			.toEqual({ disabled: true, text: 'Retry x5 (0/5 settled)' })
+
+		// And it resolves to the whole burst rather than sticking on the count.
+		await expect(page.getByTestId('checkout-history-row')).toHaveCount(5, { timeout: 15_000 })
+		await expect(page.getByTestId('checkout-retry')).toHaveText('Retry x5 (same key)')
+	})
+
 	test('Reset zeroes the counter and clears the client history', async ({ page }) => {
 		await open(page)
 		// Seed some state first so the reset is observable, and settle on the
