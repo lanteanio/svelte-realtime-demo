@@ -27,6 +27,24 @@ import { redis } from '$lib/server/redis'
 const MAX_TODOS = 200
 const TODOS_KEY = 'demos:todos'
 
+/**
+ * How long a forced rejection is held before it throws.
+ *
+ * The page's own script is "watch the placeholder appear, then disappear", and
+ * an immediate throw makes that a single fast round trip - on a local
+ * connection, tens of milliseconds. The visitor sees a toast and an unchanged
+ * list, and the demo's central observable, an optimistic row rolling back
+ * independently of its neighbours, is never actually observed. This is the
+ * artificial half of an artificial failure, so slowing it costs nothing real
+ * and is the only thing that makes the arc perceivable.
+ */
+const FORCED_FAIL_DELAY_MS = 400
+
+async function forcedRejection() {
+	await new Promise((resolve) => setTimeout(resolve, FORCED_FAIL_DELAY_MS))
+	throw new LiveError('FORCED', 'Force-fail is on')
+}
+
 async function listTodos() {
 	const raws = await redis.redis.hvals(TODOS_KEY)
 	const out = []
@@ -42,7 +60,7 @@ export const todosStream = live.stream(TOPICS.demoTodos, async () => listTodos()
 })
 
 export const addTodo = live(async (ctx, { id, text, forceFail }) => {
-	if (forceFail) throw new LiveError('FORCED', 'Force-fail is on')
+	if (forceFail) await forcedRejection()
 	const trimmed = String(text ?? '').trim().slice(0, 200)
 	if (!trimmed) throw new LiveError('VALIDATION', 'Todo text required')
 	if (typeof id !== 'string' || id.length < 1 || id.length > 64) {
@@ -57,7 +75,7 @@ export const addTodo = live(async (ctx, { id, text, forceFail }) => {
 })
 
 export const toggleTodo = live(async (ctx, { id, forceFail }) => {
-	if (forceFail) throw new LiveError('FORCED', 'Force-fail is on')
+	if (forceFail) await forcedRejection()
 	const raw = await redis.redis.hget(TODOS_KEY, id)
 	if (!raw) throw new LiveError('NOT_FOUND', 'Todo not found')
 	let todo
@@ -69,7 +87,7 @@ export const toggleTodo = live(async (ctx, { id, forceFail }) => {
 })
 
 export const removeTodo = live(async (ctx, { id, forceFail }) => {
-	if (forceFail) throw new LiveError('FORCED', 'Force-fail is on')
+	if (forceFail) await forcedRejection()
 	const raw = await redis.redis.hget(TODOS_KEY, id)
 	if (!raw) throw new LiveError('NOT_FOUND', 'Todo not found')
 	let todo

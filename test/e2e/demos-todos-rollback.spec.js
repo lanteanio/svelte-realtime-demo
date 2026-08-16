@@ -79,6 +79,56 @@ test.describe('/demos/todos-rollback', () => {
 		await expect(row).toHaveCount(1)
 	})
 
+	// The act every step of this page begins with used to happen in the
+	// smallest target on screen: the form row could not wrap, so at 320 the
+	// input collapsed to about 70px and its placeholder truncated mid-word.
+	// Asserted as a fraction of the form, not as a pixel floor - a floor
+	// passes on a wider phone while still failing the narrowest one.
+	test('the add input keeps a usable width where the form has to wrap', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 320, height: 568 } })
+		const page = await context.newPage()
+		try {
+			await open(page)
+			const geometry = await page.getByTestId('todo-input').evaluate((input) => {
+				const form = input.closest('form')
+				return {
+					input: input.getBoundingClientRect().width,
+					form: form.getBoundingClientRect().width,
+					inputTop: Math.round(input.getBoundingClientRect().top),
+					buttonTop: Math.round(form.querySelector('[data-testid="add-button"]').getBoundingClientRect().top)
+				}
+			})
+			expect(geometry.input / geometry.form, 'the input takes the row it is on').toBeGreaterThan(0.9)
+			// It takes that row because the buttons moved below it, which is the
+			// mechanism - an input that merely grew would push them off-screen.
+			expect(geometry.buttonTop, 'the buttons wrap to their own line').toBeGreaterThan(geometry.inputTop)
+
+			// And the placeholder is readable rather than clipped mid-word.
+			const clipped = await page.getByTestId('todo-input')
+				.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
+			expect(clipped, 'the placeholder must fit the field').toBe(false)
+		} finally {
+			await context.close()
+		}
+	})
+
+	// Every control names what it acts on. The checkbox and the remove glyph
+	// had no accessible name at all, so the row announced as unlabelled
+	// controls and the todo's text was the only way to tell them apart.
+	test('each row control carries an accessible name that names its todo', async ({ page }) => {
+		await open(page)
+		await clearAll(page)
+		const text = uniq('named')
+		await page.getByTestId('todo-input').fill(text)
+		await page.getByTestId('add-button').click()
+		const row = page.getByTestId('todos').locator('li', { hasText: text })
+		await expect(row).toHaveCount(1, { timeout: 10_000 })
+
+		await expect(row.getByRole('checkbox', { name: `Done: ${text}` })).toHaveCount(1)
+		await expect(row.getByRole('button', { name: `Remove: ${text}` })).toHaveCount(1)
+		await expect(page.getByLabel('New todo')).toHaveCount(1)
+	})
+
 	test('Add is disabled until the draft is non-empty', async ({ page }) => {
 		await open(page)
 		await expect(page.getByTestId('add-button')).toBeDisabled()
@@ -164,6 +214,64 @@ test.describe('/demos/todos-rollback', () => {
 		// ...and none of the five placeholders survive - the list is clean.
 		await expect(page.getByTestId('todos').locator('li', { hasText: base })).toHaveCount(0, { timeout: 10_000 })
 		await expect(page.getByTestId('todos')).toContainText(/No todos yet/i, { timeout: 10_000 })
+	})
+
+	// Five identical failures used to stack five alerts, which on a phone rung
+	// cover the lower half of the viewport - including the Todos card - during
+	// exactly the seconds the placeholders vanish. The feedback destroyed the
+	// view it was reporting on, and five copies of one sentence say nothing the
+	// count does not. Asserted at a phone width, since that is where the
+	// occlusion is: at desktop width five alerts fit and the old behaviour
+	// would pass.
+	test('a burst of identical failures reports once with a count, inside the viewport', async ({ browser }) => {
+		const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+		const page = await context.newPage()
+		try {
+			await open(page)
+			await clearAll(page)
+			await page.getByTestId('force-fail-toggle').check()
+			await page.getByTestId('todo-input').fill(uniq('burst'))
+			await page.getByTestId('spam-button').click()
+
+			const toasts = page.getByTestId('todo-toast')
+			await expect(toasts).toHaveCount(1, { timeout: 10_000 })
+			await expect(page.getByTestId('todo-toast-text')).toContainText('5x')
+			await expect(page.getByTestId('todo-toast-text')).toContainText('FORCED')
+
+			// And it fits: max-w-md is 448px, wider than this viewport, so an
+			// unclamped alert would run off the side of the screen it reports to.
+			const overflow = await toasts.first().evaluate((el) => {
+				const box = el.getBoundingClientRect()
+				return { right: box.right, left: box.left, viewport: window.innerWidth }
+			})
+			expect(overflow.right).toBeLessThanOrEqual(overflow.viewport)
+			expect(overflow.left).toBeGreaterThanOrEqual(0)
+		} finally {
+			await context.close()
+		}
+	})
+
+	// The page's own script is "watch the placeholder appear, then disappear",
+	// and an immediate throw made that a single fast round trip - tens of
+	// milliseconds on a local connection, so the visitor saw a toast and an
+	// unchanged list and never observed the rollback at all. Asserted by
+	// catching the placeholder WHILE it is up, which is only possible if the
+	// window is perceptible; the existing tests only assert the end state and
+	// pass whether or not anything was ever visible.
+	test('a rolled-back row is on screen long enough to be seen', async ({ page }) => {
+		await open(page)
+		await clearAll(page)
+		await page.getByTestId('force-fail-toggle').check()
+
+		const text = uniq('perceptible')
+		await page.getByTestId('todo-input').fill(text)
+		const row = page.getByTestId('todos').locator('li', { hasText: text })
+		await page.getByTestId('add-button').click()
+
+		// Up first...
+		await expect(row).toHaveCount(1, { timeout: 5_000 })
+		// ...and then rolled back, so this is the arc and not a row that stuck.
+		await expect(row).toHaveCount(0, { timeout: 10_000 })
 	})
 
 	test('Spam x5 with Force-fail OFF adds five todos', async ({ page }) => {

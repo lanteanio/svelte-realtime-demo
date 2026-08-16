@@ -36,16 +36,39 @@
 	let draft = $state('')
 	let forceFail = $state(false)
 
+	// Identical failures collapse into one counted row rather than stacking.
+	// "Spam x5" under Force fail produced five simultaneous alerts, and five
+	// stacked alerts cover the lower half of a phone viewport - including the
+	// Todos card - during exactly the seconds the placeholders vanish. The
+	// feedback was destroying the view it reports on, and five copies of one
+	// sentence say nothing the count does not.
+	//
+	// Coalescing keys on the CAUSE, not on the label. "Spam x5" labels its five
+	// calls "Spam 1".."Spam 5", so keying on the whole message would leave five
+	// rows that differ only by a number nobody needs - the reader wants to know
+	// what was rejected and how many, and the count carries the multiplicity
+	// better than five near-identical sentences do.
 	let toasts = $state([])
-	function pushToast(text, kind = 'error') {
-		const id = crypto.randomUUID()
-		toasts = [...toasts, { id, text, kind }]
-		setTimeout(() => { toasts = toasts.filter((t) => t.id !== id) }, 3500)
+	function pushToast(label, cause) {
+		const existing = toasts.find((t) => t.cause === cause)
+		if (existing) {
+			// Re-arm the timer as well as the count: a burst that keeps arriving
+			// must not expire on the first one's clock.
+			clearTimeout(existing.timer)
+			existing.count += 1
+			existing.timer = setTimeout(() => { toasts = toasts.filter((t) => t !== existing) }, TOAST_MS)
+			return
+		}
+		const entry = { id: crypto.randomUUID(), label, cause, count: 1, timer: null }
+		entry.timer = setTimeout(() => { toasts = toasts.filter((t) => t !== entry) }, TOAST_MS)
+		toasts = [...toasts, entry]
 	}
+
+	const TOAST_MS = 3500
 
 	async function tryMutate(label, fn) {
 		try { await fn() }
-		catch (err) { pushToast(`${label}: ${err?.code ?? 'ERROR'} - ${err?.message ?? err}`) }
+		catch (err) { pushToast(label, `${err?.code ?? 'ERROR'} - ${err?.message ?? err}`) }
 	}
 
 	async function handleAdd() {
@@ -136,20 +159,28 @@
 		</div>
 	</div>
 
-	<form onsubmit={(e) => { e.preventDefault(); handleAdd() }} class="flex gap-2">
+	<!-- The row used to be non-wrapping, so at 320 the input collapsed to about
+	     70px and its placeholder truncated mid-word: the act every step of this
+	     page begins with happened in the smallest target on the screen. The
+	     input now takes a full line of its own until there is room for the
+	     buttons beside it, which is what basis-full plus a wrapping row buys
+	     without a second breakpoint to keep in sync. -->
+	<form onsubmit={(e) => { e.preventDefault(); handleAdd() }} class="flex flex-wrap gap-2">
 		<!-- Compact on fine pointers, 44px where taps land; the row checkbox holds the 24px WCAG AA floor. -->
+		<label class="sr-only" for="todo-input">New todo</label>
 		<input
-			class="input input-bordered flex-1 pointer-coarse:min-h-11"
+			id="todo-input"
+			class="input input-bordered basis-full @sm:basis-0 @sm:flex-1 min-w-0 pointer-coarse:min-h-11"
 			bind:value={draft}
 			placeholder="Add a todo..."
 			data-testid="todo-input"
 		/>
-		<button type="submit" class="btn btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={!draft.trim()} data-testid="add-button">
+		<button type="submit" class="btn btn-primary flex-1 @sm:flex-none pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={!draft.trim()} data-testid="add-button">
 			Add
 		</button>
 		<button
 			type="button"
-			class="btn btn-warning"
+			class="btn btn-warning flex-1 @sm:flex-none"
 			onclick={handleSpamFive}
 			data-testid="spam-button"
 		>
@@ -170,11 +201,17 @@
 			<ul class="space-y-1 text-sm" data-testid="todos" data-hydrated={hydrated}>
 				{#each todos as todo (todo.id)}
 					<li class="flex items-center gap-2">
+						<!-- Every control here names what it acts on. The checkbox and
+						     the remove glyph had no accessible name at all, so a
+						     screen reader announced a row of unlabelled controls and
+						     the todo's own text was the only way to tell them apart -
+						     which is exactly what a name is for. -->
 						<input
 							type="checkbox"
 							class="checkbox checkbox-sm pointer-coarse:checkbox-md"
 							checked={todo.done}
 							onchange={() => handleToggle(todo)}
+							aria-label="Done: {todo.text}"
 							data-testid="todo-toggle-{todo.id}"
 						/>
 						<span class:line-through={todo.done} class:opacity-60={todo.done} class="flex-1">
@@ -183,9 +220,10 @@
 						<button
 							class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11"
 							onclick={() => handleRemove(todo)}
+							aria-label="Remove: {todo.text}"
 							data-testid="todo-remove-{todo.id}"
 						>
-							✕
+							<span aria-hidden="true">✕</span>
 						</button>
 					</li>
 				{:else}
@@ -213,9 +251,15 @@
 
 	{#if toasts.length > 0}
 		<div class="toast toast-end z-50">
+			<!-- max-w-md is 448px, wider than every phone rung this page is read
+			     on, so a long message ran off the side of the screen it was
+			     supposed to be reporting to. Clamped to the viewport with the
+			     toast's own gutter subtracted. -->
 			{#each toasts as toast (toast.id)}
-				<div class="alert alert-error shadow-lg max-w-md">
-					<span class="text-xs">{toast.text}</span>
+				<div class="alert alert-error shadow-lg max-w-[calc(100vw-2rem)] @md:max-w-md" data-testid="todo-toast">
+					<span class="text-xs" data-testid="todo-toast-text">
+						{toast.count > 1 ? `${toast.count}x ` : `${toast.label}: `}{toast.cause}
+					</span>
 				</div>
 			{/each}
 		</div>
