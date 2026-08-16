@@ -156,10 +156,23 @@ const STREAM_REGISTRATION_SNIPPET = [
 	')'
 ].join('\n')
 
+/**
+ * A worked example of the migration, produced by the REAL `v1ToV2`.
+ *
+ * Both panels render identical rows - same labels, same values, same dot
+ * colours - so the only visible difference was a badge, and the visitor was
+ * asked to believe a migration ran without ever seeing what it transformed.
+ * Running the actual function over an actual v1-shaped row is what makes that
+ * a demonstration rather than a claim, and it cannot drift from the code: if
+ * `v1ToV2` changes, this changes with it.
+ */
+const V1_SAMPLE = { id: SEED_IDS[0], value: 3 }
+
 export const myCounterState = live(async () => ({
 	serverVersion: 2,
 	seedIds: SEED_IDS,
-	migrateSource: STREAM_REGISTRATION_SNIPPET
+	migrateSource: STREAM_REGISTRATION_SNIPPET,
+	migrateSample: { before: V1_SAMPLE, after: v1ToV2(V1_SAMPLE) }
 }))
 
 export const incrementCounter = live(async (ctx, id) => {

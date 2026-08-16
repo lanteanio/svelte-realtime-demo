@@ -55,7 +55,8 @@
 	let state = $state({
 		serverVersion: 2,
 		seedIds: ['alpha', 'beta', 'gamma'],
-		migrateSource: ''
+		migrateSource: '',
+		migrateSample: null
 	})
 
 	// A swallowed failure here left an empty <pre> with no explanation and a
@@ -104,6 +105,8 @@
 		}
 	}
 
+	let introOpen = $state(false)
+
 	function provenanceBadge(prov) {
 		return prov === 'migrate[1]' ? 'badge-warning' : 'badge-info'
 	}
@@ -113,7 +116,17 @@
 	<header>
 
 		<h1 class="text-2xl font-bold mt-2">Schema evolution: subscribe-time migrate hooks</h1>
-		<p class="text-sm opacity-70 mt-1">
+		<!-- At 320-360 the first screen held the h1 and seven lines of
+		     inline-code-heavy prose and nothing else: no panel, no counter, no
+		     button, so a phone visitor met a wall of spec and no evidence the
+		     page was live. Clamped to three lines until the container has room,
+		     with the rest one tap away rather than removed. -->
+		<p
+			class="text-sm opacity-70 mt-1 @2xl:line-clamp-none"
+			class:line-clamp-3={!introOpen}
+			data-testid="intro"
+			data-clamped={!introOpen}
+		>
 			One stream registered at <code>version: 2</code> with
 			<code>migrate: &#123; 1: v1ToV2 &#125;</code>. Left panel subscribes
 			normally (no <code>schemaVersion</code> on the wire, loader output
@@ -126,6 +139,13 @@
 			publish is a raw v2 event, merging into the migrated base for
 			that key.
 		</p>
+		<button
+			class="text-xs link opacity-70 mt-1 @2xl:hidden"
+			onclick={() => { introOpen = !introOpen }}
+			data-testid="intro-toggle"
+		>
+			{introOpen ? 'Show less' : 'Show more'}
+		</button>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
 				Watching as
@@ -228,6 +248,25 @@
 				</p>
 			{:else if stateLoaded}
 				<pre class="text-xs font-mono bg-base-200 p-3 rounded overflow-x-auto whitespace-pre" data-testid="migrate-source">{state.migrateSource}</pre>
+				{#if state.migrateSample}
+					<!-- The two panels render identical rows, so the only visible
+					     difference was a badge and the migration itself was
+					     nowhere on the page: the visitor was asked to verify that
+					     one ran without ever seeing what it transformed. This is
+					     the real `v1ToV2` applied to a real v1-shaped row on the
+					     server, so it cannot drift from the code it documents. -->
+					<h3 class="text-xs font-semibold opacity-70 pt-2">What <code>migrate[1]</code> does to a row</h3>
+					<div class="grid @2xl:grid-cols-2 gap-2" data-testid="migrate-sample">
+						<div>
+							<div class="text-xs opacity-60 mb-1">v1 row, as a v1 client stored it</div>
+							<pre class="text-xs font-mono bg-base-200 p-2 rounded overflow-x-auto" data-testid="migrate-sample-before">{JSON.stringify(state.migrateSample.before, null, 2)}</pre>
+						</div>
+						<div>
+							<div class="text-xs opacity-60 mb-1">after <code>migrate[1]</code>, as this page receives it</div>
+							<pre class="text-xs font-mono bg-base-200 p-2 rounded overflow-x-auto" data-testid="migrate-sample-after">{JSON.stringify(state.migrateSample.after, null, 2)}</pre>
+						</div>
+					</div>
+				{/if}
 			{:else}
 				<!-- Three states, not two. Before this, a call that had not
 				     answered YET and a call that had failed both rendered the

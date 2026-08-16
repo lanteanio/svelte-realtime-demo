@@ -93,6 +93,46 @@ test.describe('/demos/schema-evolution', () => {
 		await expect(page.getByTestId('server-version')).toHaveCount(0)
 	})
 
+	// Both panels render identical rows, so the only visible difference was a
+	// badge: the visitor was asked to verify a migration ran without seeing
+	// what it transformed. The sample is produced by the REAL v1ToV2 on the
+	// server, so this asserts the transformation rather than a caption about
+	// it - the fields the migration synthesizes must be absent before and
+	// present after.
+	test('the page shows what the migration actually does to a row', async ({ page }) => {
+		await open(page)
+		const before = JSON.parse(await page.getByTestId('migrate-sample-before').innerText())
+		const after = JSON.parse(await page.getByTestId('migrate-sample-after').innerText())
+
+		for (const field of ['label', 'color', 'provenance', 'modifiedAt']) {
+			expect(before, `v1 rows have no ${field}`).not.toHaveProperty(field)
+			expect(after, `migrate[1] synthesizes ${field}`).toHaveProperty(field)
+		}
+		// Carried through, not invented: the migration must not rewrite what v1
+		// already had.
+		expect(after.id).toBe(before.id)
+		expect(after.value).toBe(before.value)
+		expect(after.provenance).toBe('migrate[1]')
+	})
+
+	// At 320 the first screen held the h1 and seven lines of prose and nothing
+	// else - no panel, no counter, no button - so the demo failed the glance
+	// test on the harshest rung. Asserted as the thing the finding is about:
+	// live rows must crest the fold, not merely exist further down.
+	test('a phone sees live rows on the first screen, and can still read the whole intro', async ({ page }) => {
+		await page.setViewportSize({ width: 320, height: 568 })
+		await open(page)
+
+		const firstRow = await page.getByTestId('v2-value-alpha').evaluate((el) => el.getBoundingClientRect().top)
+		expect(firstRow, 'a live counter must be above the fold').toBeLessThan(568)
+
+		// And nothing is lost: the clamp is a fold, not a deletion.
+		await expect(page.getByTestId('intro')).toHaveAttribute('data-clamped', 'true')
+		await page.getByTestId('intro-toggle').click()
+		await expect(page.getByTestId('intro')).toHaveAttribute('data-clamped', 'false')
+		await expect(page.getByTestId('intro')).toContainText('merging into the migrated base')
+	})
+
 	test('renders both exact projections, all controls, server version, and migration source', async ({ page }) => {
 		await open(page)
 		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Schema evolution: subscribe-time migrate hooks')
