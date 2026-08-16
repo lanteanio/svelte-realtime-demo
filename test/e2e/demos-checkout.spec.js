@@ -56,8 +56,32 @@ test.describe('/demos/checkout idempotency', () => {
 		await expect(note).toContainText('UI lockout, not idempotency')
 		await expect(note).toContainText('five real overlapping RPCs')
 		// And the lockout it describes is real, or the note is the new lie.
+		//
+		// Latched from inside the page rather than sampled from outside it. The
+		// lockout is open only while the five RPCs are in flight, measured at
+		// 7-10ms, and `toBeDisabled()` cannot evaluate until the click has
+		// round-tripped out of the browser - so under load the window closes
+		// before the first poll and every later one sees the settled state. That
+		// made this assertion racy by construction: it was sampling a 9ms
+		// transient, and passing only when the first poll happened to land
+		// inside it. A MutationObserver installed BEFORE the click cannot miss
+		// the transition however short it is, and it still fails if the lockout
+		// never engages, which is the guarantee actually under test.
+		await page.evaluate(() => {
+			const target = document.querySelector('[data-testid="checkout-place"]')
+			window.__lockoutSeen = target.hasAttribute('disabled')
+			new MutationObserver(() => {
+				if (target.hasAttribute('disabled')) window.__lockoutSeen = true
+			}).observe(target, { attributes: true, attributeFilter: ['disabled'] })
+		})
 		await page.getByTestId('checkout-retry').click()
-		await expect(page.getByTestId('checkout-place')).toBeDisabled()
+		// Settle on the storm finishing, so the latch is read after the window
+		// it is meant to have caught rather than before it opened.
+		await expect(page.getByTestId('checkout-retry')).toBeEnabled({ timeout: 10_000 })
+		expect(
+			await page.evaluate(() => window.__lockoutSeen),
+			'Place Order must be locked out while the retry storm is in flight'
+		).toBe(true)
 	})
 
 	test('Place Order increments the counter by exactly one per click', async ({ page }) => {
