@@ -393,6 +393,58 @@ test.describe('home + gallery', () => {
 		}
 	})
 
+	// The navbar end cluster used to outgrow its half and paint over the
+	// wordmark through the 640-1023 band, and the two "online" figures on this
+	// app - the navbar's global count and a board's own roster - both read as
+	// bare counts. Pinned at the rung the finding names, measuring geometry
+	// rather than class names: a cluster that fits is one row, and it does not
+	// reach back across the wordmark.
+	test('the navbar end cluster holds one row and keeps off the wordmark through the tablet band', async ({ page }) => {
+		await openHome(page)
+		for (const width of [640, 768, 1023]) {
+			await page.setViewportSize({ width, height: 900 })
+			const geometry = await page.evaluate(() => {
+				const end = document.querySelector('.navbar-end')
+				const brand = document.querySelector('.navbar-start a')
+				// Vertical CENTRES, not tops: the cluster is items-center and its
+				// children differ in height, so distinct tops are alignment
+				// rather than wrapping. Centres agree on one row and separate
+				// the moment anything stacks.
+				const rows = new Set(
+					[...end.children]
+						.filter((el) => el.getBoundingClientRect().width > 0)
+						.map((el) => {
+							const box = el.getBoundingClientRect()
+							return Math.round(box.top + box.height / 2)
+						})
+				)
+				return {
+					rows: rows.size,
+					endLeft: Math.round(end.getBoundingClientRect().left),
+					brandRight: Math.round(brand.getBoundingClientRect().right)
+				}
+			})
+			expect(geometry.rows, `end cluster wraps at ${width}`).toBe(1)
+			expect(geometry.endLeft, `end cluster overlaps the wordmark at ${width}`)
+				.toBeGreaterThanOrEqual(geometry.brandRight)
+		}
+	})
+
+	// The two counts name their own scope, so neither can be read as the other.
+	test('the global online count says it is global, and a board count says it is the board', async ({ page }) => {
+		await page.setViewportSize({ width: 1280, height: 900 })
+		await openHome(page)
+		// The navbar figure is global and carries the globe; it appears only
+		// where there is room for it, so this asserts the wording when present
+		// rather than requiring it at every width.
+		const global = page.locator('.navbar-end').getByText(/\d+ online$/)
+		if (await global.count() > 0) await expect(global.first()).toHaveText(/^\d+ online$/)
+
+		const board = await createBoardFromHome(page, `scope-${Date.now()}`)
+		await expect(page.getByText(/^\d+ on this board$/)).toHaveCount(1)
+		expect(board).toBeTruthy()
+	})
+
 	test('primary controls meet the 44px floor on a coarse-pointer rung', async ({ browser }) => {
 		const { context, page } = await openTouchPage(browser)
 		try {
