@@ -228,7 +228,22 @@ test.describe('/demos/multiplayer', () => {
 			await Promise.all([openMultiplayer(a), openMultiplayer(b)])
 			// Converge for real first, so what follows removes a peer that was
 			// demonstrably delivered rather than one that never arrived.
-			const { nameA, nameB } = await waitForPeers(a, b)
+			//
+			// Retried once through a rejoin, and the reason is narrow. The room's
+			// join race is an upstream defect at roughly 4% per pairing, and it
+			// strikes at join time - so reopening both tabs is what recovers it,
+			// not waiting longer. This test's subject is the failure DESCRIPTION,
+			// not convergence, so a tier lost here buys no coverage and just adds
+			// another draw to the merge gate's false-failure rate. The tests whose
+			// subject IS presence deliberately do not do this: they are the ones
+			// that should keep reporting the race.
+			let names = await waitForPeers(a, b).catch(() => null)
+			if (!names) {
+				console.log('[mp-rejoin] first convergence lost to the upstream join race; reopening both tabs once')
+				await Promise.all([openMultiplayer(a), openMultiplayer(b)])
+				names = await waitForPeers(a, b)
+			}
+			const { nameA, nameB } = names
 
 			// Blind A to B in the rendered roster only. B still sees A, which is
 			// the asymmetric shape the description has to recognise.
