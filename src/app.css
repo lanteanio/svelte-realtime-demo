@@ -10,6 +10,33 @@ html {
 	scrollbar-gutter: stable;
 }
 
+/* Control vocabulary, recorded because it is currently unanimous and that is
+ * worth keeping rather than rediscovering.
+ *
+ * Across the demo action surfaces `btn-warning` means one thing: a control that
+ * INDUCES chaos or failure on purpose - a retry storm, a shed simulation, a
+ * deliberately failing order, a paused subscription, a forced takeover. Nine of
+ * the eleven warning-dressed controls are one of those, so the yellow reads as
+ * a promise that pressing this makes something go wrong on purpose, which is
+ * what a visitor needs to know before pressing it.
+ *
+ * Two are not, and they are named here rather than left for someone to find and
+ * conclude the rule is decorative: the board's "Shuffle notes" FAB, where the
+ * circle buttons carry accent/warning/info as differentiation rather than
+ * meaning, and the notification inbox's "Dismiss", where warning is the negative
+ * half of a pair against a success-dressed "Got it". Neither induces failure.
+ * Whether they should be brought into line is a design decision, not a cleanup.
+ *
+ * It is NOT the dress for a destructive action. Those are `btn-outline
+ * btn-error` and they go through the confirm step in $lib/confirm-destructive;
+ * a destructive control wearing warning would read as "this breaks something
+ * for the demo" when it actually erases state every other visitor is watching.
+ *
+ * There is no rule here to enforce mechanically - whether a control induces
+ * failure is a judgement about intent, not a property a sweep can measure -
+ * which is why it is written down where the next person picking a button colour
+ * will be. */
+
 /* The coarse-pointer control floor, applied once instead of per control.
  *
  * A finger is not a mouse: the compact sizes are 32px (`-sm`) and 24px
