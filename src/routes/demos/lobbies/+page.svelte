@@ -325,6 +325,7 @@
 							bind:value={draft}
 							maxlength="140"
 							placeholder="Say something..."
+							aria-label="Message"
 							disabled={sending}
 							data-testid="lob-composer-input"
 						/>

@@ -227,6 +227,7 @@
 				type="search"
 				class="input input-sm input-bordered flex-1"
 				placeholder="Filter demos (try 'lock', 'push', 'cron')..."
+				aria-label="Filter demos"
 				bind:value={demoFilter}
 				data-testid="demos-filter"
 				autocomplete="off"

@@ -154,6 +154,7 @@
 			class="input input-bordered flex-1"
 			bind:value={draft}
 			placeholder={denied ? 'Cannot send to a denied room' : 'Type a message...'}
+			aria-label="Message"
 			disabled={denied || sending}
 			data-testid="message-input"
 		/>

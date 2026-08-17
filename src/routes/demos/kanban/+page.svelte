@@ -384,6 +384,7 @@
 							bind:value={drafts[col.id]}
 							disabled={board.readOnly}
 							placeholder="Add a card..."
+							aria-label="Add a card to {col.label}"
 							data-testid="kb-add-input-{col.id}"
 						/>
 						<button

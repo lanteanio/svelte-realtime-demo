@@ -347,6 +347,7 @@
 					spellcheck="false"
 					maxlength="4000"
 					placeholder="Type here - the other panel (and every other tab) sees the same text."
+					aria-label="Shared document, {mode} selections"
 					oninput={applyEdit}
 					bind:this={textareaRefs[mode]}
 					data-testid="{testPrefix}-textarea"
