@@ -45,4 +45,25 @@ html {
 	.btn {
 		min-width: 2.75rem;
 	}
+
+	/* Selector controls, where the target is not always the drawn box.
+	 *
+	 * A range is operated by dragging its own track, so nothing around it can
+	 * stand in for it and the control itself has to meet the floor. Its box is
+	 * a track rather than a glyph, so a taller one is the ordinary touch
+	 * adaptation and not a redesign.
+	 *
+	 * A checkbox or a toggle is also operated by clicking its label, so the
+	 * label is a real target and carrying the floor there leaves the drawn
+	 * control exactly as designed - which is the outcome growing the box
+	 * cannot give. Only a direct child counts: a label wrapping a whole row of
+	 * controls is not the target for any one of them. */
+	.range {
+		min-height: 2.75rem;
+	}
+
+	label:has(> .checkbox, > .toggle) {
+		min-height: 2.75rem;
+		align-items: center;
+	}
 }

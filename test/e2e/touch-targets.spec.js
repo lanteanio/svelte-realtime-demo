@@ -29,7 +29,14 @@ const routes = [
 // the @media (pointer: coarse) block in src/app.css by hand, because a test
 // that derived its own selector from the stylesheet would pass by construction.
 const FLOOR = 44
-const CONTROLS = '.btn, .input, .select, .file-input, .textarea, .tab'
+const CONTROLS = '.btn, .input, .select, .file-input, .textarea, .tab, .range, .checkbox, .toggle'
+// A checkbox and a toggle are activated by their label as well as their box, so
+// the label is a real target and the policy puts the floor there, leaving the
+// drawn control alone. Measuring the box for these would flag a control whose
+// target is genuinely large enough. Direct parent only, matching the
+// `label:has(> .checkbox, > .toggle)` rule the stylesheet actually states - a
+// label wrapping a whole row is not the target for any one control in it.
+const LABEL_ACTIVATED = '.checkbox, .toggle'
 
 test.describe('coarse-pointer control floor', () => {
 	test('every rendered control meets the 44px floor on a touch device', async ({ browser }) => {
@@ -45,11 +52,13 @@ test.describe('coarse-pointer control floor', () => {
 				// and least reliable part of the suite. Controls that appear only
 				// after data lands are simply not measured here.
 				await page.goto(route, { waitUntil: 'domcontentloaded' })
-				const found = await page.evaluate(({ selector, floor }) => {
+				const found = await page.evaluate(({ selector, labelActivated, floor }) => {
 					const visible = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length > 0)
 					return visible
 						.map((el) => {
-							const rect = el.getBoundingClientRect()
+							const parent = el.parentElement
+							const target = el.matches(labelActivated) && parent?.tagName === 'LABEL' ? parent : el
+							const rect = target.getBoundingClientRect()
 							// getAttribute, not className: on an SVG element className is
 							// an SVGAnimatedString and would stringify to [object].
 							const cls = el.getAttribute('class') ?? ''
@@ -59,7 +68,7 @@ test.describe('coarse-pointer control floor', () => {
 						// after subpixel layout, and failing that would be noise
 						// rather than a control anyone can miss with a finger.
 						.filter((m) => m.h < floor - 0.5 || (/(^|\s)btn(\s|$)/.test(m.cls) && m.w < floor - 0.5))
-				}, { selector: CONTROLS, floor: FLOOR })
+				}, { selector: CONTROLS, labelActivated: LABEL_ACTIVATED, floor: FLOOR })
 
 				for (const item of found) {
 					offenders.push(`${route}  ${Math.round(item.w)}x${Math.round(item.h)}  "${item.text}"  [${item.cls}]`)
