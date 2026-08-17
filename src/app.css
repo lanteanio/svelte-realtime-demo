@@ -9,3 +9,40 @@
 html {
 	scrollbar-gutter: stable;
 }
+
+/* The coarse-pointer control floor, applied once instead of per control.
+ *
+ * A finger is not a mouse: the compact sizes are 32px (`-sm`) and 24px
+ * (`-xs`), and this app had over a hundred controls sitting on them. The
+ * alternative was a `pointer-coarse:min-h-11` utility on every one of them,
+ * which costs a class on every control in every page, is invisible when it is
+ * MISSING, and silently fails to cover the next control anybody adds. Stating
+ * the policy once means a control cannot opt out of it by being forgotten.
+ *
+ * Unlayered on purpose: daisyUI's component rules live in a cascade layer, and
+ * unlayered styles beat layered ones regardless of specificity, so this needs
+ * no `!important` and no selector escalation to win over `.btn-sm`.
+ *
+ * Height is the floor that matters; the width floor is for icon-only buttons,
+ * which are square and would otherwise stay 32px wide while growing taller.
+ *
+ * Deliberately NOT included: `.toggle`, `.checkbox` and `.range`. Their box IS
+ * the visual design, so growing it changes the appearance rather than the hit
+ * area, and the correct fix expands the target around an unchanged control -
+ * which collides with the pseudo-elements daisyUI already uses to draw them.
+ * That is a separate change with its own visual verification, not a line to
+ * sneak into this one. */
+@media (pointer: coarse) {
+	.btn,
+	.input,
+	.select,
+	.file-input,
+	.textarea,
+	.tab {
+		min-height: 2.75rem;
+	}
+
+	.btn {
+		min-width: 2.75rem;
+	}
+}
