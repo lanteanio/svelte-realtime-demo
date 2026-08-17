@@ -220,7 +220,7 @@
 			</button>
 		</div>
 		<div class="tooltip" data-tip="Shuffle notes">
-			<button class="btn btn-lg btn-circle btn-warning" onclick={() => shuffleNotes(boardId)}>
+			<button class="btn btn-lg btn-circle btn-neutral" onclick={() => shuffleNotes(boardId)}>
 				<Shuffle size={20} />
 			</button>
 		</div>

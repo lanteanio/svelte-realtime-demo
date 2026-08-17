@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
+import { clickFabAction } from './board-helpers.js';
 
 let boardUrl;
 
@@ -35,10 +36,15 @@ test.describe.serial('FAB Menu Actions', () => {
 		await fab.focus();
 		await page.waitForTimeout(500);
 
-		await expect(page.locator('.btn-secondary')).toBeVisible(); // Tidy
-		await expect(page.locator('.btn-accent')).toBeVisible(); // Rearrange
-		await expect(page.locator('.btn-warning')).toBeVisible(); // Shuffle
-		await expect(page.locator('.btn-info')).toBeVisible(); // Group by author
+		// Located by the label each action carries, not by the colour it wears.
+		// The colours here are differentiation between four sibling buttons, so
+		// asserting them pinned a design choice rather than the menu's contents:
+		// a renamed or removed action passes as long as some element keeps the
+		// class, and re-dressing a button fails a test that has nothing to do
+		// with dress. The tooltip is what a visitor reads to tell them apart.
+		for (const label of ['Tidy z-order', 'Re-arrange by color', 'Shuffle notes', 'Group by author']) {
+			await expect(page.locator(`[data-tip="${label}"] button`)).toBeVisible();
+		}
 	});
 
 	test('tidy notes rearranges z-order', async ({ page }) => {
@@ -90,10 +96,7 @@ test.describe.serial('FAB Menu Actions', () => {
 			notes.map((n) => ({ left: n.style.left, top: n.style.top }))
 		);
 
-		const fab = page.locator('.fab-trigger');
-		await fab.focus();
-		await page.waitForTimeout(500);
-		await page.locator('.btn-warning').click();
+		await clickFabAction(page, 'Shuffle notes');
 		await page.waitForTimeout(2000);
 
 		const positionsAfter = await getNotes(page).evaluateAll((notes) =>

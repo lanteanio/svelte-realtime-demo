@@ -13,19 +13,19 @@ html {
 /* Control vocabulary, recorded because it is currently unanimous and that is
  * worth keeping rather than rediscovering.
  *
- * Across the demo action surfaces `btn-warning` means one thing: a control that
- * INDUCES chaos or failure on purpose - a retry storm, a shed simulation, a
- * deliberately failing order, a paused subscription, a forced takeover. Nine of
- * the eleven warning-dressed controls are one of those, so the yellow reads as
- * a promise that pressing this makes something go wrong on purpose, which is
- * what a visitor needs to know before pressing it.
+ * `btn-warning` means one thing here: a control that INDUCES chaos or failure on
+ * purpose - a retry storm, a shed simulation, a deliberately failing order, a
+ * paused subscription, a forced takeover. All nine that wear it are one of
+ * those, so the yellow reads as a promise that pressing this makes something go
+ * wrong deliberately, which is what a visitor needs before pressing it.
  *
- * Two are not, and they are named here rather than left for someone to find and
- * conclude the rule is decorative: the board's "Shuffle notes" FAB, where the
- * circle buttons carry accent/warning/info as differentiation rather than
- * meaning, and the notification inbox's "Dismiss", where warning is the negative
- * half of a pair against a success-dressed "Got it". Neither induces failure.
- * Whether they should be brought into line is a design decision, not a cleanup.
+ * Two used to sit outside that and were brought in rather than left to make the
+ * colour mean nothing in particular: the board's "Shuffle notes" FAB, where the
+ * circle buttons carry colour as differentiation between siblings and neutral
+ * says that without borrowing the chaos reading, and the notification inbox's
+ * "Dismiss", now ghost so the success-dressed "Got it" carries the pair on its
+ * own. Neither induces failure, and a vocabulary that holds except twice
+ * predicts nothing.
  *
  * It is NOT the dress for a destructive action. Those are `btn-outline
  * btn-error` and they go through the confirm step in $lib/confirm-destructive;

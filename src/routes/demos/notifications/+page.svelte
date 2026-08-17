@@ -255,7 +255,7 @@
 								<button class="btn btn-sm btn-success" onclick={() => ackIncoming(card.id, 'ok')} data-testid="inbox-ack-ok">
 									Got it
 								</button>
-								<button class="btn btn-sm btn-warning" onclick={() => ackIncoming(card.id, 'dismiss')} data-testid="inbox-ack-dismiss">
+								<button class="btn btn-sm btn-ghost" onclick={() => ackIncoming(card.id, 'dismiss')} data-testid="inbox-ack-dismiss">
 									Dismiss
 								</button>
 							</div>
