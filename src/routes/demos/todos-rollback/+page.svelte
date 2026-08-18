@@ -241,11 +241,17 @@
 		</div>
 	</div>
 
-	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
+	<aside class="text-xs opacity-50 leading-relaxed space-y-2" data-testid="tr-mechanism-note">
 		<p>
 			Server: each handler is plain <code>live(async (ctx, args) =&gt; ...)</code>.
-			With <code>forceFail</code> in the args, the handler throws
-			<code>LiveError('FORCED', ...)</code> immediately.
+			With <code>forceFail</code> in the args, the handler waits 400ms and
+			then throws <code>LiveError('FORCED', ...)</code>. The wait is
+			deliberate and it is the only artificial thing here: rejecting at once
+			made the placeholder's whole life a single local round trip, so the
+			rows this page is about appeared and vanished inside a few tens of
+			milliseconds and you saw a toast over a list that never visibly
+			changed. The failure is already artificial, so delaying it costs
+			nothing real and is what makes the rollback observable.
 		</p>
 		<p>
 			Client: <code>addTodo.createOptimistic(store, [args], change)</code>

@@ -284,6 +284,25 @@ test.describe('/demos/todos-rollback', () => {
 		await expect(row).toHaveCount(0, { timeout: 10_000 })
 	})
 
+	// The page explains its own mechanism, and that explanation is part of the
+	// demo rather than decoration: a visitor reads it to learn what the
+	// primitive does. It claimed the handler throws IMMEDIATELY, which stopped
+	// being true the moment a delay was added to make the rollback visible - so
+	// the page was teaching one thing while doing another, and the delay looked
+	// like latency rather than a deliberate choice.
+	test('the mechanism note states the deliberate delay instead of claiming an immediate throw', async ({ page }) => {
+		await open(page)
+		// The layout contributes an <aside> of its own, so target the page's
+		// note rather than whichever one happens to come first.
+		const aside = page.getByTestId('tr-mechanism-note')
+		await expect(aside).toContainText('400ms')
+		await expect(aside).toContainText('FORCED')
+		await expect(
+			aside,
+			'the note must not describe a throw the handler no longer performs'
+		).not.toContainText('immediately')
+	})
+
 	test('Spam x5 with Force-fail OFF adds five todos', async ({ page }) => {
 		await open(page)
 		await clearAll(page)
