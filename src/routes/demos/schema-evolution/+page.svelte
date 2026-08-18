@@ -27,6 +27,7 @@
 		resetCounters
 	} from '$live/demos/schema-evolution'
 	import { subscribeAt } from 'svelte-realtime/testing/client'
+	import { createNewestWins } from '$lib/newest-wins'
 	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let { data } = $props()
@@ -42,10 +43,27 @@
 	let v1List = $state([])
 	let v1Off = null
 
+	// Both panels display the NEWEST observation of each counter rather than the
+	// last frame to arrive. The publishes carry absolute values from whichever
+	// replica served the click, and crud merge replaces by key on arrival, so two
+	// clicks on different replicas reach two clients in opposite orders and one of
+	// them settles on the lower number permanently. See $lib/newest-wins for why
+	// modifiedAt is the ordering key and seq cannot be.
+	//
+	// A gate per panel, not one shared: the same counter carries a different
+	// provenance in each panel (loader/publish against migrate[1]), which is the
+	// thing this page exists to show, and a shared gate would let one panel's rows
+	// answer for the other's.
+	const newestV1 = createNewestWins()
+	const newestV2 = createNewestWins()
+	let v2List = $state([])
+	$effect(() => { v2List = newestV2($counter) })
+
+
 	onMount(() => {
 		counterAsV1Store = subscribeAt(counter, { schemaVersion: 1 })
 		v1Off = counterAsV1Store.subscribe((v) => {
-			v1List = Array.isArray(v) ? v.slice() : []
+			v1List = newestV1(v)
 		})
 	})
 	onDestroy(() => {
@@ -172,7 +190,7 @@
 				<h2 class="card-title text-sm">Live (v2): subscribed normally</h2>
 				<p class="text-xs opacity-60 grow-0">no <code>schemaVersion</code> on the wire; migrate chain skipped.</p>
 				<ul class="space-y-2" data-testid="v2-list">
-					{#each $counter ?? [] as c (c.id)}
+					{#each v2List as c (c.id)}
 						<li class="flex items-center gap-2" data-testid="v2-card">
 							<span class="inline-block w-3 h-3 rounded shrink-0" style:background={c.color}></span>
 							<span class="text-sm font-medium" data-testid="v2-label">{c.label}</span>
