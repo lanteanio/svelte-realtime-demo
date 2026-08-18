@@ -211,4 +211,35 @@ test.describe('/demos/schema-evolution', () => {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
 	})
+	// The state RPC feeds the teaching half of this page: the registration
+	// snippet and the server-version chip come from the same call. When it
+	// failed, the page said nothing - an empty code box where the snippet
+	// should be, and a chip still reading "server version: 2", which is the
+	// CLIENT default and not something the server ever confirmed. A visitor
+	// could not tell a broken page from a page whose server disagrees with it.
+	//
+	// Reached by closing the socket, which is the only way to make the RPC
+	// actually reject; asserting the error markup exists in the DOM proves
+	// nothing about whether anything can reach it.
+	test('a failed state fetch is explained, and withholds what it could not confirm', async ({ page }) => {
+		test.setTimeout(60_000)
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => ws.close())
+		await page.goto('/demos/schema-evolution')
+
+		const error = page.getByTestId('state-error')
+		await expect(error).toBeVisible({ timeout: 20_000 })
+		await expect(error).toContainText('Could not load the stream registration')
+		// The cause is named, not swallowed into a generic apology.
+		await expect(error).toContainText('DISCONNECTED')
+
+		// Both halves of that call are withheld rather than guessed at. The empty
+		// <pre> was the original complaint, and the chip is the subtler one: a
+		// client default rendered as a server fact.
+		await expect(page.getByTestId('migrate-source')).toHaveCount(0)
+		await expect(
+			page.getByTestId('server-version'),
+			'the version chip must not assert a value the server never confirmed'
+		).toHaveCount(0)
+	})
+
 })
