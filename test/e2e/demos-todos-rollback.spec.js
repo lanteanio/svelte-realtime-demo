@@ -357,8 +357,13 @@ test.describe('/demos/todos-rollback', () => {
 
 			await expectTouchTarget(page.getByTestId('todo-input'), { minWidth: 0 })
 			await expectTouchTarget(page.getByTestId('add-button'))
-			// Checkbox floor is the 24px WCAG AA minimum, not the 44px button floor.
-			await expectTouchTarget(li.locator('[data-testid^="todo-toggle-"]'), { minWidth: 24, minHeight: 24 })
+			// This checkbox is BARE - nothing wraps it - so there is no label to
+			// carry the target and the box itself has to meet the full 44px
+			// coarse-pointer floor. Blessing 24px here was the AA minimum
+			// standing in for the policy this app actually states, which left the
+			// one selector control a finger has to hit as the smallest thing on
+			// the row.
+			await expectTouchTarget(li.locator('[data-testid^="todo-toggle-"]'))
 			await expectTouchTarget(li.locator('[data-testid^="todo-remove-"]'))
 
 			await li.locator('[data-testid^="todo-remove-"]').click()

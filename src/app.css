@@ -53,12 +53,12 @@ html {
  * Height is the floor that matters; the width floor is for icon-only buttons,
  * which are square and would otherwise stay 32px wide while growing taller.
  *
- * Deliberately NOT included: `.toggle`, `.checkbox` and `.range`. Their box IS
- * the visual design, so growing it changes the appearance rather than the hit
- * area, and the correct fix expands the target around an unchanged control -
- * which collides with the pseudo-elements daisyUI already uses to draw them.
- * That is a separate change with its own visual verification, not a line to
- * sneak into this one. */
+ * The selector controls need a different rule rather than an exemption, and the
+ * block below states it. An earlier version of this comment excused them on the
+ * grounds that expanding their target collides with pseudo-elements daisyUI
+ * draws them with; that was simply wrong - it draws all three with
+ * appearance:none plus border and box-shadow and uses no ::before or ::after on
+ * any of them. */
 @media (pointer: coarse) {
 	.btn,
 	.input,
@@ -92,5 +92,17 @@ html {
 	label:has(> .checkbox, > .toggle) {
 		min-height: 2.75rem;
 		align-items: center;
+	}
+
+	/* A BARE checkbox or toggle - one with no label wrapping it - has no target
+	 * but itself, so the box has to carry the floor even though that grows the
+	 * drawn control. There is no third option: the label trick above needs a
+	 * label to put the target on. This is why the rule is split rather than
+	 * applied to every selector control - a wrapped control keeps its designed
+	 * size because something else is already big enough to hit. */
+	.checkbox:not(label > .checkbox),
+	.toggle:not(label > .toggle) {
+		min-height: 2.75rem;
+		min-width: 2.75rem;
 	}
 }
