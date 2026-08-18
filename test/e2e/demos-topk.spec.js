@@ -272,7 +272,15 @@ test.describe('/demos/topk', () => {
 			for (const row of snapshot) {
 				expect(row.progress).toBeGreaterThanOrEqual(0)
 				expect(row.progress).toBeLessThanOrEqual(100)
-				expect(row.progress).toBeCloseTo((row.count / totalCount) * 100, 4)
+				// Precision 3, not 4, and the difference is not taste. progress is parsed
+				// out of style.width, which the browser serialises rounded to four
+				// decimals - so a tolerance of 0.00005 is exactly the largest rounding
+				// error that representation can produce, and any share landing on the
+				// half-ulp fails. A tier lost a test to 19.53125 arriving as 19.5312.
+				// Three decimals clears the rounding by an order of magnitude while
+				// staying far tighter than any real mismatch: computing the bar against
+				// the leader instead of the total moves it by whole percent.
+				expect(row.progress).toBeCloseTo((row.count / totalCount) * 100, 3)
 			}
 			// Valid aggregate rows always carry positive counts (asserted above),
 			// so leaderCount is positive whenever a bar exists. The markup's
