@@ -48,7 +48,15 @@
 	// rows that differ only by a number nobody needs - the reader wants to know
 	// what was rejected and how many, and the count carries the multiplicity
 	// better than five near-identical sentences do.
+	// Removal keys on the id, never on object identity. `toasts` is $state, so
+	// what the array holds is a PROXY of the object that went in - and a timer
+	// closing over the raw object compares proxy against raw, matches nothing,
+	// and filters nothing, leaving that toast on screen forever. It hid because
+	// the coalescing path happens to work: `existing` comes out of
+	// `toasts.find(...)`, so it is already the proxy and compares equal. Only a
+	// lone toast - one error, never repeated - was stranded.
 	let toasts = $state([])
+	const dropToast = (id) => { toasts = toasts.filter((t) => t.id !== id) }
 	function pushToast(label, cause) {
 		const existing = toasts.find((t) => t.cause === cause)
 		if (existing) {
@@ -56,11 +64,11 @@
 			// must not expire on the first one's clock.
 			clearTimeout(existing.timer)
 			existing.count += 1
-			existing.timer = setTimeout(() => { toasts = toasts.filter((t) => t !== existing) }, TOAST_MS)
+			existing.timer = setTimeout(() => dropToast(existing.id), TOAST_MS)
 			return
 		}
 		const entry = { id: crypto.randomUUID(), label, cause, count: 1, timer: null }
-		entry.timer = setTimeout(() => { toasts = toasts.filter((t) => t !== entry) }, TOAST_MS)
+		entry.timer = setTimeout(() => dropToast(entry.id), TOAST_MS)
 		toasts = [...toasts, entry]
 	}
 

@@ -198,6 +198,16 @@ test.describe('/demos/todos-rollback', () => {
 		await expect(page.locator('.alert-error', { hasText: 'FORCED' })).toBeVisible({ timeout: 10_000 })
 		// ...and the optimistic placeholder must be gone (rolled back).
 		await expect(page.getByTestId('todos').locator('li', { hasText: text })).toHaveCount(0, { timeout: 10_000 })
+
+		// And it must LEAVE. A toast that appears is half the contract; one that
+		// never expires occludes the list it was reporting on, which is the whole
+		// reason the stack is bounded. This is the single-toast path - one error,
+		// never repeated - and it is the one that strands, because the coalescing
+		// path removes correctly by accident.
+		await expect(
+			page.getByTestId('todo-toast'),
+			'a single error toast must expire, not sit on the list forever'
+		).toHaveCount(0, { timeout: 10_000 })
 	})
 
 	test('five concurrent forced adds all roll back with no phantom traces', async ({ page }) => {
