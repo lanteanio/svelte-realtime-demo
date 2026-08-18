@@ -352,21 +352,41 @@ test.describe('home + gallery', () => {
 		await waitForWS(page)
 
 		const strip = page.getByTestId('demos-nav-list')
+		// The attribute is the state machine; the MASK is the affordance a visitor
+		// actually sees. Asserting only the attribute passes with every fade rule
+		// deleted, which leaves the finding unfixed and the pin green - so each
+		// state reads the computed mask too, and the masks must differ from each
+		// other or 'which way it continues' is not being said at all.
+		const maskOf = () => strip.evaluate((el) => {
+			const style = getComputedStyle(el)
+			const mask = style.maskImage && style.maskImage !== 'none' ? style.maskImage : style.webkitMaskImage
+			return mask ?? 'none'
+		})
+
 		await expect(strip).toHaveAttribute('data-overflow', 'right')
+		const maskRight = await maskOf()
+		expect(maskRight, 'the right-edge fade must actually be painted').toContain('linear-gradient')
 
 		// Scroll into the middle: both edges now have more behind them.
 		await strip.evaluate((el) => { el.scrollLeft = Math.floor((el.scrollWidth - el.clientWidth) / 2) })
 		await expect(strip).toHaveAttribute('data-overflow', 'both')
+		const maskBoth = await maskOf()
+		expect(maskBoth, 'both-edges fade must be painted').toContain('linear-gradient')
+		expect(maskBoth, 'a fade that never changes says nothing about direction').not.toBe(maskRight)
 
 		// And at the very end it must stop promising more, or the signal means
 		// nothing - a permanently-on fade is the same as no fade.
 		await strip.evaluate((el) => { el.scrollLeft = el.scrollWidth })
 		await expect(strip).toHaveAttribute('data-overflow', 'left')
+		const maskLeft = await maskOf()
+		expect(maskLeft, 'left-edge fade must be painted').toContain('linear-gradient')
+		expect(maskLeft, 'the left state must not paint the mask the right state painted').not.toBe(maskRight)
 
 		// The rail does not scroll at desktop width, so it must claim no overflow
 		// there rather than carrying a stale value across the breakpoint.
 		await page.setViewportSize({ width: 1280, height: 900 })
 		await expect(strip).toHaveAttribute('data-overflow', 'none')
+		expect(await maskOf(), 'a strip that does not scroll must paint no fade at all').toBe('none')
 	})
 
 	test('every gallery tile navigates to its demo with the matching active switcher entry', async ({ page }) => {
