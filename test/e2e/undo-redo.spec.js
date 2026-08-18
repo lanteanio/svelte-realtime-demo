@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
+import { clickFabAction, positions } from './board-helpers.js';
 
 let boardUrl;
 
@@ -162,4 +163,51 @@ test.describe.serial('Undo / Redo', () => {
 			'undo does not reach the server, so the note is still deleted after a reload'
 		).toHaveCount(countBefore - 1, { timeout: 10_000 });
 	});
+	// The board's four FAB actions rewrite EVERY note's position for every
+	// visitor and none of them is confirm-gated, so whether they are safe rests
+	// entirely on undo covering them. It does not, and nothing said so: the
+	// tests above only cover create and delete.
+	//
+	// Pinned as it behaves rather than as it ought to, because asserting the
+	// arrangement comes back would fail today. When undo is made real or
+	// withdrawn, this fails and has to be rewritten - which is the point.
+	test('undo does not reach a FAB shuffle: the board stays shuffled for everyone', async ({ page }) => {
+		test.setTimeout(90_000);
+		await page.goto(boardUrl);
+		await waitForWS(page);
+		await waitForBoardReady(page);
+
+		while ((await getNotes(page).count()) < 2) {
+			await createNote(page, 150 + (await getNotes(page).count()) * 320, 200);
+			await page.waitForTimeout(800);
+		}
+		const before = await positions(page);
+
+		await clickFabAction(page, 'Shuffle notes');
+		await expect
+			.poll(async () => JSON.stringify(await positions(page)), { timeout: 15_000 })
+			.not.toBe(JSON.stringify(before));
+		const shuffled = await positions(page);
+
+		await page.locator('body').click({ position: { x: 5, y: 5 } });
+		await page.keyboard.press('Control+z');
+		await page.waitForTimeout(1500);
+
+		// The local view may or may not repaint; what matters is the server, and
+		// a reload is the only thing that can show it.
+		await page.reload();
+		await waitForWS(page);
+		await waitForBoardReady(page);
+		const afterReload = await positions(page);
+
+		expect(
+			JSON.stringify(afterReload),
+			'undo issues no call, so the shuffle survives a reload and every other visitor keeps seeing it'
+		).toBe(JSON.stringify(shuffled));
+		expect(
+			JSON.stringify(afterReload),
+			'and the arrangement it replaced is not restored'
+		).not.toBe(JSON.stringify(before));
+	});
+
 });
