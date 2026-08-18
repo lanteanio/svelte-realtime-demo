@@ -128,6 +128,14 @@ test.describe('/demos/lobbies', () => {
 			const fromB = `from-b-${Date.now()}`
 			await sendMessage(b, fromB, 'enter')
 			await Promise.all([expect(message(a, fromB)).toHaveCount(1), expect(message(b, fromB)).toHaveCount(1)])
+			// The all-route name sweep cannot reach this field: it only exists once
+			// a lobby has been joined, and no URL gets you there. So the policy is
+			// enforced here, where the join has already happened - otherwise this
+			// control's placeholder is its only description and nothing notices.
+			await expect(
+				a.getByTestId('lob-composer-input'),
+				'the composer needs a name of its own; its placeholder disappears as soon as you type'
+			).toHaveAttribute('aria-label', 'Message')
 			await expect(a.getByTestId('lob-composer-input')).toHaveAttribute('maxlength', '140')
 			await a.getByTestId('lob-composer-input').fill('   ')
 			await expect(a.getByTestId('lob-send')).toBeDisabled()

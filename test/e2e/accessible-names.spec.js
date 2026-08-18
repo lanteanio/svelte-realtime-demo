@@ -18,18 +18,29 @@ import { fileURLToPath } from 'node:url'
 // name EXISTS, not how it is presented.
 
 const DEMOS = fileURLToPath(new URL('../../src/routes/demos', import.meta.url))
+
+// A directory scan finds `/demos/chat`, never `/demos/chat/<roomId>` - the
+// composer that needs a name lives behind the dynamic segment, so scanning
+// alone leaves it unenforced while the sweep looks complete. Deep paths that a
+// scan cannot discover are listed explicitly; a route reachable by URL belongs
+// here rather than in a per-page spec, because here it is covered by the policy
+// itself instead of by somebody remembering.
+const DEEP_ROUTES = ['/demos/chat/general']
+
 const routes = [
 	'/',
 	...readdirSync(DEMOS, { withFileTypes: true })
 		.filter((entry) => entry.isDirectory())
 		.map((entry) => `/demos/${entry.name}`)
-		.sort()
+		.sort(),
+	...DEEP_ROUTES
 ]
 
 test.describe('accessible names', () => {
 	test('no control uses its placeholder as its only name', async ({ page }) => {
 		test.setTimeout(180_000)
 		const unnamed = []
+		const perRoute = {}
 		let measured = 0
 
 		for (const route of routes) {
@@ -54,6 +65,7 @@ test.describe('accessible names', () => {
 				}
 			})
 			measured += found.total
+			perRoute[route] = found.total
 			for (const item of found.unnamed) {
 				unnamed.push(`${route}  <${item.tag}>  placeholder="${item.placeholder.slice(0, 48)}"`)
 			}
@@ -63,6 +75,12 @@ test.describe('accessible names', () => {
 		// would report success while checking nothing, and a green that means
 		// "measured nothing" would retire the policy silently.
 		expect(measured, 'the sweep must find placeholder controls or it proves nothing').toBeGreaterThan(5)
+		// Named controls behind a dynamic segment are the ones a scan misses, so
+		// prove the deep routes actually rendered some rather than trusting that
+		// visiting them did anything.
+		for (const route of DEEP_ROUTES) {
+			expect(perRoute[route] ?? 0, `${route} contributed no controls, so it is not being enforced`).toBeGreaterThan(0)
+		}
 
 		expect(
 			unnamed,
