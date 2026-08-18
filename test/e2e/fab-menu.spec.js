@@ -45,6 +45,18 @@ test.describe.serial('FAB Menu Actions', () => {
 		for (const label of ['Tidy z-order', 'Re-arrange by color', 'Shuffle notes', 'Group by author']) {
 			await expect(page.locator(`[data-tip="${label}"] button`)).toBeVisible();
 		}
+
+		// Shuffle must not wear the warning dress. In this app that yellow means
+		// one thing - a control that induces chaos or failure on purpose - and
+		// Shuffle rearranges a layout rather than breaking anything, so wearing
+		// it made the colour stop predicting behaviour everywhere else. Asserted
+		// as absence of that specific class rather than presence of the current
+		// one, because the vocabulary rule is what must hold; which neutral hue
+		// it wears instead is a design choice that may change.
+		await expect(
+			page.locator('[data-tip="Shuffle notes"] button'),
+			'warning is reserved for controls that deliberately break something'
+		).not.toHaveClass(/btn-warning/);
 	});
 
 	test('tidy notes rearranges z-order', async ({ page }) => {
@@ -52,11 +64,7 @@ test.describe.serial('FAB Menu Actions', () => {
 		await waitForWS(page);
 		await waitForBoardReady(page);
 
-		const fab = page.locator('.fab-trigger');
-		await fab.focus();
-		await page.waitForTimeout(500);
-
-		await page.locator('.btn-secondary').click();
+		await clickFabAction(page, 'Tidy z-order');
 		await page.waitForTimeout(2000);
 
 		expect(await getNotes(page).count()).toBe(3);
@@ -71,10 +79,7 @@ test.describe.serial('FAB Menu Actions', () => {
 			notes.map((n) => ({ left: n.style.left, top: n.style.top }))
 		);
 
-		const fab = page.locator('.fab-trigger');
-		await fab.focus();
-		await page.waitForTimeout(500);
-		await page.locator('.btn-accent').click();
+		await clickFabAction(page, 'Re-arrange by color');
 		await page.waitForTimeout(2000);
 
 		const positionsAfter = await getNotes(page).evaluateAll((notes) =>
@@ -118,10 +123,7 @@ test.describe.serial('FAB Menu Actions', () => {
 			notes.map((n) => ({ left: n.style.left, top: n.style.top }))
 		);
 
-		const fab = page.locator('.fab-trigger');
-		await fab.focus();
-		await page.waitForTimeout(500);
-		await page.locator('.btn-info').click();
+		await clickFabAction(page, 'Group by author');
 		await page.waitForTimeout(2000);
 
 		const positionsAfter = await getNotes(page).evaluateAll((notes) =>

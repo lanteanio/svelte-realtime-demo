@@ -242,6 +242,16 @@ test.describe('/demos/notifications', () => {
 
 			const inboxCard = b.getByTestId('inbox-card').filter({ hasText: text })
 			await expect(inboxCard).toBeVisible({ timeout: 8_000 })
+			// Dismiss must not wear the warning dress. That yellow is reserved
+			// for controls that deliberately induce chaos or failure, and
+			// dismissing a notification does neither - it is simply the quieter
+			// half of a pair against a success-dressed "Got it". Asserted as
+			// absence of the reserved class, so the vocabulary holds while the
+			// replacement hue stays a design choice.
+			await expect(
+				inboxCard.getByTestId('inbox-ack-dismiss'),
+				'warning is reserved for controls that deliberately break something'
+			).not.toHaveClass(/btn-warning/)
 			await inboxCard.getByTestId('inbox-ack-dismiss').click()
 
 			await expect(a.getByTestId('outcome-kind')).toHaveText('dismissed', { timeout: 8_000 })
