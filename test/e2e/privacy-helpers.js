@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { waitForWS, watchWire } from './helpers.js'
+import { formatDeliverySince, markDelivery } from './wire-report.js'
 
 /**
  * Thrown when a round boundary crossed a sequence that can only be asserted
@@ -37,6 +38,10 @@ function noteRoll(description) {
 }
 
 export async function openPrivacy(page, url = '/demos/privacy') {
+	// Before the navigation: the wire record only sees sockets opened after it
+	// exists, and what it is here to answer - whether the aggregate published -
+	// is a question about frames that arrive seconds later.
+	watchWire(page)
 	await page.goto(url)
 	await waitForWS(page)
 	await expect(page.getByTestId('pv-round-hint')).toBeVisible({ timeout: 10_000 })
@@ -190,6 +195,11 @@ export async function protectedSnapshot(page) {
 export async function submitMood(page, score, { onRoll = 'throw' } = {}) {
 	const startRoundId = (await roundState(page)).roundId
 	const before = (await rawState(page)).n
+	// Marked BEFORE the click. The publish this waits for is the one the click
+	// causes, and the record counts deliveries cumulatively, so a count read
+	// afterwards cannot be separated from what had already arrived.
+	const wire = watchWire(page)
+	const mark = markDelivery(wire, 'rawMood')
 	await page.getByTestId(`pv-submit-${score}`).click()
 	await expect(page.getByTestId('pv-submit-note')).toContainText(`Submitted ${score}/5`)
 	await expect(page.getByTestId(`pv-submit-${score}`)).toHaveClass(/btn-primary/)
@@ -198,19 +208,32 @@ export async function submitMood(page, score, { onRoll = 'throw' } = {}) {
 	// count read after it belongs to a different window and cannot be
 	// compared to `before` at all, so its value must not decide the poll.
 	let rolledTo = null
-	await expect.poll(async () => {
+	const counted = async () => {
 		const { roundId } = await roundState(page)
 		if (roundId !== startRoundId) {
 			rolledTo = roundId
 			return true
 		}
 		return (await rawState(page)).n > before
-	}, {
-		timeout: 10_000,
-		message:
-			`the raw aggregate never counted the ${score}/5 submission: n stayed at ${before} ` +
-			`for 10s inside round ${startRoundId}, with no round boundary to explain it`
-	}).toBe(true)
+	}
+	try {
+		await expect.poll(counted, {
+			timeout: 10_000,
+			message:
+				`the raw aggregate never counted the ${score}/5 submission: n stayed at ${before} ` +
+				`for 10s inside round ${startRoundId}, with no round boundary to explain it`
+		}).toBe(true)
+	} catch (error) {
+		// The note asserted above renders only after the RPC resolves, so the
+		// submission is already proven accepted by the time this fails. What is
+		// left is whether the aggregate published at all, which no number on the
+		// page can answer and the wire can.
+		error.message = `${error.message}
+
+--- aggregate probe ---
+${formatDeliverySince(wire, mark)}`
+		throw error
+	}
 
 	if (rolledTo === null) return { roundId: startRoundId, rolled: false }
 	const rolled = new RoundRolled(startRoundId, rolledTo, `waiting for the raw aggregate to count a ${score}/5 submission`)
