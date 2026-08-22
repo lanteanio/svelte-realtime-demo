@@ -275,4 +275,54 @@ test.describe('WebSocket Connection', () => {
 		// but definitely not 3x or more
 		console.log(`Total WS connections created: ${wsConnections.length}`);
 	});
+
+	test('a bundle that arrives and never runs is told apart from one that never arrived', async ({ page }) => {
+		// Serve the entry chunk as valid, empty JavaScript: a 200 that parses,
+		// executes, and does nothing. From outside, the result is identical to a
+		// dead bundle - no client, no socket, a status frozen at its
+		// server-rendered value - and the fix is the opposite one. Re-fetching an
+		// asset that arrived intact cannot help, so a report that says "dead
+		// bundle" here sends the reader to the network and spends the recovery
+		// budget on the wrong thing.
+		await page.route('**/_app/immutable/entry/*.js', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/javascript', body: '' })
+		);
+		await page.goto('/', { waitUntil: 'commit' });
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'a page with no running client must fail the wait').not.toBeNull();
+		expect(failure.message).toContain('BUNDLE DELIVERED, CLIENT SILENT');
+		expect(failure.message).toContain('200');
+		// The two readings this one has to be told apart from. The proven wording
+		// is reserved for a delivery failure and gates the reload, so reaching it
+		// here would reload a page whose bundle was never the problem.
+		expect(failure.message).not.toContain('PAGE NEVER HYDRATED');
+		expect(failure.message).not.toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.rehydrateReloads, 'a delivered bundle is not fixed by re-fetching it').toBe(0);
+	});
+
+	test('a document that never asks for a client is not reported as a network fault', async ({ page }) => {
+		// The third member of the family: the document itself came back without
+		// the client in it. Nothing failed, nothing was slow, and there is no
+		// asset to name - which is exactly why the inferred wording used to sit
+		// here, describing a page that never hydrated without saying that what it
+		// was served never contained a client to hydrate.
+		await page.route('**/*', (route) => {
+			if (route.request().resourceType() !== 'document') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'text/html',
+				body: '<!doctype html><html><body><p>served without a client</p></body></html>'
+			});
+		});
+		await page.goto('/', { waitUntil: 'commit' });
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'a page with no client must fail the wait').not.toBeNull();
+		expect(failure.message).toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message).not.toContain('PAGE NEVER HYDRATED');
+		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.rehydrateReloads, 'there is no asset here to re-fetch').toBe(0);
+	});
+
 });

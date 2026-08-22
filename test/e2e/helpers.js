@@ -112,6 +112,14 @@ function installConnectionProbe() {
 }
 
 /**
+ * The one request whose failure cannot mean anything else: the entry bundle the
+ * document loads to start SvelteKit at all. Shared by the proof below and the
+ * delivery record above it, because a proof and an inference that disagreed
+ * about which asset they were talking about would be worse than either alone.
+ */
+const ENTRY_CHUNK = /\/_app\/immutable\/entry\/[^/]+\.js($|\?)/;
+
+/**
  * Watch the faults a page cannot report about itself.
  *
  * The in-page probe can only describe a page whose JavaScript is running. When
@@ -123,7 +131,15 @@ function installConnectionProbe() {
  * never appeared - about a page that never got as far as opening one.
  */
 function watchPageFaults(page) {
-	const faults = { requests: [], errors: [] };
+	const faults = { requests: [], errors: [], entryChunks: [] };
+	// A failed request is evidence; a SUCCESSFUL one is evidence too, and it was
+	// being thrown away. A page with no socket and a delivered bundle is a
+	// different fault from a page with no socket and no bundle: the first
+	// excludes the network, which is the only thing the recovery reload fixes.
+	const onResponse = (response) => {
+		if (!ENTRY_CHUNK.test(response.url())) return;
+		faults.entryChunks.push({ url: response.url(), status: response.status(), ok: response.ok() });
+	};
 	const onRequestFailed = (request) => {
 		faults.requests.push({
 			url: request.url(),
@@ -132,11 +148,13 @@ function watchPageFaults(page) {
 		});
 	};
 	const onPageError = (error) => faults.errors.push(error.message);
+	page.on('response', onResponse);
 	page.on('requestfailed', onRequestFailed);
 	page.on('pageerror', onPageError);
 	return {
 		faults,
 		stop() {
+			page.off('response', onResponse);
 			page.off('requestfailed', onRequestFailed);
 			page.off('pageerror', onPageError);
 		}
@@ -180,9 +198,7 @@ function provenHydrationFailure(faults) {
 	// what keeps the reload gated on proof rather than on a symptom, and the
 	// reload's safety argument depends on that exactness - a page whose bundle
 	// never ran has no client state to lose, but a live one does.
-	const assetFailures = faults.requests.filter(
-		(r) => !isDeliberateAbort(r) && /\/_app\/immutable\/entry\/[^/]+\.js($|\?)/.test(r.url)
-	);
+	const assetFailures = faults.requests.filter((r) => !isDeliberateAbort(r) && ENTRY_CHUNK.test(r.url));
 	if (assetFailures.length) return `${assetFailures[0].failure} loading ${assetFailures[0].url}`;
 	const importErrors = faults.errors.filter((m) => /dynamically imported module|module script failed/i.test(m));
 	if (importErrors.length) return importErrors[0];
@@ -205,7 +221,22 @@ function diagnoseHydration(probe, faults) {
 	// happening means nothing ran. Hedged deliberately - this one is inferred.
 	const appSockets = (probe?.sockets ?? []).filter((s) => isAppSocketUrl(s.url));
 	if (probe && appSockets.length === 0 && probe.states.length <= 1) {
-		return 'PAGE LIKELY NEVER HYDRATED: no app socket was constructed and the status never left its server-rendered value.';
+		// Same symptom, three different faults, and the recovery reload only
+		// addresses one of them. Which is why this stops at what the requests
+		// prove and does not promote any of it to the proven wording above.
+		const chunks = faults?.entryChunks ?? [];
+		const delivered = chunks.filter((c) => c.ok);
+		if (delivered.length) {
+			return `BUNDLE DELIVERED, CLIENT SILENT: the entry chunk arrived (${delivered[0].status} ${delivered[0].url}) and no app socket was constructed. Delivery is therefore excluded, and a reload would not fix this - the client either never executed or executed without opening a socket.`;
+		}
+		if (chunks.length === 0) {
+			return 'BUNDLE NEVER REQUESTED: no entry chunk request was seen at all, so the document never reached the point of loading the client. That is a fault in what was served, not in the network under it.';
+		}
+		// Defensive on purpose. This runs only when something is already broken,
+		// and a reporter that throws while reporting replaces the evidence with a
+		// stack trace about itself - the failure mode a mutation of the branch
+		// above produced, and the one this code exists to prevent.
+		return `PAGE LIKELY NEVER HYDRATED: the entry chunk answered ${chunks[0]?.status ?? 'nothing legible'}, no app socket was constructed, and the status never left its server-rendered value.`;
 	}
 	return null;
 }
