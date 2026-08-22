@@ -357,36 +357,56 @@ test.describe('home + gallery', () => {
 		// deleted, which leaves the finding unfixed and the pin green - so each
 		// state reads the computed mask too, and the masks must differ from each
 		// other or 'which way it continues' is not being said at all.
-		const maskOf = () => strip.evaluate((el) => {
+		// Reading the computed mask proves a fade is painted; it does not say WHICH
+		// edge carries it, and a fade on the wrong edge points a visitor away from
+		// the content that continues. Swapping the two CSS rules would satisfy
+		// 'a gradient exists' and 'the states differ' while telling every phone
+		// visitor the opposite of the truth.
+		//
+		// So the mask is resolved to the EDGES it fades. The computed value is the
+		// instruction the browser paints from - direction plus stop list - so this
+		// reads the real thing rather than a marker beside it, short of sampling
+		// pixels, which would need an image decoder this suite does not carry.
+		const fadedEdges = () => strip.evaluate((el) => {
 			const style = getComputedStyle(el)
 			const mask = style.maskImage && style.maskImage !== 'none' ? style.maskImage : style.webkitMaskImage
-			return mask ?? 'none'
+			if (!mask || mask === 'none') return []
+			const inner = /linear-gradient\((.*)\)/s.exec(mask)
+			if (!inner) return []
+			// Split on top-level commas only: colour functions carry their own.
+			const parts = inner[1].split(/,(?![^(]*\))/).map((part) => part.trim())
+			const direction = parts[0].startsWith('to ') ? parts.shift() : 'to bottom'
+			const clear = (stop) => /transparent|rgba\([^)]*,\s*0\s*\)/.test(stop)
+			const startEdge = direction === 'to right' ? 'left' : 'right'
+			const endEdge = direction === 'to right' ? 'right' : 'left'
+			const edges = []
+			if (clear(parts[0])) edges.push(startEdge)
+			if (clear(parts[parts.length - 1])) edges.push(endEdge)
+			return edges.sort()
 		})
 
+		// At the start the content continues to the RIGHT, so that is the edge
+		// that must fade - and the left edge, where there is nothing more, must
+		// not.
 		await expect(strip).toHaveAttribute('data-overflow', 'right')
-		const maskRight = await maskOf()
-		expect(maskRight, 'the right-edge fade must actually be painted').toContain('linear-gradient')
+		expect(await fadedEdges(), 'the fade must sit on the edge the content continues past').toEqual(['right'])
 
-		// Scroll into the middle: both edges now have more behind them.
+		// Scrolled into the middle: both edges have more behind them.
 		await strip.evaluate((el) => { el.scrollLeft = Math.floor((el.scrollWidth - el.clientWidth) / 2) })
 		await expect(strip).toHaveAttribute('data-overflow', 'both')
-		const maskBoth = await maskOf()
-		expect(maskBoth, 'both-edges fade must be painted').toContain('linear-gradient')
-		expect(maskBoth, 'a fade that never changes says nothing about direction').not.toBe(maskRight)
+		expect(await fadedEdges(), 'with more in both directions both edges must fade').toEqual(['left', 'right'])
 
-		// And at the very end it must stop promising more, or the signal means
-		// nothing - a permanently-on fade is the same as no fade.
+		// And at the very end the promise must move to the left, or a fade that
+		// never moves is the same as no fade at all.
 		await strip.evaluate((el) => { el.scrollLeft = el.scrollWidth })
 		await expect(strip).toHaveAttribute('data-overflow', 'left')
-		const maskLeft = await maskOf()
-		expect(maskLeft, 'left-edge fade must be painted').toContain('linear-gradient')
-		expect(maskLeft, 'the left state must not paint the mask the right state painted').not.toBe(maskRight)
+		expect(await fadedEdges(), 'at the end the fade must point back the way it came').toEqual(['left'])
 
 		// The rail does not scroll at desktop width, so it must claim no overflow
 		// there rather than carrying a stale value across the breakpoint.
 		await page.setViewportSize({ width: 1280, height: 900 })
 		await expect(strip).toHaveAttribute('data-overflow', 'none')
-		expect(await maskOf(), 'a strip that does not scroll must paint no fade at all').toBe('none')
+		expect(await fadedEdges(), 'a strip that does not scroll must paint no fade at all').toEqual([])
 	})
 
 	test('every gallery tile navigates to its demo with the matching active switcher entry', async ({ page }) => {
