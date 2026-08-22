@@ -214,14 +214,20 @@
 						     screen reader announced a row of unlabelled controls and
 						     the todo's own text was the only way to tell them apart -
 						     which is exactly what a name is for. -->
-						<input
-							type="checkbox"
-							class="checkbox checkbox-sm pointer-coarse:checkbox-md"
-							checked={todo.done}
-							onchange={() => handleToggle(todo)}
-							aria-label="Done: {todo.text}"
-							data-testid="todo-toggle-{todo.id}"
-						/>
+						<!-- Wrapped so the coarse-pointer floor lands on a target rather
+						     than on the drawn box: a label activates the control it
+						     wraps, so it IS the tap surface, and the checkbox stays the
+						     size it was designed at. -->
+						<label class="flex items-center">
+							<input
+								type="checkbox"
+								class="checkbox checkbox-sm pointer-coarse:checkbox-md"
+								checked={todo.done}
+								onchange={() => handleToggle(todo)}
+								aria-label="Done: {todo.text}"
+								data-testid="todo-toggle-{todo.id}"
+							/>
+						</label>
 						<span class:line-through={todo.done} class:opacity-60={todo.done} class="flex-1">
 							{todo.text}
 						</span>

@@ -357,13 +357,45 @@ test.describe('/demos/todos-rollback', () => {
 
 			await expectTouchTarget(page.getByTestId('todo-input'), { minWidth: 0 })
 			await expectTouchTarget(page.getByTestId('add-button'))
-			// This checkbox is BARE - nothing wraps it - so there is no label to
-			// carry the target and the box itself has to meet the full 44px
-			// coarse-pointer floor. Blessing 24px here was the AA minimum
-			// standing in for the policy this app actually states, which left the
-			// one selector control a finger has to hit as the smallest thing on
-			// the row.
-			await expectTouchTarget(li.locator('[data-testid^="todo-toggle-"]'))
+			// This checkbox is BARE in the sense the policy means: nothing but a
+			// label wraps it, and the label exists solely to be the target. The
+			// floor therefore lands on the label, not on the drawn box - so both
+			// halves have to be pinned, because either alone passes for the wrong
+			// reason. A 44px drawn box satisfies a size check while redesigning the
+			// control, and a small drawn box satisfies the design while leaving a
+			// finger nothing to hit.
+			const toggle = li.locator('[data-testid^="todo-toggle-"]')
+			// Into view BEFORE measuring. A row below the fold still reports a box,
+			// and hit-testing that point returns nothing at all - which reads as a
+			// target that does not reach when it means a measurement taken
+			// off-screen.
+			await toggle.scrollIntoViewIfNeeded()
+			const drawn = await toggle.boundingBox()
+			expect(drawn, 'the checkbox must be visible to measure').not.toBeNull()
+			expect(drawn.width, 'the DRAWN control keeps its designed size').toBeLessThan(44)
+			expect(drawn.height, 'the DRAWN control keeps its designed size').toBeLessThan(44)
+
+			// The target is asserted where a finger would land: 20px right of the
+			// drawn centre is outside the box a reader sees and inside the 44px
+			// target, so it can only belong to the control if the target really
+			// extends there.
+			//
+			// The oracle is the browser's own hit test rather than the checkbox's
+			// resulting state, and that is deliberate: earlier tests in this file
+			// leave the demo in force-fail mode, where a toggle that DOES land is
+			// rolled back by design. A rollback and a missed tap are indistinguish-
+			// able afterwards, so asserting the checkbox flipped would fail on a
+			// working target and pass only by accident of test order.
+			const testid = await toggle.getAttribute('data-testid')
+			const belongsToControl = await page.evaluate(([x, y, id]) => {
+				const hit = document.elementFromPoint(x, y)
+				const input = document.querySelector(`[data-testid="${id}"]`)
+				if (!hit || !input) return false
+				// A label activates the control it wraps; an ancestor row does not,
+				// and would contain the input just the same.
+				return hit === input || (hit.tagName === 'LABEL' && hit.contains(input))
+			}, [drawn.x + drawn.width / 2 + 20, drawn.y + drawn.height / 2, testid])
+			expect(belongsToControl, 'a point 20px from the drawn control must still belong to that control').toBe(true)
 			await expectTouchTarget(li.locator('[data-testid^="todo-remove-"]'))
 
 			await li.locator('[data-testid^="todo-remove-"]').click()

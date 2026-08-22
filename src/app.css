@@ -54,11 +54,16 @@ html {
  * which are square and would otherwise stay 32px wide while growing taller.
  *
  * The selector controls need a different rule rather than an exemption, and the
- * block below states it. An earlier version of this comment excused them on the
- * grounds that expanding their target collides with pseudo-elements daisyUI
- * draws them with; that was simply wrong - it draws all three with
- * appearance:none plus border and box-shadow and uses no ::before or ::after on
- * any of them. */
+ * block below states it. Two mechanism claims have been wrong here, and both
+ * are recorded because each one sent the fix in a direction that could not
+ * work. The first excused these controls on the grounds that expanding their
+ * target collides with pseudo-elements daisyUI draws them with: it does not,
+ * since all three are appearance:none with border and box-shadow and use
+ * neither ::before nor ::after. The second read that as licence to expand the
+ * target WITH a pseudo-element, which is inert for a different reason - these
+ * inputs do not hit-test one, so the overlay is invisible to a finger as well
+ * as to the eye. What is available is what the platform already provides: a
+ * label activates the control it wraps, so a label IS a target. */
 @media (pointer: coarse) {
 	.btn,
 	.input,
@@ -91,18 +96,20 @@ html {
 
 	label:has(> .checkbox, > .toggle) {
 		min-height: 2.75rem;
+		/* Width too, because a label wrapping ONLY a control has no text to make
+		 * it wide, and a 44px-tall target 24px wide is not a 44px target. */
+		min-width: 2.75rem;
 		align-items: center;
 	}
 
 	/* A BARE checkbox or toggle - one with no label wrapping it - has no target
-	 * but itself, so the box has to carry the floor even though that grows the
-	 * drawn control. There is no third option: the label trick above needs a
-	 * label to put the target on. This is why the rule is split rather than
-	 * applied to every selector control - a wrapped control keeps its designed
-	 * size because something else is already big enough to hit. */
-	.checkbox:not(label > .checkbox),
-	.toggle:not(label > .toggle) {
-		min-height: 2.75rem;
-		min-width: 2.75rem;
-	}
+	 * but itself, and growing the drawn box would meet the floor by redesigning
+	 * the control. So the markup gives it the same thing every other selector
+	 * control already has: a label. The rule above then carries the floor, and
+	 * the drawn control keeps the size it was designed at.
+	 *
+	 * Extending the hit area with a pseudo element was tried first and does not
+	 * work: these inputs do not hit-test an ::after, so the overlay is invisible
+	 * to a finger as well as to the eye. A label is the mechanism the platform
+	 * actually provides for this. */
 }
