@@ -23,6 +23,7 @@
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 import { redis } from '$lib/server/redis'
+import { FORCED_FAIL_DELAY_MS } from './todos-rollback.shared.js'
 
 const MAX_TODOS = 200
 const TODOS_KEY = 'demos:todos'
@@ -38,7 +39,6 @@ const TODOS_KEY = 'demos:todos'
  * artificial half of an artificial failure, so slowing it costs nothing real
  * and is the only thing that makes the arc perceivable.
  */
-const FORCED_FAIL_DELAY_MS = 400
 
 async function forcedRejection() {
 	await new Promise((resolve) => setTimeout(resolve, FORCED_FAIL_DELAY_MS))

@@ -24,6 +24,7 @@
 -->
 <script>
 	import { todosStream, addTodo, toggleTodo, removeTodo, clearAll } from '$live/demos/todos-rollback'
+	import { FORCED_FAIL_DELAY_MS, TOAST_MS } from '../../../live/demos/todos-rollback.shared.js'
 	import { confirmDestructive } from '$lib/confirm-destructive'
 
 	let todos = $state([])
@@ -71,8 +72,6 @@
 		entry.timer = setTimeout(() => dropToast(entry.id), TOAST_MS)
 		toasts = [...toasts, entry]
 	}
-
-	const TOAST_MS = 3500
 
 	async function tryMutate(label, fn) {
 		try { await fn() }
@@ -250,7 +249,7 @@
 	<aside class="text-xs opacity-50 leading-relaxed space-y-2" data-testid="tr-mechanism-note">
 		<p>
 			Server: each handler is plain <code>live(async (ctx, args) =&gt; ...)</code>.
-			With <code>forceFail</code> in the args, the handler waits 400ms and
+			With <code>forceFail</code> in the args, the handler waits {FORCED_FAIL_DELAY_MS}ms and
 			then throws <code>LiveError('FORCED', ...)</code>. The wait is
 			deliberate and it is the only artificial thing here: rejecting at once
 			made the placeholder's whole life a single local round trip, so the

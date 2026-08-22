@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { FORCED_FAIL_DELAY_MS, TOAST_MS } from '../../src/live/demos/todos-rollback.shared.js'
 
 // Exhaustive human-like coverage for /demos/todos-rollback - optimistic mutate
 // with concurrent-failure rollback. Drives add / toggle / remove / clear /
@@ -199,15 +200,22 @@ test.describe('/demos/todos-rollback', () => {
 		// ...and the optimistic placeholder must be gone (rolled back).
 		await expect(page.getByTestId('todos').locator('li', { hasText: text })).toHaveCount(0, { timeout: 10_000 })
 
-		// And it must LEAVE. A toast that appears is half the contract; one that
-		// never expires occludes the list it was reporting on, which is the whole
-		// reason the stack is bounded. This is the single-toast path - one error,
-		// never repeated - and it is the one that strands, because the coalescing
-		// path removes correctly by accident.
+		// And it must leave ON TIME. A toast that appears is half the contract;
+		// one that never expires occludes the list it was reporting on, which is
+		// the whole reason the stack is bounded. This is the single-toast path -
+		// one error, never repeated - and it is the one that strands, because the
+		// coalescing path removes correctly by accident.
+		//
+		// The deadline is the DECLARED lifetime, not a round number. Ten seconds
+		// against a declared 3.5 accepts a toast outliving its contract by a
+		// factor of three, which is a regression this test would have reported as
+		// a pass. The margin covers the round trip that created the toast and the
+		// poll that observes it leaving, both of which run before the clock here
+		// starts, so the budget is already generous against the real deadline.
 		await expect(
 			page.getByTestId('todo-toast'),
-			'a single error toast must expire, not sit on the list forever'
-		).toHaveCount(0, { timeout: 10_000 })
+			`a single error toast must expire within its declared ${TOAST_MS}ms, not merely eventually`
+		).toHaveCount(0, { timeout: TOAST_MS + 1000 })
 	})
 
 	test('five concurrent forced adds all roll back with no phantom traces', async ({ page }) => {
@@ -295,7 +303,12 @@ test.describe('/demos/todos-rollback', () => {
 		// The layout contributes an <aside> of its own, so target the page's
 		// note rather than whichever one happens to come first.
 		const aside = page.getByTestId('tr-mechanism-note')
-		await expect(aside).toContainText('400ms')
+		// Read from the same constant the handler waits on, not from a literal.
+		// Three independent copies of this number agreed until one of them moved,
+		// and nothing failed when they stopped agreeing - which is the whole
+		// defect this note exists to prevent, reproduced in the regression that
+		// was supposed to catch it.
+		await expect(aside).toContainText(`${FORCED_FAIL_DELAY_MS}ms`)
 		await expect(aside).toContainText('FORCED')
 		await expect(
 			aside,
