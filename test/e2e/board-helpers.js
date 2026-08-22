@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test'
-import { waitForWS } from './helpers.js'
+import { waitForData, waitForWS, watchWire } from './helpers.js'
 
 export function boardCanvas(page) {
 	return page.locator('div.relative.w-full.overflow-auto')
@@ -14,6 +14,10 @@ export function noteWithText(page, text) {
 }
 
 export async function openBoard(page, target) {
+	// Before the navigation, not after: the wire record only sees sockets opened
+	// after it exists, so arming it here is what lets a board that never paints
+	// say whether it ever asked for its notes.
+	watchWire(page)
 	await page.goto(target)
 	await waitForWS(page)
 	// No .catch here: a board still showing its spinner after 15s is a real
@@ -21,10 +25,11 @@ export async function openBoard(page, target) {
 	// handed a half-loaded page to every assertion downstream.
 	await page.locator('.loading').first().waitFor({ state: 'hidden', timeout: 15_000 })
 	await expect(page.locator('h1')).toBeVisible({ timeout: 15_000 })
-	await expect(boardCanvas(page)).toBeVisible()
+	await waitForData(page, boardCanvas(page), { what: 'board canvas', stream: 'boards/notes/notes' })
 }
 
 export async function createFreshBoard(page, title, origin = '') {
+	watchWire(page)
 	await page.goto(`${origin}/`)
 	await waitForWS(page)
 	await page.getByPlaceholder('New board name...').fill(title)

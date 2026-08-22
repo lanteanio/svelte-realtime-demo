@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { confirmAndClick, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { confirmAndClick, expectTouchTarget, openTouchPage, waitForData, waitForWS, watchWire } from './helpers.js'
 
 const PRODUCTS = [
 	{ id: 'phone', name: 'Wireless earbuds', original: 99, sale: 29, stock: 5 },
@@ -8,9 +8,13 @@ const PRODUCTS = [
 ]
 
 async function openSale(page) {
+	// Armed before the navigation so the record covers the socket from its first
+	// frame. The product cards only exist once the productList stream answers,
+	// so a card that never appears is a fact about that stream.
+	watchWire(page)
 	await page.goto('/demos/flash-sales')
 	await waitForWS(page)
-	await expect(page.getByTestId('product-card-phone')).toBeVisible()
+	await waitForData(page, page.getByTestId('product-card-phone'), { what: 'flash-sales product cards', stream: 'demos/flash-sales/productList' })
 }
 
 async function reset(page) {

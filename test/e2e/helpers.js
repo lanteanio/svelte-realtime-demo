@@ -3,6 +3,9 @@
  */
 
 import { expect } from '@playwright/test';
+import { applyWireFrame, createWireRecord, formatWire } from './wire-report.js';
+
+export { formatWire } from './wire-report.js';
 
 /** How long a page gets to show a connected socket before the wait fails. */
 export const WS_CONNECT_TIMEOUT = 15000;
@@ -54,7 +57,13 @@ function installConnectionProbe() {
 		window.__wsProbe.rearm();
 		return;
 	}
-	const probe = { t0: performance.now(), states: [], sockets: [] };
+	// Whether something had ALREADY replaced the constructor before this probe
+	// did. Playwright installs `class WebSocket extends WebSocketMock` when a
+	// spec routes the socket, and under that the frames observable from outside
+	// the page belong to the relay rather than to the page. Read once here,
+	// before the wrapper below makes the two indistinguishable.
+	const routed = !String(window.WebSocket).includes('[native code]');
+	const probe = { t0: performance.now(), routed, states: [], sockets: [] };
 	window.__wsProbe = probe;
 	const since = () => Math.round(performance.now() - probe.t0);
 
@@ -253,10 +262,19 @@ export async function waitForWS(page, timeout = WS_CONNECT_TIMEOUT) {
 	// report degrades from naming the asset to merely inferring a dead page.
 	// That is precisely the loss of evidence this instrumentation exists to
 	// prevent, and it only shows up once a retry actually happens.
+	// Arm the wire record here too, not only at the navigation sites that own
+	// their own goto. This is the earliest point every existing gate already
+	// shares, and the record reports its own completeness, so arming it late
+	// degrades to "no evidence" rather than to a confident wrong answer.
+	const wire = watchWire(page);
 	const watcher = watchPageFaults(page);
 	try {
 		for (let reloads = 0; ; reloads++) {
 			const attempt = await attemptConnectionWait(page, timeout);
+			// Carried across from the in-page probe, which is the only place the
+			// check can be made: once the probe has wrapped the constructor, a
+			// routed page and an instrumented one look alike from the outside.
+			if (attempt.probe?.routed) wire.routed = true;
 			// Reload only on PROOF that the client bundle never loaded, and only
 			// within the budget. Two things make this a recovery rather than a
 			// failure mask. It fires on a fact - a
@@ -296,7 +314,7 @@ async function attemptConnectionWait(page, timeout) {
 	const probe = await page.evaluate(() => {
 		const found = window.__wsProbe ?? null;
 		if (found?.timer) clearInterval(found.timer);
-		return found && { t0: found.t0, states: found.states, sockets: found.sockets };
+		return found && { t0: found.t0, routed: found.routed, states: found.states, sockets: found.sockets };
 	}).catch(() => null);
 	return { probe, failure, elapsed };
 }
@@ -424,6 +442,99 @@ export function isAppWebSocket(ws) {
 	return isAppSocketUrl(ws.url());
 }
 
+/** Wire records belong to a page and outlive the wait that installed them. */
+const wireRecords = new WeakMap();
+
+/** Frames are either JSON or a codec's binary payload; only JSON is readable here. */
+function parseWireFrame(payload) {
+	if (typeof payload !== 'string') return null;
+	try {
+		const parsed = JSON.parse(payload);
+		return parsed && typeof parsed === 'object' ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Record what a page ASKED the server for, and what came back.
+ *
+ * The connection probe answers "did a socket open". Once it has said yes, every
+ * remaining explanation for a content wait that times out lives one layer up,
+ * in the page's subscriptions - and none of that is captured anywhere, so the
+ * failure arrives as a bare locator timeout that names the element and nothing
+ * else. These are ordinary JSON frames that Playwright can read without
+ * touching the page, which is why this watches from outside rather than
+ * instrumenting the client.
+ *
+ * The shape below is measured off a live page, not read from the adapter:
+ *
+ *   out {"rpc":"demos/flash-sales/productList","id":"a1","args":[],"stream":true}
+ *   out {"batch":[{"rpc":"...","id":"a2","stream":true}, ...]}
+ *   in  {"topic":"__rpc","event":"a1","data":{"id":"a1","ok":true,"data":[...],"topic":"demos:flash-sales:products"}}
+ *   in  {"topic":"__rpc","event":"__batch","data":{"batch":[{"id":"a2","ok":true,...}]}}
+ *   in  {"topic":"demos:flash-sales:products","event":"update","data":{...}}
+ *
+ * A request, its answer, and the deliveries that follow are therefore three
+ * distinguishable things, which is what lets a failed wait say WHICH of them
+ * never happened. Those have opposite fixes: a request never sent is the client
+ * never reaching its subscribe, an unanswered one is the server, and an
+ * answered one means the data arrived and the page failed to render it.
+ *
+ * One thing this cannot see: a spec that routes its own socket. The relay a
+ * route handler opens is a real socket and is what these listeners observe, so
+ * a reply the handler withheld from the page is still recorded as delivered.
+ * The connection probe detects the routing and the verdict says so outright,
+ * rather than vouching for a page that never received the frame.
+ *
+ * Attaching is idempotent per page. Attach BEFORE the navigation wherever the
+ * caller owns it: Playwright reports frames only for sockets opened after the
+ * listener exists, so a late attach sees nothing whatsoever rather than a
+ * partial history. `sockets` and `sawHandshake` are what separate that case
+ * from a page which genuinely never subscribed, and every "never" this record
+ * reports is qualified by them.
+ */
+export function watchWire(page) {
+	const existing = wireRecords.get(page);
+	if (existing) return existing;
+	const record = createWireRecord();
+	wireRecords.set(page, record);
+	const t0 = Date.now();
+	const since = () => Date.now() - t0;
+
+	page.on('websocket', (ws) => {
+		if (!isAppWebSocket(ws)) return;
+		record.sockets++;
+		ws.on('framesent', (frame) => applyWireFrame(record, 'out', parseWireFrame(frame.payload), since()));
+		ws.on('framereceived', (frame) => applyWireFrame(record, 'in', parseWireFrame(frame.payload), since()));
+	});
+	return record;
+}
+
+/**
+ * Wait for content that can only exist once a subscription delivered, and name
+ * the subscription when it does not arrive.
+ *
+ * This is the gate for the failure that clears the connection wait and then
+ * times out on the first thing the page renders from live data. Passing a
+ * `stream` is what makes the verdict discriminating: without one the report can
+ * only say that SOME subscription succeeded, which a page waiting on a
+ * different stream is entitled to have happen while it still shows nothing.
+ */
+export async function waitForData(page, locator, { what, stream, timeout = 15000 } = {}) {
+	const record = watchWire(page);
+	try {
+		await locator.waitFor({ state: 'visible', timeout });
+	} catch (error) {
+		error.message = `${error.message}\n\n--- stream probe: ${what ?? 'content'} ---\n${formatWire(record, { stream })}`;
+		// Carried structurally as well as in the message: a spec asserting on
+		// the verdict should not have to parse prose to reach it.
+		error.wire = record;
+		throw error;
+	}
+	return record;
+}
+
 /**
  * Wait for the application WebSocket. Register `onOpen` synchronously with
  * Playwright's websocket event so initial subscribe frames cannot race past
@@ -512,8 +623,11 @@ export async function waitForBoardReady(page) {
 	await page.locator('.loading').waitFor({ state: 'hidden', timeout: 15000 }).catch(() => {});
 	// The canvas is client-rendered, which is what makes this the assertion the
 	// old `h1` wait only looked like. Not swallowed: if the board never paints,
-	// that is the failure, reported here at the gate.
-	await getCanvas(page).waitFor({ state: 'visible', timeout: 15000 });
+	// that is the failure, reported here at the gate. The page holds its spinner
+	// until the notes stream returns, so a canvas that never appears is a
+	// statement about that one stream, and the report names it rather than
+	// leaving the reader with a selector that did not match.
+	await waitForData(page, getCanvas(page), { what: 'board canvas', stream: 'boards/notes/notes' });
 }
 
 /**
