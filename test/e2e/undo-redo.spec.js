@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
-import { clickFabAction, positions } from './board-helpers.js';
+import { clickFabAction, createFreshBoard, openBoard, positions } from './board-helpers.js';
 
 let boardUrl;
 
@@ -171,43 +171,75 @@ test.describe.serial('Undo / Redo', () => {
 	// Pinned as it behaves rather than as it ought to, because asserting the
 	// arrangement comes back would fail today. When undo is made real or
 	// withdrawn, this fails and has to be rewritten - which is the point.
-	test('undo does not reach a FAB shuffle: the board stays shuffled for everyone', async ({ page }) => {
-		test.setTimeout(90_000);
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
+	test('undo does not reach a FAB shuffle: it repaints one screen and leaves everyone else shuffled', async ({ browser }) => {
+		const ctxA = await browser.newContext();
+		const ctxB = await browser.newContext();
+		const a = await ctxA.newPage();
+		const b = await ctxB.newPage();
+		try {
+			const boardUrl = await createFreshBoard(a, `FAB undo ${Date.now()}`);
+			// Spaced apart: a double-click landing on an existing note opens its
+			// editor instead of creating a neighbour.
+			for (const [x, y] of [[150, 150], [450, 150], [750, 150]]) await createNote(a, x, y);
+			await expect(getNotes(a)).toHaveCount(3, { timeout: 15_000 });
 
-		while ((await getNotes(page).count()) < 2) {
-			await createNote(page, 150 + (await getNotes(page).count()) * 320, 200);
-			await page.waitForTimeout(800);
+			// The second visitor is the point. A FAB action rewrites
+			// every note's position for everyone connected, with no confirm step,
+			// so what the OTHER screen shows is the whole question.
+			await openBoard(b, boardUrl);
+			await expect(getNotes(b)).toHaveCount(3, { timeout: 15_000 });
+			const before = JSON.stringify(await positions(a));
+			await expect
+				.poll(async () => JSON.stringify(await positions(b)), { timeout: 15_000 })
+				.toBe(before);
+
+			await clickFabAction(a, 'Shuffle notes');
+			await expect
+				.poll(async () => JSON.stringify(await positions(a)), { timeout: 15_000 })
+				.not.toBe(before);
+			const shuffled = JSON.stringify(await positions(a));
+			// Shared state, confirmed on the other screen rather than assumed from
+			// the acting one.
+			await expect
+				.poll(async () => JSON.stringify(await positions(b)), { timeout: 15_000 })
+				.toBe(shuffled);
+
+			await a.locator('body').click({ position: { x: 5, y: 5 } });
+			await a.keyboard.press('Control+z');
+
+			// The FAB event DOES enter local history: the acting screen repaints to
+			// the arrangement it had before. Asserted rather than hedged: a test that
+			// permits the view to repaint or not leaves open the one question it
+			// exists to answer.
+			await expect
+				.poll(async () => JSON.stringify(await positions(a)), { timeout: 15_000 })
+				.toBe(before);
+
+			// And that repaint is the whole of the effect. Nobody else sees it.
+			await a.waitForTimeout(2000);
+			expect(
+				JSON.stringify(await positions(b)),
+				'the other visitor keeps the shuffled board, so undo is invisible to everyone but the person who pressed it'
+			).toBe(shuffled);
+
+			// A reload proves the acting screen was showing an illusion: no call
+			// was ever made, so the server still holds the shuffle.
+			await a.reload();
+			await waitForWS(a);
+			await waitForBoardReady(a);
+			expect(
+				JSON.stringify(await positions(a)),
+				'undo issues no call, so a reload restores the shuffle it appeared to remove'
+			).toBe(shuffled);
+
+			// This pins behaviour that is currently WRONG, deliberately: the four
+			// FAB actions are irreversible shared-state writes with no confirm, and
+			// undo only looks like a way back. Whichever way that is resolved -
+			// compensating calls that make undo real, or withdrawing the promise -
+			// this test must be rewritten with it rather than quietly relaxed.
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()]);
 		}
-		const before = await positions(page);
-
-		await clickFabAction(page, 'Shuffle notes');
-		await expect
-			.poll(async () => JSON.stringify(await positions(page)), { timeout: 15_000 })
-			.not.toBe(JSON.stringify(before));
-		const shuffled = await positions(page);
-
-		await page.locator('body').click({ position: { x: 5, y: 5 } });
-		await page.keyboard.press('Control+z');
-		await page.waitForTimeout(1500);
-
-		// The local view may or may not repaint; what matters is the server, and
-		// a reload is the only thing that can show it.
-		await page.reload();
-		await waitForWS(page);
-		await waitForBoardReady(page);
-		const afterReload = await positions(page);
-
-		expect(
-			JSON.stringify(afterReload),
-			'undo issues no call, so the shuffle survives a reload and every other visitor keeps seeing it'
-		).toBe(JSON.stringify(shuffled));
-		expect(
-			JSON.stringify(afterReload),
-			'and the arrangement it replaced is not restored'
-		).not.toBe(JSON.stringify(before));
 	});
 
 });
