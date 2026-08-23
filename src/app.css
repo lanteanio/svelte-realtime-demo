@@ -54,16 +54,27 @@ html {
  * which are square and would otherwise stay 32px wide while growing taller.
  *
  * The selector controls need a different rule rather than an exemption, and the
- * block below states it. Two mechanism claims have been wrong here, and both
- * are recorded because each one sent the fix in a direction that could not
- * work. The first excused these controls on the grounds that expanding their
- * target collides with pseudo-elements daisyUI draws them with: it does not,
- * since all three are appearance:none with border and box-shadow and use
- * neither ::before nor ::after. The second read that as licence to expand the
- * target WITH a pseudo-element, which is inert for a different reason - these
- * inputs do not hit-test one, so the overlay is invisible to a finger as well
- * as to the eye. What is available is what the platform already provides: a
- * label activates the control it wraps, so a label IS a target. */
+ * block below states it. This comment has twice carried a claim about how the
+ * dependency and the browser behave that turned out to be false, so what
+ * remains is only what has been measured.
+ *
+ * MEASURED, daisyUI 5.5.19: checkbox, toggle and radio are all appearance:none
+ * with border and box-shadow, and none of the three uses ::before or ::after.
+ * So the original exemption - that expanding their target would collide with
+ * pseudo-elements daisyUI draws them with - was simply wrong.
+ *
+ * ALSO MEASURED, and this corrects the correction: an ::after on one of these
+ * inputs IS generated and IS hit-tested. On a real page, a 60px overlay on a
+ * 20px checkbox returns that same input from elementFromPoint 40px out, for a
+ * positioned and a statically positioned control alike. The note that used to
+ * sit here said the opposite. Whatever made an earlier attempt at this look
+ * inert, it was not the browser refusing to hit-test the overlay.
+ *
+ * A label is used anyway, and on its merits rather than by elimination: it is
+ * the association the platform already defines, so it activates the control
+ * it wraps and is exposed to assistive technology, where a decorative overlay
+ * is neither. It also cannot silently cover a neighbouring control the way a
+ * fixed-size overlay can. */
 @media (pointer: coarse) {
 	.btn,
 	.input,
@@ -118,8 +129,9 @@ html {
 	 * control already has: a label. The rule above then carries the floor, and
 	 * the drawn control keeps the size it was designed at.
 	 *
-	 * Extending the hit area with a pseudo element was tried first and does not
-	 * work: these inputs do not hit-test an ::after, so the overlay is invisible
-	 * to a finger as well as to the eye. A label is the mechanism the platform
-	 * actually provides for this. */
+	 * A pseudo-element overlay would also extend the hit area - that was measured
+	 * rather than assumed, and the note that used to sit here claiming otherwise
+	 * was wrong. The label is chosen over it because it carries meaning as well
+	 * as area: it activates the control and reaches assistive technology, and it
+	 * cannot quietly cover the control beside it. See the policy block above. */
 }
