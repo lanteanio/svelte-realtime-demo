@@ -32,6 +32,31 @@
  */
 const WIRE_RPC_CAP = 64;
 
+/**
+ * How many recent payloads one topic keeps.
+ *
+ * A single payload cannot tell a topic that republished one unchanged value
+ * from one whose value moved, and those have different owners: the first is a
+ * reducer that produced nothing new, the second is a later publish landing on
+ * top of an earlier one. Only the sequence since the mark separates them.
+ *
+ * The cap is what keeps holding that sequence from becoming a retention leak.
+ * Payloads are held by reference, so an uncapped list would keep every object a
+ * hot topic ever delivered reachable for the life of the record: 200k cursor
+ * frames on one topic measured 26 MiB retained uncapped against 16 slots here.
+ *
+ * Held in a fixed ring rather than a list that shifts, because this runs per
+ * frame on every spec that watches the wire. Measured through the real fold
+ * with only this function swapped, the ring lands inside the noise of keeping
+ * the newest payload alone, while a list that shifts at the cap costs about
+ * +53ns per frame - some 10%, which is the wrong price for a diagnostic.
+ *
+ * The report derives how many frames it lost from the running count, so a
+ * truncated list says that it begins mid-sequence instead of presenting its
+ * tail as the whole of it.
+ */
+const WIRE_PAYLOAD_CAP = 16;
+
 /** A fresh record. Everything that follows only ever adds to one of these. */
 export function createWireRecord() {
 	return {
@@ -69,20 +94,44 @@ function applyReply(record, result, at) {
 
 /**
  * Count one delivery against its topic, keeping first and last sight of it and
- * what the last one carried.
+ * the tail of what those frames carried.
  *
- * The payload is held by reference rather than serialised, so the cost is one
- * property write per frame however hot the topic, and only the newest object
- * per topic stays reachable. It is what separates a live view that never
- * received an update from one that received an update not containing the
- * change.
+ * Payloads are held by reference rather than serialised, so the cost is two
+ * slot writes per frame however hot the topic, and the serialising happens
+ * once, at report time, for the handful of frames a report actually prints.
+ * The tail rather than the newest alone is what separates a live view that
+ * never received an update from one that received updates that never contained
+ * the change.
  */
 function countDelivery(record, topic, at, data) {
-	const seen = record.deliveries.get(topic) ?? { count: 0, first: at };
+	const seen = record.deliveries.get(topic)
+		?? { count: 0, first: at, ats: new Array(WIRE_PAYLOAD_CAP), datas: new Array(WIRE_PAYLOAD_CAP) };
 	seen.count++;
 	seen.last = at;
-	seen.lastData = data;
+	const slot = (seen.count - 1) % WIRE_PAYLOAD_CAP;
+	seen.ats[slot] = at;
+	seen.datas[slot] = data;
 	record.deliveries.set(topic, seen);
+}
+
+/**
+ * The frames a topic still holds, oldest first.
+ *
+ * The ring is written modulo its own length, so the newest frame can sit
+ * anywhere in it; the running count is what says where the sequence starts.
+ * Nothing is allocated until a report is actually being built.
+ */
+function heldFrames(seen) {
+	const cap = seen?.datas?.length ?? 0;
+	const total = seen?.count ?? 0;
+	if (!cap || !total) return [];
+	const held = Math.min(total, cap);
+	const frames = [];
+	for (let i = 0; i < held; i++) {
+		const slot = (total - held + i) % cap;
+		frames.push({ at: seen.ats[slot], data: seen.datas[slot] });
+	}
+	return frames;
 }
 
 /**
@@ -261,13 +310,55 @@ export function markDelivery(record, streamName) {
 }
 
 /**
- * Say whether a topic delivered anything since the mark, and what it carried.
+ * The frames a topic delivered since the mark, oldest first, with a run of one
+ * repeated payload collapsed into a single line.
+ *
+ * Collapsing is what makes the two shapes readable rather than merely present.
+ * A topic that republished one unchanged value forty times becomes one line
+ * saying exactly that; forty values that differ stay forty lines. Printing
+ * forty identical lines would bury the distinction the caller came for in
+ * output that looks like the noise it is.
+ *
+ * Returns null when no payload was retained, which a caller must report as not
+ * knowing rather than as an absence of frames - the count already proved the
+ * frames existed.
+ */
+function framesSince(seen, delta) {
+	const held = heldFrames(seen);
+	if (!held.length) return null;
+	const shown = held.slice(Math.max(0, held.length - delta));
+	const runs = [];
+	for (const frame of shown) {
+		const payload = frame.data === undefined ? '(no data)' : JSON.stringify(frame.data).slice(0, 200);
+		const open = runs.at(-1);
+		if (open && open.payload === payload) {
+			open.count++;
+			open.last = frame.at;
+		} else {
+			runs.push({ payload, count: 1, first: frame.at, last: frame.at });
+		}
+	}
+	const lines = runs.map((run) => (run.count === 1
+		? `  ${run.first}ms ${run.payload}`
+		: `  ${run.first}ms..${run.last}ms ${run.payload} x${run.count}`));
+	return { lines, shown: shown.length, varied: runs.length > 1 };
+}
+
+/**
+ * Say whether a topic delivered anything since the mark, and what every one of
+ * those frames carried.
  *
  * This is the report for the failure where a write was ACCEPTED and the live
  * view never moved. The acceptance is already proven by the time it is called,
  * so the two remaining owners are the publish that never happened and the value
  * that did arrive and did not contain the change - and those are told apart by
  * whether a frame exists at all, not by anything the page displays.
+ *
+ * Naming only the newest payload collapsed a third question into those two. A
+ * value that never moved and a value that moved and was replaced by a later
+ * publish present the SAME last frame, and they are a reducer fault and an
+ * ordering fault respectively. The sequence is what separates them, so the
+ * sequence is what this prints.
  */
 export function formatDeliverySince(record, mark) {
 	if (!record || !mark) return 'no wire record was installed for this page';
@@ -289,6 +380,20 @@ export function formatDeliverySince(record, mark) {
 		const ever = now ? `${now} frame(s) arrived before the mark, the last at ${seen.last}ms` : 'nothing has ever arrived on it';
 		return `NEVER PUBLISHED: no frame arrived on ${mark.topic} after the mark (${ever}). The write was accepted, so the gap is between accepting it and publishing the result, not in the client.`;
 	}
-	const carried = seen.lastData === undefined ? '(payload not recorded)' : JSON.stringify(seen.lastData).slice(0, 200);
-	return `PUBLISHED: ${delta} frame(s) arrived on ${mark.topic} after the mark, the last at ${seen.last}ms carrying ${carried}. The publish happened, so what those frames carried - or the page applying it - is where this ends.`;
+	const frames = framesSince(seen, delta);
+	const arrived = `PUBLISHED: ${delta} frame(s) arrived on ${mark.topic} after the mark, the last at ${seen.last}ms`;
+	if (!frames) {
+		return `${arrived}, and no payload was retained for any of them. The publish happened, so what those frames carried - or the page applying it - is where this ends.`;
+	}
+	const lost = delta - frames.shown;
+	const truncated = lost > 0 ? ` The ${lost} oldest since the mark are no longer held, so the list below begins mid-sequence.` : '';
+	// Stated against what is actually held. "Never moved" is a claim about
+	// every frame since the mark, and a truncated list has not seen every
+	// frame since the mark - so it may only say the tail did not move.
+	const reading = frames.varied
+		? 'The payload CHANGED across them, so the page ends on the LAST value listed rather than on an update that never came: what needs explaining is why that value is the one that won, not why nothing arrived.'
+		: lost > 0
+			? `The ${frames.shown} still held all carry the SAME payload, and the older ones are gone, so this cannot say the value never moved - only that it did not move across this tail.`
+			: 'Every frame since the mark carried the SAME payload, so the topic republished a value that never moved and the page was never given anything new to apply.';
+	return `${arrived}.${truncated} ${reading}\n${frames.lines.join('\n')}`;
 }

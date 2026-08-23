@@ -315,16 +315,135 @@ test('a topic that never delivered at all says so in its own words', () => {
 	assert.ok(report.includes('nothing has ever arrived on it'), report)
 })
 
-test('a delivery after the mark is reported with what it carried', () => {
+/**
+ * A record with the raw-mood stream bound, some frames delivered before the
+ * mark and the rest after it.
+ *
+ * Built by folding real frames rather than by writing the record's internals,
+ * so these tests go on testing the report rather than the shape it happens to
+ * keep its history in.
+ */
+function delivered(before, after) {
 	const built = record({ rpcs: [stream('demos/privacy/rawMood/__window/round', bound)] })
+	let at = 100
+	const send = (data) => applyWireFrame(built, 'in', { topic: 'demos:privacy:agg-raw:round', event: 'set', data }, (at += 20))
+	for (const data of before) send(data)
 	const mark = markDelivery(built, 'rawMood')
-	built.deliveries.set('demos:privacy:agg-raw:round', { count: 2, first: 100, last: 340, lastData: { sum: 2, n: 1, avg: 2 } })
-	const report = formatDeliverySince(built, mark)
+	for (const data of after) send(data)
+	return { report: formatDeliverySince(built, mark), built }
+}
+
+/** The payload lines of a report, which are the only indented ones. */
+function listed(report) {
+	return report.split('\n').filter((line) => line.startsWith('  '))
+}
+
+test('a delivery after the mark is reported with what it carried', () => {
+	const { report } = delivered([], [{ sum: 6, n: 2, avg: 3 }, { sum: 2, n: 1, avg: 2 }])
 	onlyDeliveryVerdict(report, 'PUBLISHED')
 	assert.ok(report.includes('2 frame(s)'), report)
 	// The payload is the whole point: an n that did not move is the reducer,
 	// an n that did move is the page.
 	assert.ok(report.includes('"n":1'), report)
+})
+
+test('the frames since the mark are all named, so a replaced value is not read as a missing one', () => {
+	// The two shapes below present an IDENTICAL last frame - n back at 1 - and
+	// have different owners: one is a value that never moved, the other a later
+	// publish landing on top of an earlier one. Only the frame BEFORE the last
+	// says which happened, so a report naming just the newest answers neither.
+	const { report } = delivered([], [{ sum: 6, n: 2 }, { sum: 5, n: 1 }])
+	const earlier = report.indexOf('{"sum":6,"n":2}')
+	const later = report.indexOf('{"sum":5,"n":1}')
+	assert.ok(earlier > -1, `the replaced value is missing from:\n${report}`)
+	assert.ok(later > -1, `the surviving value is missing from:\n${report}`)
+	// Oldest first. Reversed, the report would read as a count that grew.
+	assert.ok(earlier < later, `the frames are listed newest first:\n${report}`)
+	assert.ok(report.includes('CHANGED'), report)
+	assert.ok(!report.includes('SAME'), `a sequence that moved was called unchanged:\n${report}`)
+
+	const flat = delivered([], [{ sum: 5, n: 1 }, { sum: 5, n: 1 }]).report
+	assert.ok(flat.includes('SAME'), flat)
+	assert.ok(!flat.includes('CHANGED'), `a value that never moved was called changed:\n${flat}`)
+})
+
+test('a repeated payload collapses to one line, so identical frames are counted rather than listed', () => {
+	const same = { sum: 5, n: 1 }
+	const { report } = delivered([], [same, same, same, same])
+	assert.ok(report.includes('{"sum":5,"n":1} x4'), report)
+	// One line for the run, not four. The count is what carries the repetition,
+	// and four identical lines would bury the distinction in what looks like
+	// noise.
+	assert.equal(listed(report).length, 1, report)
+})
+
+test('frames from before the mark are not listed among the ones the action caused', () => {
+	const { report } = delivered([{ sum: 1, n: 1 }], [{ sum: 6, n: 2 }])
+	assert.ok(report.includes('1 frame(s) arrived'), report)
+	assert.ok(report.includes('{"sum":6,"n":2}'), report)
+	// The boot frame is still held and belongs to no action. Listing it would
+	// present a value the click never produced as one of its results.
+	assert.equal(listed(report).length, 1, report)
+	assert.ok(!report.includes('{"sum":1,"n":1}'), `a frame from before the mark was attributed to the action:\n${report}`)
+})
+
+test('a list that lost its oldest frames says so, and stops short of claiming the value never moved', () => {
+	// Forty distinct frames against sixteen slots, so the report is holding a
+	// tail and has to know that it is.
+	const { report } = delivered([], Array.from({ length: 40 }, (_, i) => ({ sum: i, n: 1 })))
+	assert.ok(report.includes('40 frame(s) arrived'), report)
+	assert.ok(report.includes('24 oldest since the mark are no longer held'), report)
+	assert.equal(listed(report).length, 16, report)
+	// The tail is what is kept: the frames nearest the failure explain it, and
+	// the earliest ones are the ones the ring gave up.
+	assert.ok(report.includes('{"sum":39,"n":1}'), report)
+	assert.ok(!report.includes('{"sum":23,"n":1}'), `a frame past the cap survived:\n${report}`)
+	// Sixteen frames out of forty are no evidence about the other twenty-four,
+	// and a report that spoke for them would be inventing what it never saw.
+	assert.ok(!report.includes('Every frame since the mark'), `a truncated list spoke for frames it never held:\n${report}`)
+})
+
+test('a truncated list of identical frames refuses to speak for the ones it lost', () => {
+	// Forty frames carrying the same value, sixteen slots. Every frame the
+	// report can see is identical, and it still has not seen twenty-four of
+	// them - so "the value never moved" is a claim it has not earned.
+	const { report } = delivered([], Array.from({ length: 40 }, () => ({ sum: 5, n: 1 })))
+	assert.ok(report.includes('24 oldest since the mark are no longer held'), report)
+	assert.ok(report.includes('SAME'), report)
+	assert.ok(report.includes('this cannot say the value never moved'), report)
+	assert.ok(!report.includes('Every frame since the mark'), `a truncated list spoke for frames it never held:\n${report}`)
+})
+
+test('a wrapped ring is still listed in arrival order, so the value that won is the last one', () => {
+	// Twenty frames against sixteen slots leaves the newest four written over
+	// the oldest four, so the ring's slot order and arrival order disagree.
+	// Listing by slot would rotate the sequence and name the wrong frame as the
+	// one the page ended on - which is the whole conclusion this report exists
+	// to support.
+	const { report } = delivered([], Array.from({ length: 20 }, (_, i) => ({ sum: i, n: 1 })))
+	const shown = listed(report)
+	assert.equal(shown.length, 16, report)
+	const order = shown.map((line) => Number(line.match(/"sum":(\d+)/)[1]))
+	assert.deepEqual(order, Array.from({ length: 16 }, (_, i) => 4 + i), `the wrapped ring was listed out of order:\n${report}`)
+	// Timestamps rise with the sequence, so a rotation shows up here too.
+	const times = shown.map((line) => Number(line.match(/^ {2}(\d+)ms/)[1]))
+	assert.deepEqual(times, [...times].sort((a, b) => a - b), `frame times are not ascending:\n${report}`)
+})
+
+test('a record holding no payload reports not knowing, rather than throwing inside the failure it explains', () => {
+	// This report runs inside a catch that rewrites a real test failure. A
+	// reporter that threw here would replace the failure someone needs to read
+	// with a crash in the thing that was supposed to explain it.
+	const built = record({ rpcs: [stream('demos/privacy/rawMood/__window/round', bound)] })
+	const mark = markDelivery(built, 'rawMood')
+	built.deliveries.set('demos:privacy:agg-raw:round', { count: 2, first: 100, last: 340 })
+	const report = formatDeliverySince(built, mark)
+	onlyDeliveryVerdict(report, 'PUBLISHED')
+	assert.ok(report.includes('no payload was retained'), report)
+	// The frames are still proven to exist by the count, so the report must not
+	// resolve its own blindness into a claim about what they carried.
+	assert.ok(!report.includes('SAME'), report)
+	assert.ok(!report.includes('CHANGED'), report)
 })
 
 test('a stream the record cannot name is refused, with the ones it can', () => {
@@ -342,15 +461,36 @@ test('the delivery report refuses an intercepted socket and a blind record alike
 	onlyDeliveryVerdict(formatDeliverySince(blind, markDelivery(blind, 'rawMood')), 'NO EVIDENCE')
 })
 
-test('the newest payload is what is kept, from a bare frame and from an envelope alike', () => {
-	const bare = fold([
-		['in', { topic: 'demos:privacy:agg-raw:round', event: 'set', data: { sum: 2, n: 1, avg: 2 } }],
-		['in', { topic: 'demos:privacy:agg-raw:round', event: 'set', data: { sum: 7, n: 2, avg: 3.5 } }]
-	])
-	assert.deepEqual(bare.deliveries.get('demos:privacy:agg-raw:round').lastData, { sum: 7, n: 2, avg: 3.5 })
+test('the payload sequence is what is kept, from a bare frame and from an envelope alike', () => {
+	// Envelope frames are the ones live updates actually travel in, and a
+	// reader that understood only the bare form would report a silent topic on
+	// a page whose updates were flowing. Both forms must reach the sequence.
+	const bare = record({ rpcs: [stream('demos/privacy/rawMood/__window/round', bound)] })
+	bare.sockets = 1
+	const mark = markDelivery(bare, 'rawMood')
+	applyWireFrame(bare, 'in', { topic: 'demos:privacy:agg-raw:round', event: 'set', data: { sum: 2, n: 1, avg: 2 } }, 120)
+	applyWireFrame(bare, 'in', { type: 'batch', events: [{ topic: 'demos:privacy:agg-raw:round', event: 'set', data: { sum: 7, n: 2, avg: 3.5 } }] }, 140)
+	const report = formatDeliverySince(bare, mark)
+	assert.ok(report.includes('{"sum":2,"n":1,"avg":2}'), report)
+	assert.ok(report.includes('{"sum":7,"n":2,"avg":3.5}'), report)
+	assert.equal(listed(report).length, 2, report)
+})
 
-	const wrapped = fold([['in', { type: 'batch', events: [{ topic: 'demos:x', event: 'created', data: { id: 's1' } }] }]])
-	assert.deepEqual(wrapped.deliveries.get('demos:x').lastData, { id: 's1' })
+test('a hot topic keeps its newest frames and no more, so the record cannot grow with the run', () => {
+	// Deliberately about the representation, because the bound IS the point.
+	// Payloads are held by reference: uncapped, a cursor topic would keep every
+	// object it ever delivered reachable for as long as the record lives, which
+	// measured 26 MiB over 200k frames on one topic.
+	const hot = fold(Array.from({ length: 50 }, (_, i) => ['in', { topic: 'demos:x', event: 'moved', data: { i } }]))
+	const seen = hot.deliveries.get('demos:x')
+	assert.equal(seen.count, 50)
+	assert.equal(seen.datas.length, 16)
+	assert.equal(seen.datas.filter((d) => d !== undefined).length, 16)
+	// The tail, not the head: the frames nearest the failure are the ones worth
+	// keeping, and dropping the newest would leave the report explaining a
+	// moment that had already passed.
+	const kept = seen.datas.map((d) => d.i).sort((a, b) => a - b)
+	assert.deepEqual(kept, Array.from({ length: 16 }, (_, i) => 34 + i))
 })
 
 test('a reconnect leaves an unanswered request first, and the answered one still names the topic', () => {
