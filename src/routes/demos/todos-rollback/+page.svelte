@@ -173,7 +173,9 @@
 	     buttons beside it, which is what basis-full plus a wrapping row buys
 	     without a second breakpoint to keep in sync. -->
 	<form onsubmit={(e) => { e.preventDefault(); handleAdd() }} class="flex flex-wrap gap-2">
-		<!-- Compact on fine pointers, 44px where taps land; the row checkbox holds the 24px WCAG AA floor. -->
+		<!-- Compact on fine pointers, 44px where taps land. The row checkbox keeps its
+		     drawn size and gets the floor on the label wrapping it, which is the
+		     target a finger actually hits. -->
 		<label class="sr-only" for="todo-input">New todo</label>
 		<input
 			id="todo-input"

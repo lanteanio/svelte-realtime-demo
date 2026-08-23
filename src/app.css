@@ -102,6 +102,16 @@ html {
 		align-items: center;
 	}
 
+	/* A label wrapping nothing BUT a control centres it, so the floor is a
+	 * target centred on the thing it activates rather than 20px of live space
+	 * off to one side - which is invisible, so a tap left of the control misses
+	 * while the same distance right of it lands. Labels that also carry text
+	 * keep their own layout, which is why this is scoped to :only-child rather
+	 * than folded into the rule above. */
+	label:has(> .checkbox:only-child, > .toggle:only-child) {
+		justify-content: center;
+	}
+
 	/* A BARE checkbox or toggle - one with no label wrapping it - has no target
 	 * but itself, and growing the drawn box would meet the floor by redesigning
 	 * the control. So the markup gives it the same thing every other selector

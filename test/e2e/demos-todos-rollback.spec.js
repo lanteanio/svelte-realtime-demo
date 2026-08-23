@@ -371,44 +371,72 @@ test.describe('/demos/todos-rollback', () => {
 			await expectTouchTarget(page.getByTestId('todo-input'), { minWidth: 0 })
 			await expectTouchTarget(page.getByTestId('add-button'))
 			// This checkbox is BARE in the sense the policy means: nothing but a
-			// label wraps it, and the label exists solely to be the target. The
-			// floor therefore lands on the label, not on the drawn box - so both
-			// halves have to be pinned, because either alone passes for the wrong
-			// reason. A 44px drawn box satisfies a size check while redesigning the
-			// control, and a small drawn box satisfies the design while leaving a
-			// finger nothing to hit.
+			// label wraps it, and that label exists solely to be the target. Four
+			// things are asserted together because each one alone passes for the
+			// wrong reason - a 44px drawn box satisfies a size check while
+			// redesigning the control, and a small drawn box satisfies the design
+			// while leaving a finger nothing to hit.
 			const toggle = li.locator('[data-testid^="todo-toggle-"]')
 			// Into view BEFORE measuring. A row below the fold still reports a box,
 			// and hit-testing that point returns nothing at all - which reads as a
 			// target that does not reach when it means a measurement taken
 			// off-screen.
 			await toggle.scrollIntoViewIfNeeded()
-			const drawn = await toggle.boundingBox()
-			expect(drawn, 'the checkbox must be visible to measure').not.toBeNull()
-			expect(drawn.width, 'the DRAWN control keeps its designed size').toBeLessThan(44)
-			expect(drawn.height, 'the DRAWN control keeps its designed size').toBeLessThan(44)
-
-			// The target is asserted where a finger would land: 20px right of the
-			// drawn centre is outside the box a reader sees and inside the 44px
-			// target, so it can only belong to the control if the target really
-			// extends there.
-			//
-			// The oracle is the browser's own hit test rather than the checkbox's
-			// resulting state, and that is deliberate: earlier tests in this file
-			// leave the demo in force-fail mode, where a toggle that DOES land is
-			// rolled back by design. A rollback and a missed tap are indistinguish-
-			// able afterwards, so asserting the checkbox flipped would fail on a
-			// working target and pass only by accident of test order.
 			const testid = await toggle.getAttribute('data-testid')
-			const belongsToControl = await page.evaluate(([x, y, id]) => {
-				const hit = document.elementFromPoint(x, y)
+			const geometry = await page.evaluate((id) => {
 				const input = document.querySelector(`[data-testid="${id}"]`)
-				if (!hit || !input) return false
-				// A label activates the control it wraps; an ancestor row does not,
-				// and would contain the input just the same.
-				return hit === input || (hit.tagName === 'LABEL' && hit.contains(input))
-			}, [drawn.x + drawn.width / 2 + 20, drawn.y + drawn.height / 2, testid])
-			expect(belongsToControl, 'a point 20px from the drawn control must still belong to that control').toBe(true)
+				if (!input) return null
+				const box = (el) => {
+					const r = el.getBoundingClientRect()
+					return { x: r.x, y: r.y, width: r.width, height: r.height }
+				}
+				const drawn = box(input)
+				const style = getComputedStyle(input)
+				// The CORNERS of the floor-sized square centred on the drawn control,
+				// not one point beside it. A 40px target contains a point 20px out
+				// just as well as a 44px one does, so the old probe could not tell
+				// them apart; a corner at 21px from centre is inside 44 and outside
+				// anything smaller.
+				const cx = drawn.x + drawn.width / 2
+				const cy = drawn.y + drawn.height / 2
+				const reach = 44 / 2 - 1
+				const corners = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sy]) => {
+					const hit = document.elementFromPoint(cx + sx * reach, cy + sy * reach)
+					// A label activates the control it wraps; an ancestor row does not,
+					// and would contain the input just the same.
+					return Boolean(hit) && (hit === input || (hit.tagName === 'LABEL' && hit.contains(input)))
+				})
+				const label = input.closest('label')
+				return {
+					drawn,
+					label: label ? box(label) : null,
+					minWidth: style.minWidth,
+					minHeight: style.minHeight,
+					corners
+				}
+			}, testid)
+			expect(geometry, 'the checkbox must be in the document to measure').not.toBeNull()
+			expect(geometry.label, 'the floor needs a label to land on; a bare input has no target but itself').not.toBeNull()
+
+			// The floor, at the number the policy states, measured rather than
+			// approached.
+			expect(geometry.label.width, 'the target must meet the 44px floor').toBeGreaterThanOrEqual(44)
+			expect(geometry.label.height, 'the target must meet the 44px floor').toBeGreaterThanOrEqual(44)
+			expect(
+				geometry.corners,
+				'every corner of the 44px square centred on the control must belong to that control'
+			).toEqual([true, true, true, true])
+
+			// And the floor must land on the TARGET rather than on the drawn box.
+			// Reading the computed min-* separates "the label carries it" from "the
+			// control was grown to meet it": a control enlarged to 40px passes a bare
+			// "under 44" check while being exactly the redesign the label rule exists
+			// to avoid. checkbox-md draws at 24px, so the ceiling sits just above its
+			// designed size instead of at the floor.
+			expect(parseFloat(geometry.minWidth) || 0, 'the drawn control must not carry the floor').toBeLessThan(44)
+			expect(parseFloat(geometry.minHeight) || 0, 'the drawn control must not carry the floor').toBeLessThan(44)
+			expect(geometry.drawn.width, 'the DRAWN control keeps its designed size').toBeLessThanOrEqual(28)
+			expect(geometry.drawn.height, 'the DRAWN control keeps its designed size').toBeLessThanOrEqual(28)
 			await expectTouchTarget(li.locator('[data-testid^="todo-remove-"]'))
 
 			await li.locator('[data-testid^="todo-remove-"]').click()
