@@ -5,6 +5,7 @@ import {
 	waitForAppWebSocket,
 	waitForBoardReady,
 	waitForWS,
+	watchWire,
 	WS_HYDRATE_RELOADS
 } from './helpers.js';
 
@@ -315,6 +316,10 @@ test.describe('WebSocket Connection', () => {
 				body: '<!doctype html><html><body><p>served without a client</p></body></html>'
 			});
 		});
+		// Armed BEFORE the navigation. Naming the document as the fault is only
+		// honest from a record that watched it load; the same verdict from a
+		// record armed afterwards would be a statement about the observer.
+		watchWire(page);
 		await page.goto('/', { waitUntil: 'commit' });
 
 		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
@@ -323,6 +328,39 @@ test.describe('WebSocket Connection', () => {
 		expect(failure.message).not.toContain('PAGE NEVER HYDRATED');
 		expect(failure.message).not.toContain('BUNDLE DELIVERED');
 		expect(failure.rehydrateReloads, 'there is no asset here to re-fetch').toBe(0);
+	});
+
+
+	test('a record armed after the navigation says so instead of accusing the document', async ({ page }) => {
+		// The same client-less document, observed the way every ordinary gate site
+		// observes: navigate first, wait second. page.goto resolves on load, so by
+		// the time the wait arms its record the entry chunk has already been
+		// requested and answered - or, here, never requested at all - and the
+		// record sees none of it either way.
+		//
+		// That is the whole hazard. Reading an empty chunk list as BUNDLE NEVER
+		// REQUESTED turns the observer's blindness into a finding about the
+		// document, and it would say exactly the same thing about a perfectly
+		// healthy page whose bundle loaded before anyone was watching.
+		await page.route('**/*', (route) => {
+			if (route.request().resourceType() !== 'document') return route.continue();
+			return route.fulfill({
+				status: 200,
+				contentType: 'text/html',
+				body: '<!doctype html><html><body><p>served without a client</p></body></html>'
+			});
+		});
+		await page.goto('/');
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'a page with no client must still fail the wait').not.toBeNull();
+		expect(failure.message, 'a record cannot report traffic it was not there for').toContain('UNKNOWN');
+		expect(
+			failure.message,
+			'a blind record must not be read as a finding about what was served'
+		).not.toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.rehydrateReloads, 'an unproven diagnosis must not spend the reload budget').toBe(0);
 	});
 
 });

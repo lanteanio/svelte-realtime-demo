@@ -119,6 +119,9 @@ function installConnectionProbe() {
  */
 const ENTRY_CHUNK = /\/_app\/immutable\/entry\/[^/]+\.js($|\?)/;
 
+/** Fault records belong to a page and outlive the wait that installed them. */
+const faultRecords = new WeakMap();
+
 /**
  * Watch the faults a page cannot report about itself.
  *
@@ -131,7 +134,17 @@ const ENTRY_CHUNK = /\/_app\/immutable\/entry\/[^/]+\.js($|\?)/;
  * never appeared - about a page that never got as far as opening one.
  */
 function watchPageFaults(page) {
-	const faults = { requests: [], errors: [], entryChunks: [] };
+	const existing = faultRecords.get(page);
+	if (existing) return existing;
+	// `sawNavigation` is this record's account of its own reach, and it is what
+	// stops a late arming from being read as a finding. Playwright reports
+	// request and response events only for traffic that flows after the listener
+	// exists, and the ordinary gate site navigates BEFORE it waits - `page.goto`
+	// resolves on load, by which point the entry chunk has already been
+	// requested and answered. A record armed at that point sees no chunk traffic
+	// at all, which is indistinguishable from a document that never asked for a
+	// client unless the record says which case it is in.
+	const faults = { requests: [], errors: [], entryChunks: [], sawNavigation: false };
 	// A failed request is evidence; a SUCCESSFUL one is evidence too, and it was
 	// being thrown away. A page with no socket and a delivered bundle is a
 	// different fault from a page with no socket and no bundle: the first
@@ -148,17 +161,24 @@ function watchPageFaults(page) {
 		});
 	};
 	const onPageError = (error) => faults.errors.push(error.message);
+	// A new document is a new subject. Clearing here keeps the record scoped to
+	// the page currently under test rather than accumulating a previous one's
+	// failures, and it is also the moment this record becomes able to speak
+	// fully: the entry chunk is requested after the document commits, so a
+	// record present at commit sees all of it.
+	const onNavigated = (frame) => {
+		if (frame !== page.mainFrame()) return;
+		faults.requests.length = 0;
+		faults.errors.length = 0;
+		faults.entryChunks.length = 0;
+		faults.sawNavigation = true;
+	};
+	page.on('framenavigated', onNavigated);
 	page.on('response', onResponse);
 	page.on('requestfailed', onRequestFailed);
 	page.on('pageerror', onPageError);
-	return {
-		faults,
-		stop() {
-			page.off('response', onResponse);
-			page.off('requestfailed', onRequestFailed);
-			page.off('pageerror', onPageError);
-		}
-	};
+	faultRecords.set(page, faults);
+	return faults;
 }
 
 /**
@@ -229,6 +249,9 @@ function diagnoseHydration(probe, faults) {
 		if (delivered.length) {
 			return `BUNDLE DELIVERED, CLIENT SILENT: the entry chunk arrived (${delivered[0].status} ${delivered[0].url}) and no app socket was constructed. Delivery is therefore excluded, and a reload would not fix this - the client either never executed or executed without opening a socket.`;
 		}
+		if (chunks.length === 0 && !faults?.sawNavigation) {
+			return 'PAGE LIKELY NEVER HYDRATED: no app socket was constructed and the status never left its server-rendered value. Whether a client was ever requested is UNKNOWN here - this record was armed after the page had already navigated, so it saw none of the traffic for the current document. Arm it before the navigation to tell a bundle that never arrived from one that arrived and did nothing.';
+		}
 		if (chunks.length === 0) {
 			return 'BUNDLE NEVER REQUESTED: no entry chunk request was seen at all, so the document never reached the point of loading the client. That is a fault in what was served, not in the network under it.';
 		}
@@ -298,34 +321,30 @@ export async function waitForWS(page, timeout = WS_CONNECT_TIMEOUT) {
 	// shares, and the record reports its own completeness, so arming it late
 	// degrades to "no evidence" rather than to a confident wrong answer.
 	const wire = watchWire(page);
-	const watcher = watchPageFaults(page);
-	try {
-		for (let reloads = 0; ; reloads++) {
-			const attempt = await attemptConnectionWait(page, timeout);
-			// Carried across from the in-page probe, which is the only place the
-			// check can be made: once the probe has wrapped the constructor, a
-			// routed page and an instrumented one look alike from the outside.
-			if (attempt.probe?.routed) wire.routed = true;
-			// Reload only on PROOF that the client bundle never loaded, and only
-			// within the budget. Two things make this a recovery rather than a
-			// failure mask. It fires on a fact - a
-			// failed script request - not on a bare timeout, so a genuine 15s
-			// connect stall still fails as loudly as before. And a page whose
-			// bundle never ran has no client-side state to lose, so reloading is
-			// safe even mid-test: any state the spec established is either
-			// server-side and survives, or was never created at all.
-			const proven = attempt.failure && provenHydrationFailure(watcher.faults);
-			if (proven && reloads < WS_HYDRATE_RELOADS) {
-				console.log(`[ws-rehydrate] ${page.url()} never hydrated (${proven}); reloading, attempt ${reloads + 1} of ${WS_HYDRATE_RELOADS}`);
-				// A reload that itself fails is not worth its own error path: the
-				// next attempt fails the same way and reports the whole history.
-				await page.reload().catch(() => {});
-				continue;
-			}
-			return finishConnectionWait(page, { ...attempt, faults: watcher.faults }, reloads);
+	const faults = watchPageFaults(page);
+	for (let reloads = 0; ; reloads++) {
+		const attempt = await attemptConnectionWait(page, timeout);
+		// Carried across from the in-page probe, which is the only place the
+		// check can be made: once the probe has wrapped the constructor, a
+		// routed page and an instrumented one look alike from the outside.
+		if (attempt.probe?.routed) wire.routed = true;
+		// Reload only on PROOF that the client bundle never loaded, and only
+		// within the budget. Two things make this a recovery rather than a
+		// failure mask. It fires on a fact - a
+		// failed script request - not on a bare timeout, so a genuine 15s
+		// connect stall still fails as loudly as before. And a page whose
+		// bundle never ran has no client-side state to lose, so reloading is
+		// safe even mid-test: any state the spec established is either
+		// server-side and survives, or was never created at all.
+		const proven = attempt.failure && provenHydrationFailure(faults);
+		if (proven && reloads < WS_HYDRATE_RELOADS) {
+			console.log(`[ws-rehydrate] ${page.url()} never hydrated (${proven}); reloading, attempt ${reloads + 1} of ${WS_HYDRATE_RELOADS}`);
+			// A reload that itself fails is not worth its own error path: the
+			// next attempt fails the same way and reports the whole history.
+			await page.reload().catch(() => {});
+			continue;
 		}
-	} finally {
-		watcher.stop();
+		return finishConnectionWait(page, { ...attempt, faults }, reloads);
 	}
 }
 
@@ -526,6 +545,11 @@ function parseWireFrame(payload) {
  * reports is qualified by them.
  */
 export function watchWire(page) {
+	// Both records answer the same question at different layers and both are
+	// blind to whatever happened before they existed, so they are armed
+	// together: every site that arms the wire before its navigation now arms
+	// the fault record before it too.
+	watchPageFaults(page);
 	const existing = wireRecords.get(page);
 	if (existing) return existing;
 	const record = createWireRecord();
