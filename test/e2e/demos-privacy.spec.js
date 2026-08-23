@@ -4,6 +4,7 @@ import {
 	assertSameRound,
 	inStableRound,
 	openPrivacy,
+	pinRawCount,
 	pinRoundId,
 	protectedSnapshot,
 	rawState,
@@ -12,6 +13,7 @@ import {
 	stageRollOnNextSubmit,
 	STAGED_ROUND_STEP,
 	submitMood,
+	unpinRawCount,
 	unpinRoundId,
 	waitForDistinct,
 	waitForFreshRound,
@@ -320,4 +322,49 @@ test.describe('/demos/privacy', () => {
 		await unpinRoundId(page)
 		expect(test.info().annotations.filter((a) => a.type === 'round-rolled').length).toBeGreaterThan(0)
 	})
+
+	test('a submission the page never applies is reported as published, not as missing', async ({ page }) => {
+		// The gap this closes is the ENRICHMENT path itself. The helper's other
+		// failure route - a round boundary - is raised after the poll succeeds and
+		// never enters the catch, so nothing until now drove the branch that
+		// attaches the wire verdict to a real timeout.
+		await openPrivacy(page)
+		// Headroom, so the ten-second poll below fails on the aggregate rather
+		// than straddling a boundary and raising the other error entirely.
+		await waitForFreshRound(page, { requireRoom: false })
+
+		// Stage the one fault the count cannot distinguish on its own: the write
+		// is accepted, the aggregate publishes, the frames arrive, and the page
+		// does not apply them. Freezing the readout produces exactly that, and it
+		// leaves the socket untouched - intercepting it would trip the guard that
+		// makes the report decline to speak, which is the opposite of the verdict
+		// under test.
+		const frozen = await pinRawCount(page)
+		try {
+			const failure = await submitMood(page, 3).then(() => null, (error) => error)
+			expect(failure, 'a frozen readout must fail the poll').not.toBeNull()
+			expect(failure.message, 'the timeout must carry the wire verdict').toContain('--- aggregate probe ---')
+			// The count the helper reports is the frozen one, which is what ties
+			// the message to the staged condition rather than to any old failure.
+			expect(failure.message).toContain(`n stayed at ${frozen}`)
+
+			// The verdict, and the three readings it must not reach, each excluded
+			// by name. Matched with startsWith rather than a substring test,
+			// because 'NEVER PUBLISHED:' CONTAINS 'PUBLISHED:' - the cheap check is
+			// satisfied by the exact opposite answer.
+			const verdict = (failure.message.split('--- aggregate probe ---')[1] ?? '').trim()
+			expect(verdict.startsWith('PUBLISHED:'), `the verdict must be the published one, got: ${verdict.slice(0, 40)}`).toBe(true)
+			expect(verdict, 'the published verdict names how many frames arrived').toContain('frame(s) arrived on')
+			expect(Number(verdict.slice('PUBLISHED: '.length).split(' ')[0]), 'at least one frame must be counted').toBeGreaterThan(0)
+			expect(
+				failure.message,
+				'frames did arrive, so the never-published reading would be false'
+			).not.toContain('NEVER PUBLISHED')
+			expect(failure.message, 'this spec does not intercept the socket').not.toContain('SOCKET ROUTED')
+			expect(failure.message, 'the record was armed before the navigation').not.toContain('NO EVIDENCE')
+		} finally {
+			await unpinRawCount(page)
+		}
+	})
+
 })

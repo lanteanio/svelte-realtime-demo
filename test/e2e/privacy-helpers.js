@@ -336,6 +336,44 @@ export async function unpinRoundId(page) {
 	})
 }
 
+/**
+ * Freeze the raw count the submission poll reads, leaving the socket alone.
+ *
+ * This stages the ONE fault the count on its own cannot distinguish from a
+ * publish that never happened: the aggregate publishes, the frames arrive, and
+ * the page does not apply them. Staged in the DOM rather than by intercepting
+ * the socket on purpose - a routed socket is the arrangement the delivery
+ * report refuses to speak for, so intercepting to produce the failure would
+ * make the very verdict under test unreachable.
+ *
+ * Re-applied on an interval for the same reason the round pin is: the page
+ * rewrites the node whenever the aggregate changes, which is exactly what is
+ * being suppressed.
+ *
+ * @returns the value the readout is held at, which the failure message quotes
+ */
+export async function pinRawCount(page) {
+	return page.evaluate(() => {
+		const node = () => document.querySelector('[data-testid="pv-raw-n"]')
+		const frozen = node()?.textContent ?? '0'
+		const apply = () => {
+			const el = node()
+			if (el && el.textContent !== frozen) el.textContent = frozen
+		}
+		apply()
+		window.__pvPinnedRaw = setInterval(apply, 25)
+		return frozen
+	})
+}
+
+/** Release the freeze and let the page show the aggregate again. */
+export async function unpinRawCount(page) {
+	await page.evaluate(() => {
+		clearInterval(window.__pvPinnedRaw)
+		delete window.__pvPinnedRaw
+	})
+}
+
 export async function waitForDistinct(page, expected) {
 	await expect.poll(async () => (await roundState(page)).distinct, { timeout: 10_000 })
 		.toBeGreaterThanOrEqual(expected)
