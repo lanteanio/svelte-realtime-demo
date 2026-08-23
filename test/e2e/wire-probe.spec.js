@@ -213,4 +213,55 @@ test.describe('The stream probe', () => {
 			await fresh.close()
 		}
 	})
+
+	test('a wait that times out while its stream succeeded names the page, not the wire', async ({ page }) => {
+		// The failure population this report exists for: the socket is up, the
+		// subscription answered, and the content still never appears. Until now
+		// that verdict was only ever formatted from a wait that SUCCEEDED, so the
+		// branch that attaches it to a real timeout had never run outside a spec
+		// that intercepts its own socket - and an intercepted socket is the one
+		// arrangement the report refuses to speak for. This is the only one of the
+		// four owners reachable in a browser without that interference, which is
+		// why it is the one pinned here.
+		watchWire(page)
+		await page.goto(SALE)
+		await waitForWS(page)
+		// Witness the included side first. The cards render, so the stream really
+		// did deliver, and the timeout staged below cannot be blamed on the wire.
+		await expect(page.getByTestId('product-card-phone')).toBeVisible({ timeout: 15_000 })
+
+		// Take the rendering away without touching the socket. Hiding rather than
+		// removing leaves the framework's own DOM alone: the rows are still
+		// delivered, still in the page, and simply not on screen - which is
+		// precisely the fault SUBSCRIPTION SUCCEEDED describes, produced rather
+		// than described.
+		await page.addStyleTag({ content: '[data-testid^="product-card-"] { display: none !important }' })
+
+		const failure = await waitForData(page, page.getByTestId('product-card-phone'), {
+			what: 'flash-sales product cards',
+			stream: PRODUCT_STREAM,
+			timeout: 3000
+		}).then(() => null, (error) => error)
+
+		expect(failure, 'a hidden card must fail the wait').not.toBeNull()
+		expect(
+			failure.message,
+			'the timeout must carry the verdict rather than only the selector it gave up on'
+		).toContain('--- stream probe: flash-sales product cards ---')
+		expect(failure.message).toContain('SUBSCRIPTION SUCCEEDED:')
+
+		// The readings it must not reach. Each names a different owner, and any of
+		// them here would send the reader to a layer that was working correctly.
+		expect(failure.message, 'the request was answered').not.toContain('ASKED, NEVER ANSWERED')
+		expect(failure.message, 'nothing was refused').not.toContain('REFUSED:')
+		expect(failure.message, 'the page did ask').not.toContain('NEVER ASKED')
+		expect(failure.message, 'every request came back').not.toContain('PARTLY ANSWERED')
+		expect(failure.message, 'this spec does not intercept the socket').not.toContain('SOCKET ROUTED')
+		expect(failure.message, 'the record was armed before the navigation').not.toContain('NO EVIDENCE')
+
+		// Carried structurally as well as in the prose, so a spec asserting on the
+		// verdict does not have to parse it back out again.
+		expect(failure.wire.routed, 'the verdict is only worth having on a socket nobody touched').toBe(false)
+	})
+
 })
