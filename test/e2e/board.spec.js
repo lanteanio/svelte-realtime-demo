@@ -46,6 +46,34 @@ test.describe('/board/[slug]', () => {
 		await page.waitForURL(/\/$/)
 	})
 
+	test('a double-click leaves the caret in the note, so the next keystroke lands', async ({ page }) => {
+		await createFreshBoard(page, `Board focus ${Date.now()}`)
+		const note = await createNoteAt(page, 200, 200)
+		await note.dblclick({ force: true })
+		const textarea = note.locator('textarea')
+		await expect(textarea).toBeVisible()
+
+		// Asserted rather than assumed, because every other edit in this suite
+		// goes through editNote -> textarea.fill(), and fill() focuses the field
+		// itself. That made the whole suite pass while a real visitor had to
+		// click a second time before they could type a single character.
+		await expect(textarea).toBeFocused()
+
+		// The visitor-facing half: type WITHOUT touching the note again. Using
+		// fill() or clicking here would restore exactly the blind spot above.
+		await page.keyboard.type('straight after the double-click')
+		await expect(textarea).toHaveValue('straight after the double-click')
+
+		// Opening on existing content must not select it, or the first
+		// keystroke would destroy what is already there.
+		await textarea.blur()
+		await expect(note.locator('p')).toHaveText('straight after the double-click')
+		await note.dblclick({ force: true })
+		await expect(textarea).toBeFocused()
+		await page.keyboard.type('!')
+		await expect(textarea).toHaveValue('straight after the double-click!')
+	})
+
 	test('note CRUD, color, focus z-order, drag, activity, and persistence have real outcomes', async ({ page }) => {
 		await createFreshBoard(page, `Board CRUD ${Date.now()}`)
 		const alpha = await createNoteAt(page, 120, 150)

@@ -82,6 +82,26 @@
 		editing = true
 	}
 
+	/**
+	 * Focus the editor as it mounts and put the caret at the end.
+	 *
+	 * `autofocus` is honoured when the parser reaches an element, not when one
+	 * is inserted into a document that has already loaded, so a note entering
+	 * edit mode rendered a textarea with no caret in it: the text swapped for
+	 * the editor, the first keystrokes went nowhere, and it took a second click
+	 * inside to actually type. Focusing on mount is the thing the attribute
+	 * only looked like it was doing.
+	 *
+	 * The caret goes to the end rather than selecting the content, because this
+	 * opens on an existing note as often as on a new one and selecting would
+	 * make the next keystroke destroy what is already there.
+	 */
+	function focusEditor(node) {
+		node.focus()
+		const end = node.value.length
+		node.setSelectionRange(end, end)
+	}
+
 	function stopEditing(e) {
 		editing = false
 		onEdit({ content: e.target.value })
@@ -138,12 +158,11 @@
 	<!-- Content area -->
 	<div class="flex-1 p-3 pb-0">
 		{#if editing}
-			<!-- svelte-ignore a11y_autofocus -->
 			<textarea
 				class="w-full min-h-20 bg-transparent resize-none border-none outline-none text-sm
 							 break-words whitespace-pre-wrap [field-sizing:content]"
 				value={note.content}
-				autofocus
+				use:focusEditor
 				onblur={stopEditing}
 				onkeydown={(e) => { if (e.key === 'Escape') e.target.blur() }}
 			></textarea>
