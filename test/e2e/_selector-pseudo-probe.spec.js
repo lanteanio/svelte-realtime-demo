@@ -6,14 +6,51 @@
 // it rests on now is measured, and this is the measurement, kept reproducible
 // so the next person can re-run it instead of inheriting another assertion.
 //
-// What it shows: an ::after on an appearance:none checkbox IS generated and IS
-// hit-tested, for a positioned and a statically positioned control alike. So a
-// pseudo-element overlay would extend the hit area. The policy uses a label
-// anyway, on merit - it activates the control and reaches assistive technology,
-// where an overlay does neither - not because the overlay cannot work.
+// What it shows, two halves:
+//
+// - an ::after on an appearance:none checkbox IS generated and IS hit-tested,
+//   for a positioned and a statically positioned control alike. So a
+//   pseudo-element overlay would extend the hit area. The policy uses a label
+//   anyway, on merit - it activates the control and reaches assistive
+//   technology, where an overlay does neither - not because the overlay
+//   cannot work.
+// - the dependency draws these controls WITH `:before` - the checkbox's
+//   checkmark and the toggle's knob are that pseudo-element - so only
+//   `::after` is free. An overlay on `:before` would collide with the
+//   control's own rendering, which is what makes the slot worth naming
+//   rather than saying "a pseudo-element" as if both were available.
 
 import { test, expect } from '@playwright/test'
 import { waitForWS } from './helpers.js'
+
+test('daisyUI draws the app selector controls with :before, leaving ::after free', async ({ page }) => {
+	// A real app page, so the compiled stylesheet under test is the one
+	// production serves - a claim measured against the dependency's source
+	// alone would miss whatever the build keeps or drops.
+	await page.goto('/demos/todos-rollback')
+	await waitForWS(page)
+	const result = await page.evaluate(() => {
+		const measure = (className) => {
+			const el = document.createElement('input')
+			el.type = 'checkbox'
+			el.className = className
+			document.body.appendChild(el)
+			const styles = {
+				before: getComputedStyle(el, '::before').content,
+				after: getComputedStyle(el, '::after').content
+			}
+			el.remove()
+			return styles
+		}
+		return { checkbox: measure('checkbox'), toggle: measure('toggle') }
+	})
+	console.log(`selector :before probe: ${JSON.stringify(result)}`)
+
+	for (const [name, r] of Object.entries(result)) {
+		expect(r.before, `${name}: the control draws with :before, so that slot is taken`).not.toBe('none')
+		expect(r.after, `${name}: ::after is the free slot`).toBe('none')
+	}
+})
 
 test('an ::after overlay on a selector control is generated and hit-tested', async ({ page }) => {
 	await page.goto('/demos/todos-rollback')
