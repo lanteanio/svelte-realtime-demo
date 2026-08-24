@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { createBoard, formatWire, getCanvas, waitForBoardReady, waitForData, waitForWS, watchWire } from './helpers.js'
+import { openSale, PRODUCT_STREAM } from './flash-sales-helpers.js'
+import { openBoard } from './board-helpers.js'
 import { formatDeliverySince, markDelivery } from './wire-report.js'
 
 // The gate's failure population contains a shape that clears the connection
@@ -13,7 +15,6 @@ import { formatDeliverySince, markDelivery } from './wire-report.js'
 // report that says nothing.
 
 const SALE = '/demos/flash-sales'
-const PRODUCT_STREAM = 'demos/flash-sales/productList'
 
 /**
  * Relay the socket, dropping the reply to one stream request and forwarding
@@ -58,6 +59,26 @@ async function dropStreamReply(page, streamName) {
 			ws.send(message)
 		})
 	})
+}
+
+/**
+ * Hide a selector in every document this page creates from now on. The site
+ * wrappers own their navigation, so a style added to the current document
+ * would vanish with the goto; installing at document creation is what lets a
+ * timeout be forced THROUGH a wrapper rather than beside it. The socket is
+ * untouched: the rows are requested, answered and delivered, and simply
+ * never on screen - the fault SUBSCRIPTION SUCCEEDED describes.
+ */
+async function hideInEveryDocument(page, selector) {
+	await page.addInitScript((css) => {
+		const attach = () => {
+			const style = document.createElement('style')
+			style.textContent = css
+			document.head.appendChild(style)
+		}
+		if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach)
+		else attach()
+	}, `${selector} { display: none !important }`)
 }
 
 test.describe('The stream probe', () => {
@@ -262,6 +283,72 @@ test.describe('The stream probe', () => {
 		// Carried structurally as well as in the prose, so a spec asserting on the
 		// verdict does not have to parse it back out again.
 		expect(failure.wire.routed, 'the verdict is only worth having on a socket nobody touched').toBe(false)
+	})
+
+	// The three tests below force the same timeout THROUGH the readiness
+	// wrappers the site specs actually call, not through a waitForData staged
+	// beside them. That distinction is the whole point: a wrapper quietly
+	// reverted to a bare visibility wait still times out on a hidden element,
+	// and a test that reaches the verdict on its own would stay green while
+	// the gate the suite depends on went back to reporting only a selector.
+
+	test('the flash-sales gate carries the verdict itself, not only a wait staged beside it', async ({ page }) => {
+		await hideInEveryDocument(page, '[data-testid^="product-card-"]')
+		const failure = await openSale(page).then(() => null, (error) => error)
+
+		expect(failure, 'hidden cards must fail the gate').not.toBeNull()
+		expect(
+			failure.message,
+			'the gate itself must attach the probe to its timeout'
+		).toContain('--- stream probe: flash-sales product cards ---')
+		expect(failure.message).toContain('SUBSCRIPTION SUCCEEDED:')
+		// The style is installed before the first paint, so there is no visible
+		// card to witness; the delivery is witnessed on the wire instead. The
+		// rows are what prove the data arrived and pin the blame on the hiding.
+		const product = failure.wire.rpcs.find((call) => call.rpc === PRODUCT_STREAM)
+		expect(product.ok).toBe(true)
+		expect(product.rows).toBeGreaterThanOrEqual(3)
+		// The arming half of the integration: the wrapper attaches the record
+		// before its own navigation, or this degrades to a blind record.
+		expect(failure.message).not.toContain('NO EVIDENCE')
+		expect(failure.wire.routed).toBe(false)
+	})
+
+	test('the board gate a spec calls after its own goto carries the verdict on a timeout', async ({ page }) => {
+		watchWire(page)
+		const boardUrl = await createBoard(page, `Wire wrapper ${Date.now()}`)
+		await page.goto(boardUrl)
+		await waitForWS(page)
+		// Witness the included side: the same gate passes while the canvas is
+		// on screen, so the failure staged below is about the hiding alone.
+		await waitForBoardReady(page)
+
+		await page.addStyleTag({ content: 'div.relative.w-full.overflow-auto { display: none !important }' })
+		const failure = await waitForBoardReady(page).then(() => null, (error) => error)
+
+		expect(failure, 'a hidden canvas must fail the gate').not.toBeNull()
+		expect(
+			failure.message,
+			'the gate itself must attach the probe to its timeout'
+		).toContain('--- stream probe: board canvas ---')
+		expect(failure.message).toContain('SUBSCRIPTION SUCCEEDED:')
+		expect(failure.message).not.toContain('NO EVIDENCE')
+		expect(failure.wire.routed).toBe(false)
+	})
+
+	test('the board wrapper that owns its navigation carries the verdict on a timeout', async ({ page }) => {
+		const boardUrl = await createBoard(page, `Wire wrapper own-goto ${Date.now()}`)
+		await hideInEveryDocument(page, 'div.relative.w-full.overflow-auto')
+		const failure = await openBoard(page, boardUrl).then(() => null, (error) => error)
+
+		expect(failure, 'a hidden canvas must fail the wrapper').not.toBeNull()
+		expect(
+			failure.message,
+			'the wrapper itself must attach the probe to its timeout'
+		).toContain('--- stream probe: board canvas ---')
+		expect(failure.message).toContain('SUBSCRIPTION SUCCEEDED:')
+		expect(failure.message).not.toContain('NO EVIDENCE')
+		expect(failure.wire.routed).toBe(false)
 	})
 
 })
