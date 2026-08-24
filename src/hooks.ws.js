@@ -45,9 +45,9 @@ import { armPressureTicker } from '$live/demos/pressure'
 import '$live/_purge'
 
 // SIGUSR2 heap-snapshot trigger. `kill -SIGUSR2 <pid>` on the host writes
-// a `heap-<timestamp>.heapsnapshot` file under HEAP_SNAPSHOT_DIR (default
-// os.tmpdir(); load it in Chrome DevTools -> Memory tab to see top
-// retainers. Configurable so containers whose CWD is owned by root can
+// a `heap-<timestamp>-<pid>.heapsnapshot` file under HEAP_SNAPSHOT_DIR
+// (default os.tmpdir()). Load it in Chrome DevTools -> Memory tab to see
+// top retainers. Configurable so containers whose CWD is owned by root can
 // point the dump at a writable directory (e.g. /tmp) without sed-patching
 // the build at runtime.
 const HEAP_SNAPSHOT_DIR = process.env.HEAP_SNAPSHOT_DIR || os.tmpdir()
