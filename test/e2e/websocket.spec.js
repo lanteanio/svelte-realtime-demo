@@ -331,17 +331,18 @@ test.describe('WebSocket Connection', () => {
 	});
 
 
-	test('a record armed after the navigation says so instead of accusing the document', async ({ page }) => {
+	test('a record armed after the navigation reads the document instead of shrugging', async ({ page }) => {
 		// The same client-less document, observed the way every ordinary gate site
 		// observes: navigate first, wait second. page.goto resolves on load, so by
 		// the time the wait arms its record the entry chunk has already been
 		// requested and answered - or, here, never requested at all - and the
-		// record sees none of it either way.
+		// record sees none of that traffic either way.
 		//
-		// That is the whole hazard. Reading an empty chunk list as BUNDLE NEVER
-		// REQUESTED turns the observer's blindness into a finding about the
-		// document, and it would say exactly the same thing about a perfectly
-		// healthy page whose bundle loaded before anyone was watching.
+		// The record's blindness must still not become a finding - but the
+		// document is not blind about itself. Its markup says whether a client
+		// was ever referenced, and its resource timeline is written by the
+		// browser regardless of who was watching, so the verdict here comes from
+		// the document's own evidence and says so.
 		await page.route('**/*', (route) => {
 			if (route.request().resourceType() !== 'document') return route.continue();
 			return route.fulfill({
@@ -354,13 +355,81 @@ test.describe('WebSocket Connection', () => {
 
 		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
 		expect(failure, 'a page with no client must still fail the wait').not.toBeNull();
-		expect(failure.message, 'a record cannot report traffic it was not there for').toContain('UNKNOWN');
-		expect(
-			failure.message,
-			'a blind record must not be read as a finding about what was served'
-		).not.toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message).toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message, 'the verdict must name its source').toContain('references no client');
+		// The readings this one must not reach: the delivery owner, the
+		// client-executed owner, and the shrug this branch used to end in.
 		expect(failure.message).not.toContain('BUNDLE DELIVERED');
-		expect(failure.rehydrateReloads, 'an unproven diagnosis must not spend the reload budget').toBe(0);
+		expect(failure.message).not.toContain('ENTRY CHUNK FETCH FAILED');
+		expect(failure.message, 'the document answers here, so the record must not shrug').not.toContain('UNKNOWN');
+		expect(failure.rehydrateReloads, 'there is no asset here to re-fetch').toBe(0);
+	});
+
+	test('an ordinary gate site tells a bundle that arrived and died from one that never arrived', async ({ page }) => {
+		// The empty-but-delivered chunk again, at the ordering every real spec
+		// uses: navigate first, wait second. The Playwright-side record misses
+		// the fetch entirely, and the old reading here was the hedged UNKNOWN -
+		// which left the most common gate failure shape covered by one sentence
+		// naming three owners. The document's resource timeline holds the fetch
+		// with its status, so the verdict now excludes delivery by evidence.
+		await page.route('**/_app/immutable/entry/*.js', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/javascript', body: '' })
+		);
+		await page.goto('/');
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'a page with no running client must fail the wait').not.toBeNull();
+		expect(failure.message).toContain('BUNDLE DELIVERED, CLIENT SILENT');
+		expect(failure.message, 'the verdict must name its source').toContain('resource timeline');
+		expect(failure.message).not.toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message).not.toContain('ENTRY CHUNK FETCH FAILED');
+		expect(failure.message).not.toContain('UNKNOWN');
+		expect(failure.rehydrateReloads, 'a delivered bundle is not fixed by re-fetching it').toBe(0);
+	});
+
+	test('an ordinary gate site names a delivery failure it never saw, without spending the reload', async ({ page }) => {
+		// The delivery-failure owner at the same ordering. The reload predicate
+		// must not move: it is gated on a failure the record saw ITSELF, and
+		// this record was armed after the navigation, so the verdict names the
+		// fault from the document's timeline while the reload budget stays
+		// unspent. Promoting timeline evidence to the proven wording would be
+		// the retry firing on hearsay.
+		await page.route('**/_app/immutable/entry/*.js', (route) => route.abort());
+		await page.goto('/');
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'a page whose entry chunk never arrived must fail the wait').not.toBeNull();
+		expect(failure.message).toContain('ENTRY CHUNK FETCH FAILED');
+		expect(failure.message, 'the verdict must say it does not gate the reload').toContain('does not gate the recovery reload');
+		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.message).not.toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message).not.toContain('UNKNOWN');
+		expect(failure.rehydrateReloads, 'timeline evidence must not spend the reload budget').toBe(0);
+	});
+
+	test('a document whose timeline has been erased is reported as unknown, not accused', async ({ page }) => {
+		// The honest fallback, produced rather than described. The document
+		// references a client, so "never requested" would be an accusation the
+		// evidence cannot support - but its resource timeline holds nothing,
+		// because this test erased it, which is indistinguishable from a
+		// timeline that overflowed or a browser that kept no record. The only
+		// evidence-backed answer left is the hedged one, and reaching anything
+		// more confident here would mean the reporter invents findings when its
+		// second source goes dark too.
+		await page.route('**/_app/immutable/entry/*.js', (route) =>
+			route.fulfill({ status: 200, contentType: 'application/javascript', body: '' })
+		);
+		await page.goto('/');
+		await page.evaluate(() => performance.clearResourceTimings());
+
+		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		expect(failure, 'a page with no running client must fail the wait').not.toBeNull();
+		expect(failure.message).toContain('UNKNOWN');
+		expect(failure.message, 'the hedge must say what evidence is missing').toContain('no legible entry chunk fetch');
+		expect(failure.message, 'a referenced client must shield the document from accusation').not.toContain('BUNDLE NEVER REQUESTED');
+		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.message).not.toContain('ENTRY CHUNK FETCH FAILED');
+		expect(failure.rehydrateReloads).toBe(0);
 	});
 
 });

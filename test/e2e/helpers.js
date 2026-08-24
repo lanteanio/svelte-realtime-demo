@@ -182,6 +182,95 @@ function watchPageFaults(page) {
 }
 
 /**
+ * Read the evidence the current document keeps about itself, for the record
+ * that arrived too late to have watched the load.
+ *
+ * Playwright reports traffic only from the moment a listener exists, and the
+ * ordinary gate site navigates before it waits - so the Playwright-side record
+ * is structurally blind there. The document is not: its resource timeline is
+ * per-document, written by the browser regardless of who is watching, and its
+ * markup says whether a client was ever referenced at all. Neither depends on
+ * when the observer arrived, which is exactly the property the late-armed
+ * record lacks.
+ *
+ * Returns null when the page cannot be asked - this runs only while a failure
+ * is already being reported, and a reporter that throws while reporting
+ * replaces the evidence with a stack trace about itself.
+ */
+async function harvestDocumentEvidence(page) {
+	try {
+		return await page.evaluate((entryPattern) => {
+			const entryChunk = new RegExp(entryPattern);
+			const entries = performance.getEntriesByType('resource')
+				.filter((entry) => entryChunk.test(entry.name))
+				.map((entry) => ({
+					url: entry.name,
+					// 0 is Chromium's value for a fetch that never got a response;
+					// null means the browser does not expose responseStatus at all.
+					status: typeof entry.responseStatus === 'number' ? entry.responseStatus : null,
+					transfer: entry.transferSize,
+					body: entry.decodedBodySize
+				}));
+			// MEASURED on this app's served document: the client is started by an
+			// INLINE bootstrap script whose text imports the entry chunk - there
+			// is no script[src] and no modulepreload link to find. All three
+			// reference shapes are counted so a preload-strategy change cannot
+			// silently turn every clientless-document verdict into a hedge.
+			const external = [...document.querySelectorAll('script[src], link[rel="modulepreload"]')]
+				.map((el) => el.src ?? el.href)
+				.filter((url) => typeof url === 'string' && url.includes('/_app/')).length;
+			const inline = [...document.querySelectorAll('script:not([src])')]
+				.filter((el) => (el.textContent ?? '').includes('/_app/immutable/')).length;
+			return { entries, clientRefs: external + inline };
+		}, ENTRY_CHUNK.source);
+	} catch {
+		return null;
+	}
+}
+
+/** A timeline entry that carried the chunk. Cache hits transfer 0 bytes but
+ * decode plenty and report their status, so status is the primary signal and
+ * body size only stands in where a browser reports no status at all. */
+function timelineDelivered(entry) {
+	if (entry.status !== null) return entry.status >= 200 && entry.status < 400;
+	return entry.body > 0;
+}
+
+/** A timeline entry that provably did not deliver: an error status, or a fetch
+ * that moved no bytes and reported none. */
+function timelineFailed(entry) {
+	if (entry.status !== null) return entry.status === 0 || entry.status >= 400;
+	return entry.transfer === 0 && entry.body === 0;
+}
+
+/**
+ * The three-way reading for a record that was armed after the navigation,
+ * sourced from the document instead of from traffic the record never saw.
+ * Falls back to the honest UNKNOWN only where the document's evidence is
+ * itself missing or unreadable.
+ */
+function diagnoseFromDocument(dom) {
+	const lateArmed = 'this record was armed after the page had already navigated, so it saw none of the traffic for the current document';
+	if (!dom) {
+		return `PAGE LIKELY NEVER HYDRATED: no app socket was constructed and the status never left its server-rendered value. Whether a client was ever requested is UNKNOWN here - ${lateArmed}, and the document's own evidence could not be read. Arm it before the navigation to tell a bundle that never arrived from one that arrived and did nothing.`;
+	}
+	const delivered = dom.entries.find(timelineDelivered);
+	if (delivered) {
+		const status = delivered.status === null ? `${delivered.body} bytes decoded` : `status ${delivered.status}`;
+		return `BUNDLE DELIVERED, CLIENT SILENT: the document's own resource timeline shows the entry chunk arrived (${status}, ${delivered.url}) and no app socket was constructed. Delivery is therefore excluded, and a reload would not fix this - the client either never executed or executed without opening a socket. The timeline is per-document and written by the browser itself, so it does not depend on when this record arrived.`;
+	}
+	const failed = dom.entries.find(timelineFailed);
+	if (failed) {
+		const status = failed.status === null ? 'no readable status' : `status ${failed.status}`;
+		return `ENTRY CHUNK FETCH FAILED: the document's own resource timeline shows the entry chunk was requested and never delivered (${status}, ${failed.transfer} bytes transferred, ${failed.url}). That is a delivery fault. It is read from the page's timeline rather than observed directly, so it does not gate the recovery reload - only a failure this record saw itself may spend that budget.`;
+	}
+	if (dom.entries.length === 0 && dom.clientRefs === 0) {
+		return 'BUNDLE NEVER REQUESTED: the current document references no client at all - no /_app/ script, no modulepreload, and no inline bootstrap naming /_app/immutable/ - and its resource timeline holds no entry chunk fetch. That is a fault in what was served, not in the network under it. Read from the document itself, which does not depend on when this record arrived.';
+	}
+	return `PAGE LIKELY NEVER HYDRATED: no app socket was constructed and the status never left its server-rendered value. The document references a client (${dom.clientRefs} /_app/ reference(s)) but its resource timeline holds no legible entry chunk fetch, so whether one was ever made is UNKNOWN here - ${lateArmed}.`;
+}
+
+/**
  * An aborted request is the page or the test cancelling it - a navigation away,
  * a fetch a spec deliberately interrupts - and never the host running out of
  * anything. `/demos/denials` alone produces three per run. Counting those as
@@ -232,7 +321,7 @@ function provenHydrationFailure(faults) {
  * for some other reason must not be mislabelled, since 'the page never booted'
  * and 'the page booted and could not connect' have opposite fixes.
  */
-function diagnoseHydration(probe, faults) {
+function diagnoseHydration(probe, faults, dom) {
 	const proven = provenHydrationFailure(faults);
 	if (proven) return `PAGE NEVER HYDRATED: ${proven}`;
 	// No direct evidence, so fall back to the shape a dead bundle leaves behind:
@@ -250,7 +339,13 @@ function diagnoseHydration(probe, faults) {
 			return `BUNDLE DELIVERED, CLIENT SILENT: the entry chunk arrived (${delivered[0].status} ${delivered[0].url}) and no app socket was constructed. Delivery is therefore excluded, and a reload would not fix this - the client either never executed or executed without opening a socket.`;
 		}
 		if (chunks.length === 0 && !faults?.sawNavigation) {
-			return 'PAGE LIKELY NEVER HYDRATED: no app socket was constructed and the status never left its server-rendered value. Whether a client was ever requested is UNKNOWN here - this record was armed after the page had already navigated, so it saw none of the traffic for the current document. Arm it before the navigation to tell a bundle that never arrived from one that arrived and did nothing.';
+			// The record is structurally blind here - it was armed after the
+			// navigation - but the document is not. Its own resource timeline and
+			// markup carry the three-way answer this branch used to shrug at, so
+			// the ordinary gate site names an owner instead of the observer's
+			// blindness. Only where that evidence is itself unreadable does the
+			// hedged UNKNOWN remain.
+			return diagnoseFromDocument(dom);
 		}
 		if (chunks.length === 0) {
 			return 'BUNDLE NEVER REQUESTED: no entry chunk request was seen at all, so the document never reached the point of loading the client. That is a fault in what was served, not in the network under it.';
@@ -265,7 +360,7 @@ function diagnoseHydration(probe, faults) {
 }
 
 /** Render the probe's findings for a failure message. */
-function formatConnectionProbe(probe, faults) {
+function formatConnectionProbe(probe, faults, dom) {
 	if (!probe) return 'probe did not install';
 	const states = probe.states.map((s) => `${s.at}ms ${s.state}`).join(' -> ') || '(none captured)';
 	const sockets = probe.sockets.length
@@ -289,7 +384,7 @@ function formatConnectionProbe(probe, faults) {
 	if (faults?.errors.length) {
 		sections.push(`page errors:\n${faults.errors.map((m) => `  ${m}`).join('\n')}`);
 	}
-	const verdict = faults ? diagnoseHydration(probe, faults) : null;
+	const verdict = faults ? diagnoseHydration(probe, faults, dom) : null;
 	if (verdict) sections.unshift(verdict);
 	return sections.join('\n');
 }
@@ -344,7 +439,10 @@ export async function waitForWS(page, timeout = WS_CONNECT_TIMEOUT) {
 			await page.reload().catch(() => {});
 			continue;
 		}
-		return finishConnectionWait(page, { ...attempt, faults }, reloads);
+		// Only a failure needs the document's own evidence, and only a failure
+		// can afford the evaluate: this stays off the passing path entirely.
+		const dom = attempt.failure ? await harvestDocumentEvidence(page) : null;
+		return finishConnectionWait(page, { ...attempt, faults, dom }, reloads);
 	}
 }
 
@@ -370,13 +468,13 @@ async function attemptConnectionWait(page, timeout) {
 }
 
 /** Report the outcome of the final attempt, and throw if it failed. */
-function finishConnectionWait(page, { probe, faults, failure, elapsed }, reloads) {
+function finishConnectionWait(page, { probe, faults, failure, elapsed, dom }, reloads) {
 	// Never let a recovered wait pass silently. A run's log has to show how
 	// often this fired, or a rising rate of a host fault becomes invisible
 	// exactly the way the original false-failure rate was.
 	const after = reloads ? ` after ${reloads} rehydrate reload(s)` : '';
 	if (failure) {
-		failure.message = `${failure.message}\n\n--- connection probe (${elapsed}ms${after}) ---\n${formatConnectionProbe(probe, faults)}`;
+		failure.message = `${failure.message}\n\n--- connection probe (${elapsed}ms${after}) ---\n${formatConnectionProbe(probe, faults, dom)}`;
 		// Carry the structured probe on the error too. A failure is exactly when
 		// a caller most wants the socket list, and a thrown wait has no return
 		// value to put it in.
