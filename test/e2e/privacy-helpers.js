@@ -95,6 +95,15 @@ export async function assertSameRound(page, startRoundId, during) {
  * new window's event count, which the caller re-baselines, and they cannot
  * add a second distinct contributor.
  *
+ * The guard covers the WHOLE body, not only the steps that detect a crossing
+ * themselves. Only the helpers that read the round id throw RoundRolled; a
+ * poll on a count, a cohort assertion, a snapshot comparison all fail with
+ * ordinary errors when the tumble resets what they were reading. On any such
+ * failure the round is re-read: moved means the boundary explains it and the
+ * attempt is retried, unchanged means the failure is real and is rethrown
+ * as-is. A genuine bug that coincides with a tumble costs one retry and then
+ * fails again in a stable round, still loud.
+ *
  * @param {import('@playwright/test').Page} page
  * @param {(round: { roundId: number, distinct: number, k: number, resetInSeconds: number }, attempt: number) => Promise<any>} run
  */
@@ -105,9 +114,33 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 		try {
 			return await run(round, attempt)
 		} catch (err) {
-			if (!(err instanceof RoundRolled)) throw err
-			rolled = err
-			noteRoll(`attempt ${attempt} of ${attempts}: ${err.message}`)
+			if (err instanceof RoundRolled) {
+				rolled = err
+				noteRoll(`attempt ${attempt} of ${attempts}: ${err.message}`)
+				continue
+			}
+			// A failure that is not a detected crossing may still be the
+			// boundary presenting through whichever step was running: every
+			// round-scoped number resets at the tumble, so a poll that timed
+			// out or a count that read wrong WHILE the round moved is
+			// explained by the boundary, and only the steps that read the
+			// round id ever throw RoundRolled themselves. If the round is
+			// unchanged the failure is real and stays loud. The read is
+			// guarded so a page that cannot answer rethrows the original
+			// failure rather than a reporter error about the check.
+			let current = null
+			try {
+				current = await roundState(page)
+			} catch {
+				throw err
+			}
+			if (current === null || current.roundId === round.roundId) throw err
+			rolled = new RoundRolled(
+				round.roundId,
+				current.roundId,
+				`running a round-scoped step whose failure the boundary explains: ${String(err?.message ?? err).split('\n')[0]}`
+			)
+			noteRoll(`attempt ${attempt} of ${attempts}: ${rolled.message}`)
 		}
 	}
 	throw rolled

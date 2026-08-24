@@ -4,10 +4,13 @@ import { sharedIdentityState } from './helpers.js'
 import {
 	inStableRound,
 	openPrivacy,
+	pinRoundId,
 	protectedSnapshot,
 	rawState,
 	roundState,
+	STAGED_ROUND_STEP,
 	submitMood,
+	unpinRoundId,
 	waitForDistinct,
 	waitForProtected
 } from './privacy-helpers.js'
@@ -91,6 +94,48 @@ test.describe('cluster: /demos/privacy', () => {
 			})
 		} finally {
 			await Promise.allSettled(contexts.map((context) => context.close()))
+		}
+	})
+
+	// Placed last: it submits without asserting anything about the cohort, and
+	// its submissions would otherwise change where the sequence test above
+	// starts. A test that stages faults absorbs their cost.
+	test('a boundary presenting through an ordinary step costs the attempt, not the test', async ({ browser }) => {
+		// The failure shape this file actually produced on the tier was not a
+		// detected crossing: it was a poll timing out on a count the tumble had
+		// reset, thrown with no round awareness at all, which aborted the whole
+		// sequence before any retry could run. Staged deterministically here:
+		// the round id is pinned to a foreign value so the guard's re-read sees
+		// a moved round, while the failing step is an ordinary poll timeout.
+		// The retry's second window may sit out most of a minute waiting for
+		// the headroom it asks for, same as the sequence test above.
+		test.setTimeout(150_000)
+		const ctx = await browser.newContext({ baseURL: INSTANCE_A })
+		const page = await ctx.newPage()
+		try {
+			await openPrivacy(page, `${INSTANCE_A}/demos/privacy`)
+			const attempts = []
+			const outcome = await inStableRound(page, async (round, attempt) => {
+				attempts.push(attempt)
+				if (attempt === 1) {
+					await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
+					// An ordinary step, the waitForDistinct shape: a poll on a
+					// count that will not reach its target, with nothing in it
+					// that reads the round id or throws RoundRolled.
+					await expect.poll(async () => (await rawState(page)).n, { timeout: 1500 })
+						.toBe(Number.MAX_SAFE_INTEGER)
+				}
+				await unpinRoundId(page)
+				// The second window runs a REAL step the first attempt never
+				// reached, so the retry provably hands back a working sequence
+				// rather than only a fresh loop iteration.
+				const submitted = await submitMood(page, 2)
+				return { roundId: submitted.roundId, attempt }
+			}, { freshRound: { minSecondsLeft: 30, requireRoom: false } })
+			expect(attempts, 'the boundary must cost the attempt, not the test').toEqual([1, 2])
+			expect(outcome.attempt).toBe(2)
+		} finally {
+			await ctx.close()
 		}
 	})
 })

@@ -262,6 +262,9 @@ test.describe('/demos/privacy', () => {
 	// and what its baseline count means. A test that stages faults has to be
 	// the one that absorbs their cost.
 	test('a round boundary is named as a boundary and retried, not reported as lost submissions', async ({ page }) => {
+		// Owns several fresh-round waits and four real submissions; the default
+		// 30s budget leaves no room for an unlucky wall-clock phase.
+		test.setTimeout(120_000)
 		const anyRound = { minSecondsLeft: 1, requireRoom: false }
 		await openPrivacy(page)
 
@@ -305,6 +308,38 @@ test.describe('/demos/privacy', () => {
 		expect(await inStableRound(page, async () => { ran++; return 'clean' }, { freshRound: anyRound })).toBe('clean')
 		expect(ran).toBe(1)
 
+		// A failure the boundary EXPLAINS is converted to a retry. Most steps
+		// of a round-scoped sequence never read the round id: a poll on a
+		// count the tumble reset fails as an ordinary timeout, not as a
+		// RoundRolled, and aborting the sequence on it is the boundary killing
+		// the test through a side door. The staged crossing makes the guard's
+		// re-read see a moved round while the thrown error knows nothing of
+		// rounds at all.
+		const conversions = []
+		const converted = await inStableRound(page, async (round, attempt) => {
+			conversions.push(attempt)
+			if (attempt === 1) {
+				await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
+				throw new Error('a poll timed out reading a count the tumble reset')
+			}
+			await unpinRoundId(page)
+			return 'ran after the conversion'
+		}, { freshRound: anyRound })
+		expect(conversions, 'an explained failure must cost the attempt, not the test').toEqual([1, 2])
+		expect(converted).toBe('ran after the conversion')
+
+		// And the conversion is evidence-gated: the same ordinary failure in a
+		// round that did NOT move stays loud and unretried, because a retry on
+		// an unexplained failure would be a real bug getting a second chance
+		// to pass. Headroom is asked for so a real tumble cannot land inside
+		// this block and explain the failure by accident.
+		let plainRuns = 0
+		await expect(inStableRound(page, async () => {
+			plainRuns++
+			throw new Error('a real failure in a stable round')
+		}, { freshRound: { minSecondsLeft: 5, requireRoom: false } })).rejects.toThrow('a real failure in a stable round')
+		expect(plainRuns, 'an unexplained failure must not be retried').toBe(1)
+
 		// The submission helper is where this actually presented in the gate,
 		// so its crossing path is exercised rather than reasoned about. The
 		// staged roll lands after the starting read and before the raw count
@@ -324,6 +359,10 @@ test.describe('/demos/privacy', () => {
 	})
 
 	test('a submission the page never applies is reported as published, not as missing', async ({ page }) => {
+		// The fresh-round wait below qualifies only in the first seconds of a
+		// minute, so an unlucky wall-clock phase legitimately costs most of
+		// one; the default 30s budget turned that phase into a coin flip.
+		test.setTimeout(120_000)
 		// The gap this closes is the ENRICHMENT path itself. The helper's other
 		// failure route - a round boundary - is raised after the poll succeeds and
 		// never enters the catch, so nothing until now drove the branch that
