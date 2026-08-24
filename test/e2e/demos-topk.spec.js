@@ -682,4 +682,46 @@ test.describe('/demos/topk', () => {
 			await context.close()
 		}
 	})
+
+	test('speed and bias are shared state: a change in one browser reaches the other without a reload', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		try {
+			const a = await ctxA.newPage()
+			const b = await ctxB.newPage()
+			await open(a)
+			await open(b)
+			await restoreDefaults(a)
+			await expect(b.getByTestId('speed-input')).toHaveValue('5', { timeout: 10_000 })
+
+			// Asserting the event RATE would not discriminate here: the cron
+			// reads both values out of Redis, so the firehose already changed
+			// for everyone. It was the readout that disagreed until a reload.
+			await setSpeed(a, 9)
+			await expect(b.getByTestId('speed-input')).toHaveValue('9', { timeout: 10_000 })
+
+			// Bias travels on the same topic, and is asserted separately
+			// because a subscriber told about one and not the other would be a
+			// smaller version of the same bug.
+			await setBias(a, 'monopoly')
+			await expect(b.getByTestId('bias-monopoly')).toHaveClass(/btn-primary/, { timeout: 10_000 })
+			await expect(b.getByTestId('bias-uniform')).not.toHaveClass(/btn-primary/)
+
+			// Changing one must not reset the other, which a single shared
+			// payload makes possible to get wrong.
+			await setSpeed(a, 2)
+			await expect(b.getByTestId('speed-input')).toHaveValue('2', { timeout: 10_000 })
+			await expect(b.getByTestId('bias-monopoly')).toHaveClass(/btn-primary/)
+
+			// And it travels both ways, not only from whoever loaded first.
+			await setBias(b, 'hot')
+			await expect(a.getByTestId('bias-hot')).toHaveClass(/btn-primary/, { timeout: 10_000 })
+		} finally {
+			const restore = await ctxA.newPage()
+			await open(restore, NAV).catch(() => {})
+			await restoreDefaults(restore)
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
 })

@@ -120,6 +120,9 @@ function pickItem(bias) {
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
 	await redis.redis.set(SPEED_KEY, num)
+	// Published after the write, so a subscriber that reacts by re-reading
+	// cannot observe the old value.
+	ctx.publish(TOPICS.demoTopkControl, 'set', { speed: num, bias: await getBias() })
 	return { ok: true, speed: num }
 })
 
@@ -133,8 +136,30 @@ export const setBias = live(async (ctx, b) => {
 		throw new LiveError('VALIDATION', 'invalid bias')
 	}
 	await redis.redis.set(BIAS_KEY, b)
+	ctx.publish(TOPICS.demoTopkControl, 'set', { speed: await getSpeed(), bias: b })
 	return { ok: true, bias: b }
 })
+
+/**
+ * The firehose controls as live shared state, rather than values each page
+ * sampled once on the way in.
+ *
+ * The simulation was already shared: the setters write to Redis and the cron
+ * reads from there, so every browser's stream really did change together.
+ * Only the READOUT disagreed - a page learned speed and bias at load and was
+ * never told they changed, so two browsers sat at different settings above an
+ * identical firehose and reloading looked like the fix.
+ *
+ * Both values ride one topic because they describe one control panel: a
+ * subscriber that learned about a bias change but not the rate beside it would
+ * be a smaller version of the same bug. The loader returns the same shape the
+ * setters publish, so a subscriber cannot tell the initial read from a change.
+ */
+export const topkControls = live.stream(
+	TOPICS.demoTopkControl,
+	async () => ({ speed: await getSpeed(), bias: await getBias() }),
+	{ merge: 'set' }
+)
 
 /**
  * Page-load state probe. Returns the current speed/bias so the page

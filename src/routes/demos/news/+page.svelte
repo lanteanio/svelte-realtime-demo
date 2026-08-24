@@ -20,6 +20,7 @@
 		newsStories,
 		trending,
 		newsStats,
+		newsControls,
 		signPublish,
 		setSpeed,
 		myNewsState
@@ -47,14 +48,20 @@
 			trending.last30s.subscribe((v) => { last30s = v ?? { counts: {}, top: [] } }),
 			trending.thisMinute.subscribe((v) => { thisMinute = v ?? { counts: {}, top: [] } }),
 			trending.lifetime.subscribe((v) => { lifetime = v ?? { counts: {}, top: [] } }),
-			newsStats.subscribe((v) => { stats = v ?? stats })
+			newsStats.subscribe((v) => { stats = v ?? stats }),
+			// The rate is shared state, so it is read from the stream rather
+			// than sampled once: another browser moving the slider moves this
+			// one, instead of leaving the two disagreeing until a reload.
+			newsControls.subscribe((v) => { if (typeof v?.speed === 'number') speedVal = v.speed })
 		]
 		return () => { for (const off of offs) off() }
 	})
 
 	onMount(async () => {
+		// The rate deliberately does NOT come from here any more; the stream
+		// above owns it. The lengths are fixed server config, so a one-shot
+		// read is the right shape for them.
 		const s = await myNewsState()
-		speedVal = s?.speed ?? 5
 		maxHeadlineLen = s?.maxHeadlineLen ?? 80
 		maxSummaryLen = s?.maxSummaryLen ?? 200
 	})

@@ -264,6 +264,7 @@ declare module "$live/demos/news" {
   export const setSpeed: (...args: any[]) => Promise<any>;
   export const signPublish: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
+  export const newsControls: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const newsStories: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const newsStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const trending: {
@@ -411,6 +412,7 @@ declare module "$live/demos/topk" {
   export const setBias: (...args: any[]) => Promise<any>;
   export const myTopkState: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
+  export const topkControls: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const trending: {
     "last10s": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
     "last1min": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };

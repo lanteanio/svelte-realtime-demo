@@ -16,7 +16,7 @@
 -->
 <script>
 	import { onMount } from 'svelte'
-	import { trending, setSpeed, setBias, myTopkState } from '$live/demos/topk'
+	import { trending, topkControls, setSpeed, setBias, myTopkState } from '$live/demos/topk'
 
 	let items = $state([])
 	let speedVal = $state(5)
@@ -32,16 +32,24 @@
 			trending.last10s.subscribe((v) => { last10s = v ?? { counts: {}, top: [] } }),
 			trending.last1min.subscribe((v) => { last1min = v ?? { counts: {}, top: [] } }),
 			trending.thisMinute.subscribe((v) => { thisMinute = v ?? { counts: {}, top: [] } }),
-			trending.lifetime.subscribe((v) => { lifetime = v ?? { counts: {}, top: [] } })
+			trending.lifetime.subscribe((v) => { lifetime = v ?? { counts: {}, top: [] } }),
+			// Speed and bias are shared state, so they are read from the stream
+			// rather than sampled once: another browser changing either moves
+			// this one, instead of leaving the two disagreeing until a reload.
+			topkControls.subscribe((v) => {
+				if (typeof v?.speed === 'number') speedVal = v.speed
+				if (typeof v?.bias === 'string') biasVal = v.bias
+			})
 		]
 		return () => { for (const off of offs) off() }
 	})
 
 	onMount(async () => {
+		// Speed and bias deliberately do NOT come from here any more; the
+		// stream above owns them. The item catalog is fixed server config, so
+		// a one-shot read is the right shape for it.
 		const s = await myTopkState()
 		items = s?.items ?? []
-		speedVal = s?.speed ?? 5
-		biasVal = s?.bias ?? 'uniform'
 	})
 
 	function nameById(id) {

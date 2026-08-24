@@ -247,12 +247,35 @@ export async function purge(ctx) {
 }
 
 /**
+ * The firehose rate as live shared state, rather than a number each page
+ * sampled once on the way in.
+ *
+ * The simulation was already shared: `setSpeed` writes the rate to Redis and
+ * the cron reads it from there, so every browser's feed really did speed up
+ * together. Only the READOUT disagreed - a page learned the rate at load and
+ * was never told it changed, so two browsers sat at different numbers above
+ * an identical stream and reloading looked like the fix. The rate now travels
+ * the way every other shared value in these demos does.
+ *
+ * The loader returns the same shape the setter publishes, so a subscriber
+ * cannot tell the initial read from a later change.
+ */
+export const newsControls = live.stream(
+	TOPICS.demoNewsControl,
+	async () => ({ speed: await getSpeed() }),
+	{ merge: 'set' }
+)
+
+/**
  * Set the firehose rate (0-50 events/sec). Capped well below the
  * default publish-rate threshold (5000/sec per topic).
  */
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
 	await redis.redis.set(SPEED_KEY, num)
+	// Published after the write, so a subscriber that reacts by re-reading
+	// cannot observe the old value.
+	ctx.publish(TOPICS.demoNewsControl, 'set', { speed: num })
 	return { ok: true, speed: num }
 })
 

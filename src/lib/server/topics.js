@@ -41,8 +41,14 @@ export const TOPICS = defineTopics({
 	demoNotificationsActivity: 'demos:notifications:activity',
 	demoTopkEvent: 'demos:topk:event',
 	demoTopkBase: 'demos:topk',
+	// The firehose controls each carry a topic of their own so a change reaches
+	// every open page. The values live in Redis, which the cron already reads,
+	// so the simulation was shared before this existed; the topic is what makes
+	// the READOUT shared, instead of a number each page sampled once on load.
+	demoTopkControl: 'demos:topk:control',
 	demoNewsStories: 'demos:news:stories',
 	demoNewsView: 'demos:news:view',
+	demoNewsControl: 'demos:news:control',
 	demoNewsTopkBase: 'demos:news:topk',
 	demoJobsList: 'demos:jobs:list',
 	demoJobsStats: 'demos:jobs:stats',

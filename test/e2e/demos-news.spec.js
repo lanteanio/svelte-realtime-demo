@@ -246,6 +246,44 @@ test.describe('/demos/news', () => {
 		}
 	})
 
+	test('the firehose rate is shared state: a change in one browser reaches the other without a reload', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		try {
+			const a = await ctxA.newPage()
+			const b = await ctxB.newPage()
+			await open(a)
+			await open(b)
+
+			// Both sides start at the default, so asserting 7 requires B to
+			// actually move. Asserting the event RATE instead would not
+			// discriminate: the cron reads the value from Redis, so the
+			// firehose already changed for everyone. It is the readout that
+			// used to disagree until a reload.
+			await expect(b.getByTestId('news-speed-input')).toHaveValue('5')
+			await setSpeed(a, 7)
+			await expect(b.getByTestId('news-speed-input')).toHaveValue('7', { timeout: 10_000 })
+			await expect(b.getByTestId('news-speed-label')).toHaveText('7 view events/sec')
+
+			// A second, different change, chosen at the pause edge because its
+			// label takes the other branch: one arriving value could be a
+			// coincidence, and only this one exercises the zero case.
+			await setSpeed(a, 0)
+			await expect(b.getByTestId('news-speed-input')).toHaveValue('0', { timeout: 10_000 })
+			await expect(b.getByTestId('news-speed-label')).toHaveText('paused')
+
+			// And it travels both ways, not just from whoever loaded first.
+			await setSpeed(b, 3)
+			await expect(a.getByTestId('news-speed-input')).toHaveValue('3', { timeout: 10_000 })
+		} finally {
+			const restore = await ctxA.newPage()
+			await open(restore)
+			await setSpeed(restore, 5)
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
 	test('panel title and subtitle separate onto their own lines at narrow rungs', async ({ page }) => {
 		await open(page)
 		const header = page.getByTestId('lb-news-last30s').locator('h2').first()
