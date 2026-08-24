@@ -232,7 +232,23 @@
 	let durationSec = $state(8)
 	let listing = $state(false)
 	let lastResult = $state(null)
+	// The lot whose outcome the result banner is waiting on. createAuction
+	// answers 'listed' the moment the lot is published - it does not wait
+	// out the auction - so the final status arrives where every other
+	// participant already reads it: the lot's record landing on the recent
+	// stream. The effect below swaps the banner from 'listed' to that
+	// record when it does.
+	let pendingLotId = $state(null)
 	let formError = $state('')
+
+	$effect(() => {
+		if (pendingLotId === null) return
+		const settled = recentList.find((r) => r.id === pendingLotId)
+		if (settled) {
+			lastResult = settled
+			pendingLotId = null
+		}
+	})
 
 	const myActiveCount = $derived(activeList.filter((l) => l.sellerId === me?.id).length)
 	// The first unmet listing rule, said out loud instead of a mute disable.
@@ -271,6 +287,9 @@
 				recipientIds
 			})
 			lastResult = result
+			// A 'listed' answer is not the outcome; arm the banner to settle
+			// from the recent stream. Any other status (no-bidders) is final.
+			pendingLotId = result.status === 'listed' ? result.id : null
 			item = ''
 		} catch (err) {
 			formError = err?.code ? `${err.code}: ${err.message ?? ''}` : (err?.message ?? String(err))
@@ -327,6 +346,7 @@
 		if (r.status === 'sold') return `sold to ${r.winnerName} for $${r.soldPrice}`
 		if (r.status === 'no-sale') return 'no-sale (reserve not met)'
 		if (r.status === 'no-bidders') return 'no-bidders (nobody else online)'
+		if (r.status === 'listed') return 'listed - bidding is open'
 		return r.status
 	}
 </script>

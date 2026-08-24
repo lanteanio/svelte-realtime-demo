@@ -228,6 +228,64 @@ test.describe('/demos/auctions', () => {
 		}
 	})
 
+	test('the slider maximum lists immediately: the answer is the listing, not the outcome', async ({ browser }) => {
+		// The top of the duration slider used to be deterministically
+		// unusable: collecting bids needs durationSec*1000 plus the push
+		// grace, which at the maximum exceeds the RPC's own timeout, so the
+		// one value the control itself offers as its ceiling could never
+		// succeed - and the band below it was a latency coin flip. The
+		// listing now answers the moment the lot is published, the outcome
+		// travels the recent stream, and this pins the previously impossible
+		// input from the included side: the maximum itself.
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await a.goto('/demos/auctions')
+			await b.goto('/demos/auctions')
+			await expect.poll(
+				async () => (await a.getByTestId('list-submit').textContent()) ?? '',
+				{ timeout: 8_000 }
+			).toMatch(/[1-9]\d* bidder/)
+			await waitForPushReady(a, b)
+
+			const item = `lot-${RUN}-max-duration`
+			await a.getByTestId('list-item-input').fill(item)
+			await a.getByTestId('list-start-input').fill('10')
+			await a.getByTestId('list-reserve-input').fill('15')
+			await a.getByTestId('list-duration-input').fill('30')
+			const listedAt = Date.now()
+			await a.getByTestId('list-submit').click()
+
+			// The answer must arrive in listing time, not auction time: 5s is
+			// generous for a round trip and a sixth of the duration, so a
+			// regression to awaiting the run cannot pass this wait.
+			await expect(a.getByTestId('list-result-text')).toHaveText('listed - bidding is open', { timeout: 5_000 })
+			expect(Date.now() - listedAt, 'the listing must not wait out the auction').toBeLessThan(15_000)
+
+			// The form is free again while the lot runs - listing is a submit,
+			// not a thirty-second lease on the page. The button is back to its
+			// rest label, and naming a new item re-arms it.
+			await expect(a.getByTestId('list-submit')).not.toContainText('Listing...')
+			await a.getByTestId('list-item-input').fill(`${item}-next`)
+			await expect(a.getByTestId('list-submit')).toBeEnabled()
+
+			// And the lot really is live everywhere it should be: the seller's
+			// active rail counts it down and the bidder holds a bid card.
+			await expect(a.getByTestId('active-card').filter({ hasText: item })).toBeVisible({ timeout: 5_000 })
+			const bCard = b.getByTestId('inbox-card').filter({ hasText: item })
+			await expect(bCard).toBeVisible({ timeout: 8_000 })
+			// Pass rather than leaving the push to its timeout, so the run's
+			// only remaining wait is the listed duration itself. The lot then
+			// settles in the background; nothing here waits for it.
+			await bCard.getByTestId('inbox-card-pass').click()
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
 	test('reserve-not-met: B bids below reserve, A sees no-sale', async ({ browser }) => {
 		const ctxA = await browser.newContext()
 		const ctxB = await browser.newContext()

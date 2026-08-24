@@ -142,6 +142,79 @@ export const myAuctionsState = live(async () => ({
 }))
 
 /**
+ * Collect bids for one lot and settle it. Runs DETACHED from the RPC
+ * that listed the lot: fans out one `live.push` per recipient, each
+ * accepted bid is appended to lot.bids, HSET back to the cluster-shared
+ * lot record, and a fresh 'updated' event is published immediately,
+ * driving the live race. After Promise.allSettled (every reply has
+ * resolved, passed, or timed out) and the listed duration has elapsed,
+ * the highest bid above reserve wins; otherwise no-sale. The lot is
+ * removed from active and archived to the recent stream, which is how
+ * every participant - the seller included - learns the outcome.
+ *
+ * `ctx.publish` is platform-scoped, not request-scoped, so publishing
+ * after the listing RPC has returned is the same operation the crons
+ * perform; nothing here depends on the RPC still being open.
+ */
+async function runAuction(ctx, lot, recipientIds) {
+	const { id, startingPrice, reservePrice, deadlineAt } = lot
+	const timeoutMs = lot.durationSec * 1000 + PUSH_GRACE_MS
+	const payload = publicLot(lot)
+
+	await Promise.allSettled(recipientIds.map(async (toUserId) => {
+		try {
+			const reply = await live.push({ userId: toUserId }, PUSH_EVENT, payload, { timeoutMs })
+			if (!reply || reply.pass === true) return
+			const amount = Math.floor(Number(reply.amount))
+			if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_PRICE) return
+			if (amount < startingPrice) return
+			lot.bids.push({
+				bidderId: toUserId,
+				bidderName: sanitizeName(reply.bidderName),
+				bidderColor: sanitizeColor(reply.bidderColor),
+				amount,
+				ts: Date.now()
+			})
+			// Persist the new bid into the cluster-shared lot record so a
+			// spectator joining mid-auction on any replica sees the bid via
+			// the loader, not only via subsequently-arriving live events.
+			await redis.redis.hset(ACTIVE_KEY, id, JSON.stringify(publicLot(lot)))
+			ctx.publish(TOPICS.demoAuctionsActive, 'updated', publicLot(lot))
+		} catch {
+			// NOT_FOUND, timeout, handler-error: silent. Treated as pass.
+		}
+	}))
+
+	// Honor the listed duration as a minimum even when all replies land
+	// early. Without this, a single-bidder reply collapses the lot in
+	// milliseconds and reads visually as "click Bid = item sold." The
+	// per-bid `ctx.publish` already fired inside the map, so spectators
+	// keep watching the live waterfall + countdown while we wait here.
+	const remaining = deadlineAt - Date.now()
+	if (remaining > 0) {
+		await new Promise((resolve) => setTimeout(resolve, remaining))
+	}
+
+	await redis.redis.hdel(ACTIVE_KEY, id)
+	ctx.publish(TOPICS.demoAuctionsActive, 'deleted', { id })
+
+	if (lot.bids.length === 0) {
+		await archive(lot, 'no-sale', null, null, ctx)
+		return
+	}
+
+	const sorted = lot.bids.slice().sort((a, b) => b.amount - a.amount || a.ts - b.ts)
+	const top = sorted[0]
+	if (top.amount < reservePrice) {
+		await archive(lot, 'no-sale', null, null, ctx)
+		return
+	}
+
+	const winner = { id: top.bidderId, name: top.bidderName, color: top.bidderColor }
+	await archive(lot, 'sold', winner, top.amount, ctx)
+}
+
+/**
  * The headline RPC. Object-arg form:
  *
  *   createAuction({
@@ -153,14 +226,19 @@ export const myAuctionsState = live(async () => ({
  *   })
  *
  * Validates inputs, publishes the lot to the active-lots stream so
- * spectators see it appear, then fans out one `live.push` per
- * recipient (excluding self, deduped, capped). Each push that returns
- * a valid bid is appended to lot.bids, HSET back to the cluster-shared
- * lot record, and a fresh 'updated' event is published immediately,
- * driving the live race. After Promise.allSettled (every reply has
- * resolved, passed, or timed out), the highest bid above reserve wins;
- * otherwise no-sale. The lot is removed from active and archived to
- * the recent stream.
+ * spectators see it appear, starts the bidding run in the background,
+ * and returns `{ status: 'listed' }` IMMEDIATELY. It does not wait for
+ * the auction: at the slider's maximum the collection needs
+ * durationSec*1000 + PUSH_GRACE_MS to settle, which is longer than the
+ * caller's own RPC timeout - an await here made the top of the slider
+ * deterministically unusable, and every other value a spinner for its
+ * whole duration. The outcome arrives where every other participant
+ * already reads it: the lot leaves the active stream and lands on the
+ * recent stream with its final status.
+ *
+ * The one case still answered synchronously is `no-bidders`: there is
+ * no run to wait for, and the immediate final answer is what the empty
+ * room deserves.
  */
 export const createAuction = live(async (ctx, args) => {
 	const sellerId = ctx.user?.id
@@ -233,77 +311,31 @@ export const createAuction = live(async (ctx, args) => {
 		return { ok: true, status: 'no-bidders', id, soldPrice: null, winnerId: null, winnerName: null }
 	}
 
-	const timeoutMs = durationSec * 1000 + PUSH_GRACE_MS
-	const payload = publicLot(lot)
-
-	await Promise.allSettled(recipientIds.map(async (toUserId) => {
+	// Detached on purpose - see runAuction's doc for why the RPC must not
+	// wait. The catch is the backstop for the awaits the run makes between
+	// bids (Redis writes, the archive): the run must not die leaving the
+	// lot live forever, so cleanup is attempted and the failure is logged
+	// rather than swallowed. No recent record is fabricated for a run that
+	// crashed - the lot simply leaves the active stream.
+	runAuction(ctx, lot, recipientIds).catch(async (err) => {
+		console.error(`[auctions] bidding run for lot ${id} failed:`, err)
 		try {
-			const reply = await live.push({ userId: toUserId }, PUSH_EVENT, payload, { timeoutMs })
-			if (!reply || reply.pass === true) return
-			const amount = Math.floor(Number(reply.amount))
-			if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_PRICE) return
-			if (amount < startingPrice) return
-			lot.bids.push({
-				bidderId: toUserId,
-				bidderName: sanitizeName(reply.bidderName),
-				bidderColor: sanitizeColor(reply.bidderColor),
-				amount,
-				ts: Date.now()
-			})
-			// Persist the new bid into the cluster-shared lot record so a
-			// spectator joining mid-auction on any replica sees the bid via
-			// the loader, not only via subsequently-arriving live events.
-			await redis.redis.hset(ACTIVE_KEY, id, JSON.stringify(publicLot(lot)))
-			ctx.publish(TOPICS.demoAuctionsActive, 'updated', publicLot(lot))
-		} catch {
-			// NOT_FOUND, timeout, handler-error: silent. Treated as pass.
-		}
-	}))
+			await redis.redis.hdel(ACTIVE_KEY, id)
+			ctx.publish(TOPICS.demoAuctionsActive, 'deleted', { id })
+		} catch { /* redis is down; the record is unreachable either way */ }
+	})
 
-	// Honor the listed duration as a minimum even when all replies land
-	// early. Without this, a single-bidder reply collapses the lot in
-	// milliseconds and reads visually as "click Bid = item sold." The
-	// per-bid `ctx.publish` already fired inside the map, so spectators
-	// keep watching the live waterfall + countdown while we wait here.
-	const remaining = deadlineAt - Date.now()
-	if (remaining > 0) {
-		await new Promise((resolve) => setTimeout(resolve, remaining))
-	}
-
-	await redis.redis.hdel(ACTIVE_KEY, id)
-	ctx.publish(TOPICS.demoAuctionsActive, 'deleted', { id })
-
-	if (lot.bids.length === 0) {
-		await archive(lot, 'no-sale', null, null, ctx)
-		return { ok: true, status: 'no-sale', id, soldPrice: null, winnerId: null, winnerName: null }
-	}
-
-	const sorted = lot.bids.slice().sort((a, b) => b.amount - a.amount || a.ts - b.ts)
-	const top = sorted[0]
-	if (top.amount < reservePrice) {
-		await archive(lot, 'no-sale', null, null, ctx)
-		return { ok: true, status: 'no-sale', id, soldPrice: null, winnerId: null, winnerName: null }
-	}
-
-	const winner = { id: top.bidderId, name: top.bidderName, color: top.bidderColor }
-	await archive(lot, 'sold', winner, top.amount, ctx)
-	return {
-		ok: true,
-		status: 'sold',
-		id,
-		soldPrice: top.amount,
-		winnerId: winner.id,
-		winnerName: winner.name
-	}
+	return { ok: true, status: 'listed', id, deadlineAt, recipientCount: recipientIds.length }
 })
 
 /**
  * Wipe the recent-results list. Active lots are intentionally NOT
- * purged: an in-flight createAuction is awaiting Promise.allSettled
- * over per-bidder live.push calls, and yanking the lot out from under
- * those awaiters would orphan the seller's RPC. Active lots already
- * self-evict at their deadline (durationSec, max MAX_DURATION_SEC =
- * 30s), so the worst case is a 30s wait before Redis drains itself.
+ * purged: each has a bidding run awaiting Promise.allSettled over its
+ * per-bidder live.push calls, and yanking the lot out from under those
+ * awaiters would have the run settle a lot the world no longer shows.
+ * Active lots already self-evict at their deadline (durationSec, max
+ * MAX_DURATION_SEC = 30s), so the worst case is a 30s wait before
+ * Redis drains itself.
  */
 export async function purge(ctx) {
 	const raws = await redis.redis.lrange(RECENT_KEY, 0, -1)
