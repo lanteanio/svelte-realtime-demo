@@ -316,6 +316,45 @@ test.describe('/demos/flash-sales', () => {
 		}
 	})
 
+	test('a reset made elsewhere clears this visitor\'s claimed badge, not only the pool', async ({ browser }) => {
+		// The half a pool number cannot carry: a reset wipes every claim
+		// server-side, and the other browser used to receive the pool going
+		// back to full while its own green Claimed badge stayed - the shared
+		// value updated and the per-visitor flag lied beside it. The reset
+		// event now carries the one bit that distinguishes it from a claim,
+		// and this pins that the OTHER browser's badge and button both return
+		// to their unclaimed state without a reload.
+		const first = await browser.newContext()
+		const second = await browser.newContext()
+		try {
+			const a = await first.newPage()
+			await reset(a)
+			const b = await second.newPage()
+			await openSale(b)
+
+			await b.getByTestId('coupon-claim').click()
+			await expect(b.getByTestId('coupon-result')).toHaveText(/Claimed:.*SAVE20/)
+			await expect(b.getByTestId('coupon-claim')).toHaveText('Re-check coupon')
+			await expect(a.getByTestId('coupon-pool')).toHaveText('49')
+
+			await confirmAndClick(a.getByTestId('reset'))
+
+			// The pool returning to full was never the hard part; the badge
+			// and the button are. Both must clear in the browser that did NOT
+			// reset, with no reload anywhere.
+			await expect(b.getByTestId('coupon-pool')).toHaveText('50')
+			await expect(b.getByTestId('coupon-result')).toHaveCount(0)
+			await expect(b.getByTestId('coupon-claim')).toHaveText(/Claim coupon/)
+
+			// And the cleared state is real, not cosmetic: a fresh claim works.
+			await b.getByTestId('coupon-claim').click()
+			await expect(b.getByTestId('coupon-result')).toHaveText(/Claimed:.*SAVE20/)
+			await expect(b.getByTestId('coupon-pool')).toHaveText('49')
+		} finally {
+			await Promise.allSettled([first.close(), second.close()])
+		}
+	})
+
 	test('a tab opened before the claim still reads Already claimed, and the pool moves once', async ({ browser }) => {
 		// One context so both tabs carry the SAME identity cookie - the coupon
 		// rule is per user, so two contexts would be two users and prove nothing.

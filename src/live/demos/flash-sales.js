@@ -378,7 +378,13 @@ export const resetSale = live(async (ctx) => {
 			ctx.publish(TOPICS.demoFlashSales, 'deleted', { id: s.id })
 		} catch { /* corrupt entry already gone */ }
 	}
-	ctx.publish(TOPICS.demoFlashCoupons, 'set', { poolRemaining: COUPON_POOL_INITIAL })
+	// `reset: true` is the one bit the pool number cannot carry: a claim and a
+	// reset both arrive as 'set' with a poolRemaining, and a subscriber holding
+	// a green "Claimed" badge has no way to tell "the pool moved" from "your
+	// claim was wiped" without it. The marker rides the event only - the
+	// stream's loader never returns it - so a fresh subscriber cannot mistake
+	// the resting value for a reset that concerns it.
+	ctx.publish(TOPICS.demoFlashCoupons, 'set', { poolRemaining: COUPON_POOL_INITIAL, reset: true })
 	for (const p of PRODUCTS_INITIAL) {
 		ctx.publish(TOPICS.demoFlashProducts, 'updated', {
 			id: p.id,

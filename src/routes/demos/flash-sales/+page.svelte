@@ -70,6 +70,16 @@
 	$effect(() => {
 		const off = couponPool.subscribe((v) => {
 			if (v && typeof v.poolRemaining === 'number') poolLive = v.poolRemaining
+			// A reset made in ANY browser wipes every claim server-side, and the
+			// pool number alone cannot say so - a claim and a reset both arrive
+			// as a new poolRemaining. Without clearing here, this tab kept its
+			// green "Claimed" badge beside a full pool: the reset applied and
+			// the per-visitor flag lied. The marker rides only the reset event,
+			// so an ordinary claim elsewhere never clears anyone's badge.
+			if (v?.reset) {
+				couponResult = null
+				state = { ...state, alreadyClaimed: false }
+			}
 		})
 		return () => off()
 	})
