@@ -431,12 +431,17 @@ test.describe('/demos/todos-rollback', () => {
 			// Reading the computed min-* separates "the label carries it" from "the
 			// control was grown to meet it": a control enlarged to 40px passes a bare
 			// "under 44" check while being exactly the redesign the label rule exists
-			// to avoid. checkbox-md draws at 24px, so the ceiling sits just above its
-			// designed size instead of at the floor.
+			// to avoid. The drawn size itself is pinned at the number, not under a
+			// ceiling: this checkbox is checkbox-md on a coarse rung and daisyUI
+			// draws that at exactly 24px, while a ceiling would admit every redesign
+			// smaller than itself - one size up (checkbox-lg) is a visibly different
+			// 28px control. Half a pixel of tolerance for subpixel layout.
 			expect(parseFloat(geometry.minWidth) || 0, 'the drawn control must not carry the floor').toBeLessThan(44)
 			expect(parseFloat(geometry.minHeight) || 0, 'the drawn control must not carry the floor').toBeLessThan(44)
-			expect(geometry.drawn.width, 'the DRAWN control keeps its designed size').toBeLessThanOrEqual(28)
-			expect(geometry.drawn.height, 'the DRAWN control keeps its designed size').toBeLessThanOrEqual(28)
+			expect(geometry.drawn.width, 'the DRAWN control keeps its designed 24px width').toBeGreaterThan(23.5)
+			expect(geometry.drawn.width, 'the DRAWN control keeps its designed 24px width').toBeLessThan(24.5)
+			expect(geometry.drawn.height, 'the DRAWN control keeps its designed 24px height').toBeGreaterThan(23.5)
+			expect(geometry.drawn.height, 'the DRAWN control keeps its designed 24px height').toBeLessThan(24.5)
 			await expectTouchTarget(li.locator('[data-testid^="todo-remove-"]'))
 
 			await li.locator('[data-testid^="todo-remove-"]').click()
