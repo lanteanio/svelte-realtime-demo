@@ -169,7 +169,7 @@
 
 		<div class="card bg-base-100 border border-base-300" data-testid="cluster-cron-instances">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Instances seen</h2>
+				<h2 class="card-title text-sm">Instances seen in the tick log</h2>
 				{#if seenInstanceIds.length === 0}
 					<p class="opacity-40 text-xs">Waiting...</p>
 				{:else}
@@ -182,12 +182,23 @@
 								{:else if id === myInstanceId}
 									<span class="badge badge-xs badge-ghost">self</span>
 								{:else}
-									<span class="badge badge-xs badge-outline">follower</span>
+									<span class="badge badge-xs badge-outline">past leader</span>
 								{/if}
 							</li>
 						{/each}
 					</ul>
 				{/if}
+				<!-- This list is derived from tick authors plus the replica serving
+				     this page - it cannot be a roster, because only the leader ever
+				     writes a tick and that restraint is the demo's whole point. The
+				     caption keeps a healthy N-replica deploy from reading as N-2
+				     dead ones. -->
+				<p class="text-xs opacity-60" data-testid="cluster-cron-instances-note">
+					Only the current leader writes ticks, so replicas that correctly
+					stay silent never appear here. However many replicas a deploy
+					runs, this list shows the leader, you, and any past leaders -
+					it is not a roster of every instance.
+				</p>
 			</div>
 		</div>
 	</div>

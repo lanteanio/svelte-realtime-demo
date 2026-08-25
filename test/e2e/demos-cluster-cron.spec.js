@@ -140,6 +140,19 @@ test.describe('/demos/cluster-cron', () => {
 		expectContinuousNewestFirst(await tickSeqs(page))
 		await expect(page.getByTestId('instance-leader-badge')).toHaveCount(1)
 		expect(await page.getByTestId('cluster-cron-instance-row').count()).toBeGreaterThanOrEqual(1)
+
+		// The panel's honesty about its own derivation. The list is tick
+		// authors plus the serving replica, and only the leader ever writes a
+		// tick - so on a multi-replica deploy a correct system shows fewer
+		// rows than replicas, and without the caption that read as dead
+		// replicas to exactly the audience this demo exists for. The heading
+		// must state the derivation and the caption must say silent replicas
+		// never appear, so neither can quietly revert to roster language.
+		await expect(page.getByTestId('cluster-cron-instances')).toContainText('Instances seen in the tick log')
+		const note = page.getByTestId('cluster-cron-instances-note')
+		await expect(note).toBeVisible()
+		await expect(note).toContainText('Only the current leader writes ticks')
+		await expect(note).toContainText('not a roster')
 	})
 
 	test('the only page drill-down navigates to durable jobs and back to a live ticking view', async ({ page }) => {
