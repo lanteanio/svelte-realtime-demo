@@ -86,6 +86,47 @@ test.describe('/demos/shooter', () => {
 		expect(errors).toEqual([])
 	})
 
+	test('movement stays predicted at the slider maximum: your dot never lags your keys', async ({ page }) => {
+		const errors = collectShooterErrors(page)
+		await openShooter(page)
+		const slider = page.getByTestId('sh-lag')
+		await slider.fill('600')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 600ms' })).toBeVisible()
+		await slider.blur()
+
+		// The stopwatch runs inside the page so runner round-trips cannot eat
+		// the margin: dispatch the keydown, then sample the own dot every
+		// animation frame until its position attribute moves. Prediction means
+		// the dot moves on the next movement tick (~33ms); the defect this
+		// pins wrapped the whole command - prediction included - in the
+		// slider's setTimeout, so at 600ms the first movement could not arrive
+		// under 600ms and the budget below cannot be met.
+		const ms = await page.evaluate(() => new Promise((resolve) => {
+			const me = document.querySelector('[data-testid="sh-me"]')
+			const x0 = me.getAttribute('data-x')
+			const y0 = me.getAttribute('data-y')
+			const t0 = performance.now()
+			window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd' }))
+			const tick = () => {
+				if (me.getAttribute('data-x') !== x0 || me.getAttribute('data-y') !== y0) {
+					window.dispatchEvent(new KeyboardEvent('keyup', { key: 'd' }))
+					resolve(performance.now() - t0)
+					return
+				}
+				if (performance.now() - t0 > 3000) {
+					window.dispatchEvent(new KeyboardEvent('keyup', { key: 'd' }))
+					resolve(-1)
+					return
+				}
+				requestAnimationFrame(tick)
+			}
+			requestAnimationFrame(tick)
+		}))
+		expect(ms, 'the dot must move at all').toBeGreaterThan(0)
+		expect(ms, `first movement arrived ${Math.round(ms)}ms after keydown with the slider at 600`).toBeLessThan(500)
+		expect(errors).toEqual([])
+	})
+
 	test('Space fires without a pointer, and a lagged send still acknowledges the input instantly', async ({ page }) => {
 		const errors = collectShooterErrors(page)
 		await openShooter(page)

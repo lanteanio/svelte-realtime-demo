@@ -32,14 +32,19 @@
 	})
 	$effect(() => () => view.destroy())
 
-	// --- Artificial extra latency on YOUR sends (the demo's subject) ---
+	// --- Artificial extra latency on YOUR shots (the demo's subject) ---
+	//
+	// Shots ONLY, never movement. `view.command` is where the local
+	// prediction runs - the dot moves on the same frame the key is down -
+	// so wrapping it in the invented delay lags the INPUT, not the send:
+	// at the slider's top the player's own dot trailed every keypress by
+	// 600ms, which reads as broken controls rather than as simulated
+	// latency. The channel offers no way to predict now and transmit
+	// later, and the slider's subject never needed one: the fairness
+	// story it exists for - the rewind measured from when the send
+	// leaves, aim ageing while a shot waits - is entirely about shots.
 	let lagMs = $state(0)
 	let shotsFired = $state(0)
-
-	function sendCommand(cmd) {
-		if (lagMs > 0) setTimeout(() => view.command(cmd), lagMs)
-		else view.command(cmd)
-	}
 
 	function scheduleFire(angle) {
 		const send = () => {
@@ -200,7 +205,7 @@
 			if (held.has('right')) dx += STEP
 			if (held.has('up')) dy -= STEP
 			if (held.has('down')) dy += STEP
-			if (dx !== 0 || dy !== 0) sendCommand({ type: 'move', dx, dy })
+			if (dx !== 0 || dy !== 0) view.command({ type: 'move', dx, dy })
 		}
 		raf = requestAnimationFrame(loop)
 		return () => cancelAnimationFrame(raf)
@@ -342,9 +347,11 @@
 						<span class="absolute right-0">600</span>
 					</div>
 					<p class="text-xs opacity-60">
-						Delays your command/shoot sends with a
-						<code>setTimeout</code> wrapper. The shot fires (and the
-						muzzle flash draws) when the send actually leaves, and the
+						Delays your shots with a
+						<code>setTimeout</code> wrapper - movement stays predicted
+						and immediate, so your own dot never lags your keys. The shot
+						fires (and the muzzle flash draws) when the send actually
+						leaves, and the
 						render-time it carries is stamped at that moment - so the
 						server rewinds to when the send left, not to when you
 						clicked. Your aim keeps ageing during the wait while the
