@@ -182,6 +182,60 @@ function watchPageFaults(page) {
 }
 
 /**
+ * WCAG contrast arithmetic over computed-style colour strings, shared by the
+ * specs that assert what actually reaches the screen rather than which class
+ * was applied. `channelsOf` parses the numeric channels out of an rgb()/
+ * rgba() computed value; luminance and ratio follow the WCAG 2.x formulae.
+ */
+function channelsOf(value) {
+	return (String(value).match(/[\d.]+/g) ?? []).map(Number);
+}
+
+/** The alpha channel of a computed colour, 1 where none is present. */
+export function alphaOfComputed(value) {
+	const parts = channelsOf(value);
+	return parts.length > 3 ? parts[3] : 1;
+}
+
+export function luminanceOfComputed(value) {
+	// The browser serializes a computed colour in the space it was authored
+	// in: identity hexes come back as rgb(), the theme palette comes back as
+	// oklch() because that is what the design tokens are. Reading oklch
+	// channels as if they were rgb bytes produces a confidently wrong ratio,
+	// so the two spaces get their own paths to the same WCAG relative
+	// luminance - which is a dot product over LINEAR sRGB, reached via gamma
+	// expansion for rgb() and via the OKLab matrices for oklch().
+	const str = String(value);
+	if (str.startsWith('oklch')) {
+		const [L = 0, C = 0, H = 0] = channelsOf(str);
+		const hRad = (H * Math.PI) / 180;
+		const a = C * Math.cos(hRad);
+		const b = C * Math.sin(hRad);
+		const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+		const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+		const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+		const rLin = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+		const gLin = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+		const bLin = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+		const clamp = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+		return 0.2126 * clamp(rLin) + 0.7152 * clamp(gLin) + 0.0722 * clamp(bLin);
+	}
+	const [r = 0, g = 0, b = 0] = channelsOf(str);
+	const channel = (byte) => {
+		const s = byte / 255;
+		return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+	};
+	return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+export function contrastOfComputed(a, b) {
+	const la = luminanceOfComputed(a);
+	const lb = luminanceOfComputed(b);
+	const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+	return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
  * Read the evidence the current document keeps about itself, for the record
  * that arrived too late to have watched the load.
  *

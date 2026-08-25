@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { contrastOfComputed, expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 
 const RUN = `e2e-${Date.now()}`
 
@@ -283,6 +283,63 @@ test.describe('/demos/auctions', () => {
 		} finally {
 			await ctxA.close()
 			await ctxB.close()
+		}
+	})
+
+	test('the bid input renders its value visibly inside a live lot card, in both themes', async ({ browser }) => {
+		// Typing into 'your bid' on a live lot showed nothing: the value bound
+		// (the button beside it updated), the number was simply invisible -
+		// the input sits inside a coloured alert card and inherited a text
+		// colour meant for the card, not for its own field. The class is not
+		// the claim; the rendered contrast is, so this measures the computed
+		// colour against the computed background the glyphs actually paint
+		// over, per theme, and asserts the WCAG AA floor for normal text.
+		for (const colorScheme of ['light', 'dark']) {
+			const ctxA = await browser.newContext({ colorScheme })
+			const ctxB = await browser.newContext({ colorScheme })
+			const a = await ctxA.newPage()
+			const b = await ctxB.newPage()
+			try {
+				await a.goto('/demos/auctions')
+				await b.goto('/demos/auctions')
+				await expect.poll(
+					async () => (await a.getByTestId('list-submit').textContent()) ?? '',
+					{ timeout: 8_000 }
+				).toMatch(/[1-9]\d* bidder/)
+				await waitForPushReady(a, b)
+
+				const item = `lot-${RUN}-contrast-${colorScheme}`
+				await a.getByTestId('list-item-input').fill(item)
+				await a.getByTestId('list-duration-input').fill('20')
+				await a.getByTestId('list-submit').click()
+
+				const bCard = b.getByTestId('inbox-card').filter({ hasText: item })
+				await expect(bCard).toBeVisible({ timeout: 8_000 })
+				const input = bCard.getByTestId('inbox-card-amount')
+				await input.fill('1000')
+				const styles = await input.evaluate((el) => {
+					const s = getComputedStyle(el)
+					// The background the glyphs paint over: the input's own when
+					// it has one, else the first opaque ancestor behind it.
+					let bg = s.backgroundColor
+					let node = el
+					while (/rgba\(\d+, \d+, \d+, 0\)|transparent/.test(bg) && node.parentElement) {
+						node = node.parentElement
+						bg = getComputedStyle(node).backgroundColor
+					}
+					return { color: s.color, background: bg }
+				})
+				const ratio = contrastOfComputed(styles.color, styles.background)
+				expect(
+					ratio,
+					`${colorScheme}: the typed amount renders ${styles.color} on ${styles.background} (${ratio.toFixed(2)}:1), below WCAG AA for normal text`
+				).toBeGreaterThanOrEqual(4.5)
+				// Pass so the background run settles this push immediately.
+				await bCard.getByTestId('inbox-card-pass').click()
+			} finally {
+				await ctxA.close()
+				await ctxB.close()
+			}
 		}
 	})
 

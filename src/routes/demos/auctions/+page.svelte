@@ -419,10 +419,15 @@
 							{#if card.state === 'pending'}
 								<form onsubmit={(e) => { e.preventDefault(); submitBid(card, card.draftAmount) }} class="flex gap-2 items-center">
 									<span class="text-xs opacity-60">your bid $</span>
-									<!-- Compact on fine pointers, 44px floor where taps land. -->
+									<!-- Compact on fine pointers, 44px floor where taps land.
+									     text-base-content is load-bearing: the surrounding alert
+									     sets a content colour for ITS background, the input keeps
+									     its own base-100 field, and in the dark theme the two
+									     nearly coincide - the typed amount was invisible. The
+									     field's text must be dressed for the field's surface. -->
 									<input
 										type="number"
-										class="input input-bordered input-sm w-28 pointer-coarse:min-h-11"
+										class="input input-bordered input-sm w-28 text-base-content pointer-coarse:min-h-11"
 										min={Math.max(1, (top ? top.amount + 1 : card.startingPrice))}
 										max={caps.maxPrice}
 										step="1"

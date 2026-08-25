@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { expectTouchTarget, openTouchPage } from './helpers.js'
+import { alphaOfComputed, contrastOfComputed, expectTouchTarget, openTouchPage } from './helpers.js'
 import {
 	REACTION_TOKENS,
 	animationTime,
@@ -14,35 +14,11 @@ import {
 	waitForReactionCount
 } from './multiplayer-helpers.js'
 
-// Computed colours arrive as `rgb(r, g, b)` / `rgba(r, g, b, a)`. These read
-// what actually reached the screen, because what matters here is the
-// rendered appearance and a class or an inline-style presence check is a proxy
-// for it. The WCAG rule itself is exercised across the whole identity palette
-// in test/unit/label-contrast.test.js.
-function channelsOf(value) {
-	return (String(value).match(/[\d.]+/g) ?? []).map(Number)
-}
-
-function alphaOfComputed(value) {
-	const parts = channelsOf(value)
-	return parts.length > 3 ? parts[3] : 1
-}
-
-function luminanceOfComputed(value) {
-	const [r = 0, g = 0, b = 0] = channelsOf(value)
-	const channel = (byte) => {
-		const s = byte / 255
-		return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
-	}
-	return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-}
-
-function contrastOfComputed(a, b) {
-	const la = luminanceOfComputed(a)
-	const lb = luminanceOfComputed(b)
-	const [hi, lo] = la > lb ? [la, lb] : [lb, la]
-	return (hi + 0.05) / (lo + 0.05)
-}
+// Computed colours arrive as `rgb(r, g, b)` / `rgba(r, g, b, a)`. The shared
+// helpers read what actually reached the screen, because what matters here is
+// the rendered appearance and a class or an inline-style presence check is a
+// proxy for it. The WCAG rule itself is exercised across the whole identity
+// palette in test/unit/label-contrast.test.js.
 
 test.describe.configure({ mode: 'serial' })
 
