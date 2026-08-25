@@ -24,7 +24,6 @@ Open the page, get a random name, drop notes on a shared canvas. Every note, cur
 | `batch()` | svelte-realtime | Coalesce rapid note-drag moves into single WebSocket frames |
 | `ctx.batch()` | svelte-realtime | Server-side batched publish for arrangement actions and cron cleanup |
 | Optimistic updates | svelte-realtime | Note position updates instantly on drag, server confirms async |
-| Undo / redo | svelte-realtime | Ctrl+Z / Ctrl+Shift+Z to undo note actions |
 | `status` store | svelte-adapter-uws | Connection status dot in navbar (green/yellow/red) |
 | Redis pub/sub bus | extensions | Multi-instance deployment with cross-instance updates |
 | Input validation | server | Board titles, note content, colors, and coordinates are validated and bounded |
@@ -245,7 +244,7 @@ Playwright tests covering:
 - Board CRUD, note operations (create, edit, drag, delete, color, z-order)
 - Board settings (title, background), persistence across refresh
 - FAB menu (tidy, rearrange by color, shuffle, group by author)
-- Undo/redo (Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, textarea guard)
+- No-undo policy on the shared board (the chords and header carry no local-only restore)
 - Multi-user realtime sync (two browser contexts)
 - Presence and cursor overlay
 - Activity ticker
@@ -319,7 +318,7 @@ src/
 │   ├── +layout.svelte              -- Navbar, connection status, 'outdated bundle' reload banner
 │   ├── +layout.server.js           -- Identity cookie: read or generate
 │   ├── +page.svelte                -- Home: board list + searchable demo catalog
-│   ├── board/[slug]/               -- The sticky-notes board (canvas, FAB, undo/redo)
+│   ├── board/[slug]/               -- The sticky-notes board (canvas, FAB menu)
 │   ├── demos/                      -- One page per demo, shared sidebar layout
 │   ├── api/demos/                  -- Webhook sink + inbound news webhook + org/tenant switchers
 │   ├── healthz/                    -- Dependency-aware health (readiness is the adapter's /readyz)

@@ -11,7 +11,14 @@
 	- User actions call RPCs (createNote, moveNote, etc) over WebSocket
 	- RPCs update the database and publish events
 	- All connected clients receive events and update their local state
-	- Undo/redo is built into the notes stream (enableHistory)
+
+	The board offers no undo. The stream's history API restores a LOCAL
+	snapshot only - it issues no call and publishes nothing - so on a
+	shared board it would show the presser a restored note that stayed
+	deleted for everyone else. A control that looks collaborative and is
+	not is worse than no control, so none is offered. The kanban demo
+	shows what a real one costs: a compensating publish, scoped to your
+	own action, inside a stated window.
 -->
 <script>
 	import { notes, createNote, moveNote, editNote, deleteNote, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
@@ -35,14 +42,6 @@
 	const notesStore = $derived(notes(boardId))
 	const settingsStore = $derived(settings(boardId))
 	const activityStore = $derived(activity(boardId))
-
-	// Enable undo/redo once the notes stream has loaded.
-	// This tracks all created/updated/deleted events so Ctrl+Z works.
-	$effect(() => {
-		if ($notesStore !== undefined) {
-			notesStore.enableHistory()
-		}
-	})
 
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
@@ -82,26 +81,11 @@
 	// immediately and queues the server roundtrip. The server's confirming
 	// 'updated' event absorbs the queue entry by note_id (crud merge), so
 	// no manual snap-back protection or local-position bookkeeping needed.
-	// pauseHistory/resumeHistory still wraps the drag so undo/redo skips
-	// intermediate positions and only records the final landing spot.
-	let dragging = $state(false)
-
 	function handleMove(noteId, x, y) {
-		if (!dragging) {
-			dragging = true
-			notesStore.pauseHistory()
-		}
 		notesStore.mutate(
 			() => moveNote(boardId, noteId, x, y),
 			(current) => current.map(n => n.note_id === noteId ? { ...n, x, y } : n)
 		)
-	}
-
-	function handleMoveEnd() {
-		if (dragging) {
-			dragging = false
-			notesStore.resumeHistory()
-		}
 	}
 
 	// --- Z-ordering ---
@@ -130,27 +114,7 @@
 		return () => clearInterval(timer)
 	})
 
-	// --- Keyboard shortcuts ---
-	// Ctrl+Z = undo, Ctrl+Shift+Z or Ctrl+Y = redo.
-	// Disabled when typing in a textarea or input (so browser undo works there).
-	function onKeyDown(e) {
-		const tag = document.activeElement?.tagName
-		if (tag === 'TEXTAREA' || tag === 'INPUT') return
-		if (e.key === 'y' && (e.ctrlKey || e.metaKey)) {
-			e.preventDefault()
-			notesStore.redo()
-		} else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
-			e.preventDefault()
-			if (e.shiftKey) {
-				notesStore.redo()
-			} else {
-				notesStore.undo()
-			}
-		}
-	}
 </script>
-
-<svelte:window onkeydown={onKeyDown} />
 
 <!-- Loading state: notes stream hasn't returned data yet -->
 {#if $notesStore === undefined}
@@ -166,8 +130,6 @@
 		settings={$settingsStore}
 		onUpdate={(fields) => updateSettings(boardId, fields)}
 		onAddNote={handleAddNote}
-		onUndo={() => notesStore.undo()}
-		onRedo={() => notesStore.redo()}
 	>
 		<PresenceBar {boardId} />
 	</BoardHeader>
@@ -183,7 +145,6 @@
 				{note}
 				zIndex={note.z_index ?? 0}
 				onMove={(x, y) => handleMove(note.note_id, x, y)}
-				onMoveEnd={() => handleMoveEnd()}
 				onEdit={(fields) => editNote(boardId, note.note_id, fields)}
 				onDelete={() => deleteNote(boardId, note.note_id)}
 				onFocus={() => bringToFront(note.note_id)}

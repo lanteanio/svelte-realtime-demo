@@ -9,9 +9,9 @@
 -->
 <script>
 	import CountdownTimer from './CountdownTimer.svelte'
-	import { Clock, Plus, Undo2, Redo2 } from 'lucide-svelte'
+	import { Clock, Plus } from 'lucide-svelte'
 
-	let { settings, onUpdate, children, onAddNote, onUndo, onRedo } = $props()
+	let { settings, onUpdate, children, onAddNote } = $props()
 	let editingTitle = $state(false)
 
 	const BACKGROUNDS = ['#f5f5f4', '#fefce8', '#ecfdf5', '#eff6ff', '#fdf4ff', '#1e1e2e']
@@ -42,14 +42,6 @@
 			<Plus size={14} /> Note
 		</button>
 	{/if}
-	<!-- Undo/redo exist for every input, not just the keyboard chord. -->
-	{#if onUndo}
-		<div class="flex shrink-0">
-			<button class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={onUndo} aria-label="Undo" title="Undo (Ctrl+Z)" data-testid="board-undo"><Undo2 size={14} /></button>
-			<button class="btn btn-ghost btn-xs pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={onRedo} aria-label="Redo" title="Redo (Ctrl+Y)" data-testid="board-redo"><Redo2 size={14} /></button>
-		</div>
-	{/if}
-
 	<!-- Background colors (hidden on mobile to save space) -->
 	<div class="hidden sm:flex gap-1 shrink-0">
 		{#each BACKGROUNDS as bg}

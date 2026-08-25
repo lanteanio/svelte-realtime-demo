@@ -110,34 +110,6 @@ test.describe('/board/[slug]', () => {
 		await expect(activityTicker(page)).toContainText('removed a note')
 	})
 
-	test('Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y, textarea undo isolation, and delete restoration all work', async ({ page }) => {
-		await createFreshBoard(page, `Board history ${Date.now()}`)
-		await createNoteAt(page, 240, 220)
-		await expect(boardNotes(page)).toHaveCount(1)
-		await page.keyboard.press('Control+z')
-		await expect(boardNotes(page)).toHaveCount(0, { timeout: 10_000 })
-		await page.keyboard.press('Control+Shift+z')
-		await expect(boardNotes(page)).toHaveCount(1, { timeout: 10_000 })
-		await page.keyboard.press('Control+z')
-		await expect(boardNotes(page)).toHaveCount(0, { timeout: 10_000 })
-		await page.keyboard.press('Control+y')
-		await expect(boardNotes(page)).toHaveCount(1, { timeout: 10_000 })
-
-		const note = boardNotes(page).first()
-		await note.dblclick({ force: true })
-		const textarea = note.locator('textarea')
-		await textarea.fill('History draft')
-		await textarea.press('Control+z')
-		await expect(boardNotes(page)).toHaveCount(1)
-		await textarea.press('Escape')
-		await expect(note.locator('textarea')).toHaveCount(0)
-
-		await deleteNote(note)
-		await expect(boardNotes(page)).toHaveCount(0)
-		await page.keyboard.press('Control+z')
-		await expect(boardNotes(page)).toHaveCount(1, { timeout: 10_000 })
-	})
-
 	test('all four arrangement actions produce bounded deterministic layouts and the menu closes', async ({ page }) => {
 		await createFreshBoard(page, `Board arrange ${Date.now()}`)
 		const a = await createNoteAt(page, 100, 120)

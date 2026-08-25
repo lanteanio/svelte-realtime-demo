@@ -72,7 +72,7 @@
 			// Flush any pending move so the final landing position lands
 			// on the server even if pointerup races the rAF callback.
 			if (pendingMove) flushMove()
-			onMoveEnd()
+			onMoveEnd?.()
 		}
 	}
 

@@ -1,245 +1,93 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
-import { clickFabAction, createFreshBoard, openBoard, positions } from './board-helpers.js';
+import { createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
+import { clickFabAction, createFreshBoard, positions } from './board-helpers.js';
 
-let boardUrl;
+// The board offers NO undo, and this spec is what keeps that honest.
+//
+// The stream's history API restores a LOCAL snapshot only: it issues no call
+// and publishes nothing. Wired to Ctrl+Z on a shared board, it showed the
+// presser a restored note that stayed deleted for everyone else - a silent,
+// confidently wrong answer on the app's headline surface. The wiring is
+// removed rather than kept as a local convenience, because a control that
+// looks collaborative and is not misleads exactly the visitor who trusts it.
+//
+// Each test presses the gesture that used to lie and asserts from the state
+// the illusion used to repaint: a deleted note must STAY deleted on the
+// pressing screen, and a shuffle must STAY shuffled. If anyone rewires the
+// history API to these gestures, the repaint returns and these fail on the
+// spot - which is the intended tripwire. A real collaborative undo (a
+// compensating publish, scoped to your own action, like the kanban delete
+// toast) replaces this spec rather than relaxing it.
 
-test.describe.serial('Undo / Redo', () => {
-	test('setup: create a board', async ({ page }) => {
-		boardUrl = await createBoard(page, `Undo Test ${Date.now()}`);
-	});
+test.describe('No undo on the shared board', () => {
+	test('the header offers no undo controls and Ctrl+Z restores nothing, not even locally', async ({ page }) => {
+		await createFreshBoard(page, `No undo ${Date.now()}`);
 
-	test('Ctrl+Z undoes note creation', async ({ page }) => {
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
+		// Two notes, not one: the post-reload assertion expects a non-zero
+		// count, which a board that never finished loading cannot satisfy.
+		await createNote(page, 200, 260);
+		await createNote(page, 520, 260);
+		await expect(getNotes(page)).toHaveCount(2, { timeout: 15_000 });
 
-		// Create a note
-		await createNote(page, 300, 300);
-		expect(await getNotes(page).count()).toBe(1);
+		// The controls that carried the illusion are gone.
+		await expect(page.getByTestId('board-undo')).toHaveCount(0);
+		await expect(page.getByTestId('board-redo')).toHaveCount(0);
 
-		// Undo
+		const note = getNotes(page).first();
+		await note.hover({ force: true });
+		await page.getByLabel('Delete note').first().click({ force: true });
+		await expect(getNotes(page)).toHaveCount(1, { timeout: 10_000 });
+
+		// The exact gesture that used to repaint the deleted note. The old
+		// wiring restored it locally within a frame, so a bounded settle is
+		// enough for the tripwire: if the restore comes back, the count goes
+		// to 2 here and this fails.
 		await page.keyboard.press('Control+z');
 		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(0);
-	});
-
-	test('Ctrl+Shift+Z redoes undone action', async ({ page }) => {
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
-
-		const before = await getNotes(page).count();
-
-		// Create a note
-		await createNote(page, 300, 300);
-		expect(await getNotes(page).count()).toBe(before + 1);
-
-		// Undo
-		await page.keyboard.press('Control+z');
-		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(before);
-
-		// Redo
+		await expect(getNotes(page), 'Ctrl+Z must not repaint a deleted note').toHaveCount(1);
+		await page.keyboard.press('Control+y');
 		await page.keyboard.press('Control+Shift+z');
 		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(before + 1);
-	});
+		await expect(getNotes(page), 'the redo chords must be equally inert').toHaveCount(1);
 
-	test('Ctrl+Y also redoes', async ({ page }) => {
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
-
-		await createNote(page, 300, 300);
-		const countBefore = await getNotes(page).count();
-
-		await page.keyboard.press('Control+z');
-		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(countBefore - 1);
-
-		await page.keyboard.press('Control+y');
-		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(countBefore);
-	});
-
-	test('undo does nothing when editing a textarea', async ({ page }) => {
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
-
-		// Make sure we have a note
-		if (await getNotes(page).count() === 0) {
-			await createNote(page, 300, 300);
-		}
-		const countBefore = await getNotes(page).count();
-
-		// Double-click the note content area to edit
-		const noteContent = getNotes(page).first().locator('p');
-		await noteContent.dblclick({ force: true });
-		const textarea = page.locator('textarea');
-		await expect(textarea).toBeVisible();
-
-		// Ctrl+Z while in textarea should NOT undo note creation
-		await textarea.press('Control+z');
-		await page.waitForTimeout(500);
-
-		await textarea.press('Escape');
-		await page.waitForTimeout(500);
-
-		expect(await getNotes(page).count()).toBe(countBefore);
-	});
-
-	test('undo note deletion restores the note', async ({ page }) => {
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
-
-		if (await getNotes(page).count() === 0) {
-			await createNote(page, 300, 300);
-		}
-		const countBefore = await getNotes(page).count();
-
-		// Delete a note (force needed - canvas overlay has high z-index)
-		const note = getNotes(page).first();
-		await note.hover({ force: true });
-		await page.getByLabel('Delete note').first().click({ force: true });
-		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(countBefore - 1);
-
-		// Undo the deletion
-		await page.keyboard.press('Control+z');
-		await page.waitForTimeout(1500);
-		expect(await getNotes(page).count()).toBe(countBefore);
-	});
-
-	// What every assertion above actually measures, stated so the suite stops
-	// implying more than it checks.
-	//
-	// Undo here restores the LOCAL snapshot of the stream and nothing else: it
-	// issues no call, publishes nothing, and never reaches the server. Each test
-	// above reads the count in the same tab that pressed the key, which is the
-	// one place the restore is visible - so they would all pass exactly as they
-	// do now if the note stayed deleted everywhere else, which is what happens.
-	//
-	// This pins the behaviour that IS true rather than the one a visitor
-	// reasonably expects from a shared board, because an assertion that undo
-	// persists would fail today. Whether to make undo real or to stop offering a
-	// collaborative one is an open product decision; when it is taken, this test
-	// fails and has to be rewritten, which is the point of pinning it.
-	test('undo restores the local view only, and the deletion survives a reload', async ({ page }) => {
-		await page.goto(boardUrl);
-		await waitForWS(page);
-		await waitForBoardReady(page);
-
-		// Two notes, not one, and this is load-bearing. With a single note the
-		// post-reload assertion would expect ZERO, which a page that has not
-		// finished loading its notes satisfies just as well as a genuinely
-		// deleted note - the assertion would pass without the server ever being
-		// consulted. Expecting a non-zero count means the board must actually
-		// have loaded for the assertion to hold at all.
-		while (await getNotes(page).count() < 2) {
-			await createNote(page, 200 + (await getNotes(page).count()) * 320, 260);
-			await page.waitForTimeout(800);
-		}
-		const countBefore = await getNotes(page).count();
-		expect(countBefore, 'the reload assertion is vacuous below two notes').toBeGreaterThanOrEqual(2);
-
-		const note = getNotes(page).first();
-		await note.hover({ force: true });
-		await page.getByLabel('Delete note').first().click({ force: true });
-		await expect(getNotes(page)).toHaveCount(countBefore - 1, { timeout: 10_000 });
-
-		await page.keyboard.press('Control+z');
-		await expect(getNotes(page), 'the local view restores the note').toHaveCount(countBefore, { timeout: 10_000 });
-
-		// The reload is the whole test: it can only show what the server holds,
-		// so it separates a restored note from a repainted one.
+		// And the screen was telling the truth: the server agrees.
 		await page.reload();
 		await waitForWS(page);
 		await waitForBoardReady(page);
-		await expect(
-			getNotes(page),
-			'undo does not reach the server, so the note is still deleted after a reload'
-		).toHaveCount(countBefore - 1, { timeout: 10_000 });
-	});
-	// The board's four FAB actions rewrite EVERY note's position for every
-	// visitor and none of them is confirm-gated, so whether they are safe rests
-	// entirely on undo covering them. It does not, and nothing said so: the
-	// tests above only cover create and delete.
-	//
-	// Pinned as it behaves rather than as it ought to, because asserting the
-	// arrangement comes back would fail today. When undo is made real or
-	// withdrawn, this fails and has to be rewritten - which is the point.
-	test('undo does not reach a FAB shuffle: it repaints one screen and leaves everyone else shuffled', async ({ browser }) => {
-		const ctxA = await browser.newContext();
-		const ctxB = await browser.newContext();
-		const a = await ctxA.newPage();
-		const b = await ctxB.newPage();
-		try {
-			const boardUrl = await createFreshBoard(a, `FAB undo ${Date.now()}`);
-			// Spaced apart: a double-click landing on an existing note opens its
-			// editor instead of creating a neighbour.
-			for (const [x, y] of [[150, 150], [450, 150], [750, 150]]) await createNote(a, x, y);
-			await expect(getNotes(a)).toHaveCount(3, { timeout: 15_000 });
-
-			// The second visitor is the point. A FAB action rewrites
-			// every note's position for everyone connected, with no confirm step,
-			// so what the OTHER screen shows is the whole question.
-			await openBoard(b, boardUrl);
-			await expect(getNotes(b)).toHaveCount(3, { timeout: 15_000 });
-			const before = JSON.stringify(await positions(a));
-			await expect
-				.poll(async () => JSON.stringify(await positions(b)), { timeout: 15_000 })
-				.toBe(before);
-
-			await clickFabAction(a, 'Shuffle notes');
-			await expect
-				.poll(async () => JSON.stringify(await positions(a)), { timeout: 15_000 })
-				.not.toBe(before);
-			const shuffled = JSON.stringify(await positions(a));
-			// Shared state, confirmed on the other screen rather than assumed from
-			// the acting one.
-			await expect
-				.poll(async () => JSON.stringify(await positions(b)), { timeout: 15_000 })
-				.toBe(shuffled);
-
-			await a.locator('body').click({ position: { x: 5, y: 5 } });
-			await a.keyboard.press('Control+z');
-
-			// The FAB event DOES enter local history: the acting screen repaints to
-			// the arrangement it had before. Asserted rather than hedged: a test that
-			// permits the view to repaint or not leaves open the one question it
-			// exists to answer.
-			await expect
-				.poll(async () => JSON.stringify(await positions(a)), { timeout: 15_000 })
-				.toBe(before);
-
-			// And that repaint is the whole of the effect. Nobody else sees it.
-			await a.waitForTimeout(2000);
-			expect(
-				JSON.stringify(await positions(b)),
-				'the other visitor keeps the shuffled board, so undo is invisible to everyone but the person who pressed it'
-			).toBe(shuffled);
-
-			// A reload proves the acting screen was showing an illusion: no call
-			// was ever made, so the server still holds the shuffle.
-			await a.reload();
-			await waitForWS(a);
-			await waitForBoardReady(a);
-			expect(
-				JSON.stringify(await positions(a)),
-				'undo issues no call, so a reload restores the shuffle it appeared to remove'
-			).toBe(shuffled);
-
-			// This pins behaviour that is currently WRONG, deliberately: the four
-			// FAB actions are irreversible shared-state writes with no confirm, and
-			// undo only looks like a way back. Whichever way that is resolved -
-			// compensating calls that make undo real, or withdrawing the promise -
-			// this test must be rewritten with it rather than quietly relaxed.
-		} finally {
-			await Promise.allSettled([ctxA.close(), ctxB.close()]);
-		}
+		await expect(getNotes(page), 'the deletion was real and survives a reload').toHaveCount(1, { timeout: 10_000 });
 	});
 
+	test('Ctrl+Z after a FAB shuffle leaves the shuffle in place instead of repainting the old arrangement', async ({ page }) => {
+		await createFreshBoard(page, `No FAB undo ${Date.now()}`);
+		// Spaced apart: a double-click landing on an existing note opens its
+		// editor instead of creating a neighbour.
+		for (const [x, y] of [[150, 150], [450, 150], [750, 150]]) await createNote(page, x, y);
+		await expect(getNotes(page)).toHaveCount(3, { timeout: 15_000 });
+		const before = JSON.stringify(await positions(page));
+
+		await clickFabAction(page, 'Shuffle notes');
+		await expect
+			.poll(async () => JSON.stringify(await positions(page)), { timeout: 15_000 })
+			.not.toBe(before);
+		const shuffled = JSON.stringify(await positions(page));
+
+		// The old wiring repainted the pre-shuffle arrangement here - on this
+		// screen only - while every other visitor kept the shuffle. Now the
+		// pressing screen shows the same truth as everyone else's.
+		await page.locator('body').click({ position: { x: 5, y: 5 } });
+		await page.keyboard.press('Control+z');
+		await page.waitForTimeout(2000);
+		expect(
+			JSON.stringify(await positions(page)),
+			'the shuffle is shared state and stays; no local repaint pretends otherwise'
+		).toBe(shuffled);
+
+		await page.reload();
+		await waitForWS(page);
+		await waitForBoardReady(page);
+		expect(
+			JSON.stringify(await positions(page)),
+			'what the screen showed is what the server holds'
+		).toBe(shuffled);
+	});
 });
