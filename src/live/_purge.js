@@ -44,7 +44,10 @@
  * schema-evolution, flash-sales, from-seq, cluster-cron - none of them accept
  * user content into persistent state, only read-only counters or pre-seeded
  * data. Also skipped by design: alarms, forget, and privacy keep their state
- * in TTL'd Redis keys; collab-editor's doc snapshot carries a 24h Redis TTL;
+ * in TTL'd Redis keys (alarms additionally prunes fired records past 24h on
+ * read: the key TTL only drains an ABANDONED log, since every fire refreshes
+ * it, and a busy log would otherwise keep aged entries alive indefinitely);
+ * collab-editor's doc snapshot carries a 24h Redis TTL;
  * arena, shooter, lobbies, multiplayer, and ops hold only ephemeral in-memory
  * state. kanban has no purge yet and its shared board is unbounded - if it
  * attracts abuse, drop the CRDT topic on a cron via the authority's

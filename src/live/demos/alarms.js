@@ -37,11 +37,23 @@
  * The fired log is a Redis list so it is cluster-shared and survives
  * restarts alongside the alarm rows. Records hold only framework
  * timestamps - no user content, no PII.
+ *
+ * Retention is BOTH a count and an age. The cap alone bounded the list
+ * at twenty entries and nothing ever aged out: with light traffic a
+ * record from days ago sat in "Fired alarms" indefinitely, reading as
+ * staleness in a realtime demo. Fired records now leave after
+ * RETENTION_MS: the loader prunes aged entries on every run (they are
+ * removed by VALUE, not by index, so a concurrent fire pushing a new
+ * head cannot shift a live entry under the trim), and both Redis keys
+ * carry TTLs so an abandoned demo drains to nothing on its own - which
+ * is also what makes the purge module's "TTL'd Redis keys" exclusion
+ * true for this demo rather than aspirational.
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
 import { redis } from '$lib/server/redis'
 import { TOPICS } from '$lib/server/topics'
+import { partitionFired, RETENTION_MS } from '$lib/server/alarm-retention'
 
 const LOG_KEY = 'demos:alarms:fired'
 const PENDING_KEY = 'demos:alarms:pending'
@@ -49,14 +61,39 @@ const LOG_CAP = 20
 const MIN_SECONDS = 2
 const MAX_SECONDS = 600
 
-/** Read the fired-alarm log, newest first (LPUSH order). */
-async function readLog() {
-	const raws = await redis.redis.lrange(LOG_KEY, 0, LOG_CAP - 1)
-	const out = []
+/**
+ * Read the fired-alarm log, newest first (LPUSH order), pruning entries
+ * past RETENTION_MS as a side effect. Aged entries are removed by VALUE
+ * (LREM) rather than by trimming to an index: an alarm firing between
+ * the read and the trim pushes a new head, and an index-based trim
+ * computed from the stale read would cut that live record off instead
+ * of the aged tail. Corrupt entries are removed the same way. Each
+ * removal is published as 'deleted' so already-subscribed tabs converge
+ * without waiting for their next loader run; the CRUD merge makes a
+ * duplicate 'deleted' from two concurrent loaders a no-op.
+ * @param {(event: string, data: any) => void} [publish]
+ */
+async function readLog(publish) {
+	const raws = await redis.redis.lrange(LOG_KEY, 0, -1)
+	const records = []
+	const corrupt = []
 	for (const raw of raws) {
-		try { out.push(JSON.parse(raw)) } catch { /* skip corrupt entry */ }
+		try { records.push({ entry: JSON.parse(raw), raw }) } catch { corrupt.push(raw) }
 	}
-	return out
+	const { fresh, stale } = partitionFired(records, Date.now())
+	if (stale.length > 0 || corrupt.length > 0) {
+		const removal = redis.redis.multi()
+		for (const record of stale) removal.lrem(LOG_KEY, 1, record.raw)
+		for (const raw of corrupt) removal.lrem(LOG_KEY, 1, raw)
+		removal.pexpire(LOG_KEY, RETENTION_MS)
+		await removal.exec()
+		if (publish) {
+			for (const record of stale) {
+				if (typeof record.entry?.id === 'string') publish('deleted', { id: record.entry.id })
+			}
+		}
+	}
+	return fresh.slice(0, LOG_CAP).map((record) => record.entry)
 }
 
 /** Read the pending-alarm intent, or null when none is recorded. */
@@ -93,7 +130,7 @@ export const timers = live.stream(TOPICS.demoAlarmsLog, async (ctx) => {
 		// ctx.setAlarm is bound on the wire-subscribe path; a loader run
 		// reached another way (or a Redis blip) leaves the alarm as-is.
 	}
-	return readLog()
+	return readLog((event, data) => ctx.publish(event, data))
 }, {
 	merge: 'crud',
 	key: 'id',
@@ -110,6 +147,10 @@ export const timers = live.stream(TOPICS.demoAlarmsLog, async (ctx) => {
 			await redis.redis.multi()
 				.lpush(LOG_KEY, JSON.stringify(record))
 				.ltrim(LOG_KEY, 0, LOG_CAP - 1)
+				// The whole-key TTL, refreshed per fire: age-pruning happens on
+				// read, and this is what drains the key to nothing when nobody
+				// fires or reads for a day - the abandoned-demo half of retention.
+				.pexpire(LOG_KEY, RETENTION_MS)
 				.del(PENDING_KEY)
 				.exec()
 			ctx.publish('created', record)
@@ -130,7 +171,13 @@ export const schedule = live(async (ctx, inSeconds) => {
 		throw new LiveError('VALIDATION', `delay must be ${MIN_SECONDS}..${MAX_SECONDS} seconds`)
 	}
 	const at = Date.now() + Math.round(s * 1000)
-	await redis.redis.set(PENDING_KEY, JSON.stringify({ at, setAt: Date.now() }))
+	// TTL far beyond the fire time, never near it: the loader reads this key
+	// to reconcile the framework alarm, and an expiry that raced a pending
+	// alarm would read as a cancellation. Time-to-fire is capped at
+	// MAX_SECONDS, so fire-time plus a full retention window can only expire
+	// an intent that is long dead - a crash orphan the fire path never
+	// cleared - which is the one case the TTL exists for.
+	await redis.redis.set(PENDING_KEY, JSON.stringify({ at, setAt: Date.now() }), 'PX', Math.round(s * 1000) + RETENTION_MS)
 	ctx.publish(TOPICS.demoAlarmsControl, 'armed', { at })
 	return { ok: true, at }
 })
