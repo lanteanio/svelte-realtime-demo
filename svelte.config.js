@@ -44,6 +44,15 @@ const out = process.env.BUILD_OUT_DIR || 'build'
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
 	kit: {
+		// Every evaluation of this config inside one build must agree on
+		// version.name: the client bundle reads its hydration payload from
+		// globalThis.__sveltekit_<hash(version.name)>, and kit's default is
+		// Date.now() at evaluation time - so a config evaluated twice within
+		// a build can ship a client that reads another evaluation's global
+		// and hydrates nothing on any page. scripts/build.mjs pins the value
+		// once per build invocation; the fallback keeps ad-hoc builds
+		// working with today's semantics (one fresh version per build).
+		version: { name: process.env.SRD_BUILD_VERSION || String(Date.now()) },
 		adapter: adapter({
 			out,
 			// The app ships its own /healthz route with per-dependency readiness
