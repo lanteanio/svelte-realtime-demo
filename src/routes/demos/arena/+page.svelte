@@ -15,6 +15,7 @@
 <script>
 	import { onMount } from 'svelte'
 	import MovePad from '$lib/components/MovePad.svelte'
+	import { interestReading } from '$lib/interest-reading'
 	import { arena, population } from '$live/demos/arena'
 	import { apply, WORLD_W, WORLD_H } from '../../../live/demos/arena.shared.js'
 
@@ -204,11 +205,13 @@
 		return 1
 	}
 
-	const receiving = $derived(view.remote.size)
-	const totalRemote = $derived(Math.max(0, total - 1))
-	const pctCulled = $derived(
-		totalRemote > 0 ? Math.max(0, Math.round(100 * (1 - receiving / totalRemote))) : 0
-	)
+	// The numerator is live and the denominator is a 2s poll, so the pair can
+	// contradict itself while the world grows; interestReading states how that
+	// is reconciled and why.
+	const hudReading = $derived(interestReading(view.remote.size, total))
+	const receiving = $derived(hudReading.receiving)
+	const totalRemote = $derived(hudReading.total)
+	const pctCulled = $derived(hudReading.culled)
 </script>
 
 <svelte:window onkeydown={onKeydown} onkeyup={onKeyup} />
