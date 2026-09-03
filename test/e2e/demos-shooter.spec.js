@@ -178,6 +178,16 @@ test.describe('/demos/shooter', () => {
 			await holdKey(a, 'ArrowRight', 600)
 			await expect.poll(async () => Number(await remote.getAttribute('cx')), { timeout: 10_000 })
 				.toBeGreaterThan(remoteA?.x ?? ownA.x)
+
+			// And the visitor LEAVING is half of what a roster has to get right.
+			// Both contexts used to close in cleanup only, where nothing reads
+			// the result, so a player who disconnected and stayed on screen as a
+			// ghost dot - drifting or frozen where they left - would have passed
+			// every assertion above. Closing the context is the departure; the
+			// dot going with it is the claim.
+			await contextA.close()
+			await expect(remote, 'a departed visitor must leave the arena, not linger as a ghost dot')
+				.toHaveCount(0, { timeout: 20_000 })
 		} finally {
 			await Promise.allSettled([contextA.close(), contextB.close()])
 		}
