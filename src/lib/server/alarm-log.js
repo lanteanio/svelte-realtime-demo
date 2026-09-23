@@ -77,7 +77,7 @@ export async function readPending(client) {
  * Put a fired record at the head of the log and clear the intent it
  * fulfilled.
  * @param {AlarmRedis} client
- * @param {{ id: string, firedAt: number }} record
+ * @param {{ id: string, at: number, firedAt: number, lateMs: number, recovered: boolean }} record
  */
 export async function appendFired(client, record) {
 	await client.multi()
@@ -100,13 +100,14 @@ export async function clearPending(client) {
 }
 
 /**
- * Record the intent to fire at `at`, `delayMs` after `now`.
+ * Record the intent to fire `seconds` from now. Returns the fire time.
  * @param {AlarmRedis} client
- * @param {number} at
- * @param {number} delayMs
- * @param {number} now
+ * @param {number} seconds already validated by the caller
  */
-export async function writePending(client, at, delayMs, now) {
+export async function schedulePending(client, seconds) {
+	const now = Date.now()
+	const delayMs = Math.round(seconds * 1000)
+	const at = now + delayMs
 	// TTL far beyond the fire time, never near it: the loader reads this key
 	// to reconcile the framework alarm, and an expiry that raced a pending
 	// alarm would read as a cancellation. The delay is capped by the caller,
@@ -114,4 +115,40 @@ export async function writePending(client, at, delayMs, now) {
 	// that is long dead - a crash orphan the fire path never cleared - which
 	// is the one case the TTL exists for.
 	await client.set(PENDING_KEY, JSON.stringify({ at, setAt: now }), 'PX', delayMs + RETENTION_MS)
+	return at
+}
+
+/**
+ * The alarm room's stream loader: reconcile the framework alarm to the
+ * recorded intent, then return the fired log, pruned.
+ * @param {AlarmRedis} client
+ * @param {{ setAlarm(at: number): void, deleteAlarm(): void, publish(event: string, data: any): void }} ctx
+ */
+export async function loadRoom(client, ctx) {
+	try {
+		const pending = await readPending(client)
+		if (pending) ctx.setAlarm(pending.at)
+		else ctx.deleteAlarm()
+	} catch {
+		// ctx.setAlarm is bound on the wire-subscribe path; a loader run
+		// reached another way (or a Redis blip) leaves the alarm as-is.
+	}
+	return readLog(client, Date.now(), (event, data) => ctx.publish(event, data))
+}
+
+/**
+ * The alarm handler: log how the alarm fired and tell the open tabs.
+ * @param {AlarmRedis} client
+ * @param {{ alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void }} ctx
+ */
+export async function recordFire(client, ctx) {
+	const record = {
+		id: crypto.randomUUID(),
+		at: ctx.alarm.at,
+		firedAt: ctx.alarm.firedAt,
+		lateMs: ctx.alarm.lateMs,
+		recovered: ctx.alarm.recovered
+	}
+	await appendFired(client, record)
+	ctx.publish('created', record)
 }

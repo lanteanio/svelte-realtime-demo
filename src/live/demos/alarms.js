@@ -54,7 +54,7 @@
 import { live, LiveError } from 'svelte-realtime/server'
 import { redis } from '$lib/server/redis'
 import { TOPICS } from '$lib/server/topics'
-import { appendFired, clearPending, readLog, readPending, writePending } from '$lib/server/alarm-log'
+import { clearPending, loadRoom, readPending, recordFire, schedulePending } from '$lib/server/alarm-log'
 
 const MIN_SECONDS = 2
 const MAX_SECONDS = 600
@@ -72,32 +72,12 @@ const MAX_SECONDS = 600
  * intent key, and publishes 'created' into this room so open tabs see
  * the record land live.
  */
-export const timers = live.stream(TOPICS.demoAlarmsLog, async (ctx) => {
-	try {
-		const pending = await readPending(redis.redis)
-		if (pending) ctx.setAlarm(pending.at)
-		else ctx.deleteAlarm()
-	} catch {
-		// ctx.setAlarm is bound on the wire-subscribe path; a loader run
-		// reached another way (or a Redis blip) leaves the alarm as-is.
-	}
-	return readLog(redis.redis, Date.now(), (event, data) => ctx.publish(event, data))
-}, {
+export const timers = live.stream(TOPICS.demoAlarmsLog, (ctx) => loadRoom(redis.redis, ctx), {
 	merge: 'crud',
 	key: 'id',
 	invalidateOn: TOPICS.demoAlarmsControl,
 	alarm: {
-		onAlarm: async (ctx) => {
-			const record = {
-				id: crypto.randomUUID(),
-				at: ctx.alarm.at,
-				firedAt: ctx.alarm.firedAt,
-				lateMs: ctx.alarm.lateMs,
-				recovered: ctx.alarm.recovered
-			}
-			await appendFired(redis.redis, record)
-			ctx.publish('created', record)
-		}
+		onAlarm: (ctx) => recordFire(redis.redis, ctx)
 	}
 })
 
@@ -113,10 +93,7 @@ export const schedule = live(async (ctx, inSeconds) => {
 	if (!Number.isFinite(s) || s < MIN_SECONDS || s > MAX_SECONDS) {
 		throw new LiveError('VALIDATION', `delay must be ${MIN_SECONDS}..${MAX_SECONDS} seconds`)
 	}
-	const now = Date.now()
-	const delayMs = Math.round(s * 1000)
-	const at = now + delayMs
-	await writePending(redis.redis, at, delayMs, now)
+	const at = await schedulePending(redis.redis, s)
 	ctx.publish(TOPICS.demoAlarmsControl, 'armed', { at })
 	return { ok: true, at }
 })
