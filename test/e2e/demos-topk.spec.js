@@ -186,27 +186,38 @@ test.describe('/demos/topk', () => {
 		}
 	})
 
-	test('the speed label includes zero and the server clamps an out-of-range RPC value', async ({ page }) => {
+	test('the speed label includes zero and the server clamps an out-of-range RPC value', async ({ page, browser }) => {
 		test.setTimeout(90_000)
 		await open(page)
+		const watcherContext = await browser.newContext()
 		try {
 			await setSpeed(page, 0)
 			await expect(page.getByText('Firehose (0 events/sec)')).toBeVisible()
+			// A second browser reading 0 has the shared value rather than the
+			// page's initializer of 5, so its later move to 50 can only come
+			// from what the server published.
+			const watcher = await watcherContext.newPage()
+			await open(watcher)
+			await expect(watcher.getByTestId('speed-input')).toHaveValue('0', { timeout: 10_000 })
 
 			// A normal range fill cannot exceed max=50: the browser clamps it
 			// before onchange. setRawSpeed only removes that client-side cap; it
 			// still drives the page's real handleSpeedChange -> setSpeed RPC path.
 			await setRawSpeed(page, 77)
-			await expect(page.getByText('Firehose (77 events/sec)')).toBeVisible()
-			// The label above is optimistic local state. A fresh hydration is the
-			// server oracle and must expose setSpeed's retained upper clamp.
-			await page.waitForTimeout(1_000)
+			// The control is server-owned: the page shows 77 only until the
+			// clamped value comes back, so what both browsers settle on without
+			// a reload is setSpeed's upper clamp.
+			for (const view of [page, watcher]) {
+				await expect(view.getByTestId('speed-input')).toHaveValue('50', { timeout: 10_000 })
+				await expect(view.getByText('Firehose (50 events/sec)')).toBeVisible()
+			}
+			// And the server retained it: a fresh hydration reads the same value.
 			await page.reload()
 			await waitForWS(page)
 			await expect(page.getByTestId('speed-input')).toHaveValue('50', { timeout: 10_000 })
-			await expect(page.getByText('Firehose (50 events/sec)')).toBeVisible()
 		} finally {
 			await restoreDefaults(page)
+			await watcherContext.close().catch(() => {})
 		}
 	})
 
