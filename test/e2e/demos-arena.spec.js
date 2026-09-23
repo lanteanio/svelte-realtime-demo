@@ -394,6 +394,68 @@ test.describe('/demos/arena', () => {
 		await expect(page.getByTestId('arena-spectate-toggle')).not.toBeChecked()
 	})
 
+	// Remote dots have to move at the display rate, interpolated between
+	// packets, not jump once per packet and freeze in between. A plain
+	// "fraction of frames with motion" cannot tell the two apart on its own:
+	// stepping moves on (packet rate / frame rate) of frames, which climbs
+	// toward any threshold as the frame rate drops on a loaded machine. So
+	// the verdict only counts frames that no packet could explain - no
+	// WebSocket message in that frame's interval or the one before it,
+	// allowing for a packet rendered one frame late. Stepping cannot move a
+	// dot on those frames at all; interpolation moves one on nearly all.
+	test('remote dots keep moving between packets instead of stepping on each one', async ({ page }) => {
+		test.setTimeout(45_000)
+		await page.addInitScript(() => {
+			window.__wsMessages = 0
+			const Native = window.WebSocket
+			window.WebSocket = class extends Native {
+				constructor(url, protocols) {
+					super(url, protocols)
+					this.addEventListener('message', () => { window.__wsMessages++ })
+				}
+			}
+		})
+		await open(page)
+		await expect.poll(() => page.getByTestId('arena-remote').count(), { timeout: 15_000 }).toBeGreaterThanOrEqual(5)
+		await page.waitForTimeout(2_000)
+
+		const frames = await page.evaluate((seconds) => new Promise((resolve) => {
+			const last = new Map()
+			const out = []
+			let seen = window.__wsMessages
+			const end = performance.now() + seconds * 1000
+			const tick = (ts) => {
+				const now = window.__wsMessages
+				const dots = document.querySelectorAll('[data-testid="arena-remote"]')
+				let moved = 0
+				for (const el of dots) {
+					const at = `${el.getAttribute('cx')},${el.getAttribute('cy')}`
+					if (last.has(el) && last.get(el) !== at) moved++
+					last.set(el, at)
+				}
+				out.push({ packets: now - seen, dots: dots.length, moved })
+				seen = now
+				if (ts < end) requestAnimationFrame(tick)
+				else resolve(out)
+			}
+			requestAnimationFrame(tick)
+		}), 4)
+
+		const sampled = frames.slice(2)
+		const quiet = sampled.filter((f, i) => i > 0 && f.packets === 0 && sampled[i - 1].packets === 0)
+		const movedQuiet = quiet.filter((f) => f.moved > 0).length
+		const packets = sampled.reduce((sum, f) => sum + f.packets, 0)
+		const meanDots = sampled.reduce((sum, f) => sum + f.dots, 0) / sampled.length
+		const summary = `${sampled.length} frames, ${packets} packets, ${meanDots.toFixed(1)} dots on average, ` +
+			`motion on ${movedQuiet} of ${quiet.length} frames no packet explains`
+		// Without packets arriving there is nothing to interpolate, and
+		// without enough quiet frames or dots the ratio below means nothing.
+		expect(packets, summary).toBeGreaterThan(20)
+		expect(meanDots, summary).toBeGreaterThanOrEqual(5)
+		expect(quiet.length, summary).toBeGreaterThanOrEqual(30)
+		expect(movedQuiet / quiet.length, summary).toBeGreaterThanOrEqual(0.8)
+	})
+
 	test('interest cull settles bounded after panning across the world', async ({ page }) => {
 		test.setTimeout(45_000)
 		await open(page)
