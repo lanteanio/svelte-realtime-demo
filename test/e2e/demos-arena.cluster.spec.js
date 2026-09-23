@@ -28,6 +28,41 @@ async function x(page) {
 	return Number(await page.getByTestId('arena-me').getAttribute('data-x'))
 }
 
+// The page draws your dot at the client's initializer, the centre of the
+// world, until the server's join reply moves it to your spawn, so leaving the
+// centre is what proves this visitor has joined.
+async function openJoined(page, origin) {
+	await openAt(page, origin)
+	let spot
+	await expect.poll(async () => {
+		const me = page.getByTestId('arena-me')
+		spot = { x: Number(await me.getAttribute('data-x')), y: Number(await me.getAttribute('data-y')) }
+		return spot.x !== 1200 || spot.y !== 800
+	}, { message: 'own dot never left the pre-join centre, so the join reply never arrived', timeout: 15_000 }).toBe(true)
+	return spot
+}
+
+async function camera(page) {
+	const text = (await page.getByTestId('arena-cam').textContent()) ?? ''
+	const match = text.match(/cam\s+(-?\d+),\s*(-?\d+)/)
+	return match ? { x: Number(match[1]), y: Number(match[2]) } : { x: Number.NaN, y: Number.NaN }
+}
+
+// Pan the spectate camera until it sits within half a pan step of `spot`.
+async function panCameraTo(page, spot) {
+	for (let i = 0; i < 40; i++) {
+		const cam = await camera(page)
+		if (Math.abs(cam.x - spot.x) > 80) await page.getByTestId(cam.x < spot.x ? 'arena-pan-right' : 'arena-pan-left').click()
+		else if (Math.abs(cam.y - spot.y) > 80) await page.getByTestId(cam.y < spot.y ? 'arena-pan-down' : 'arena-pan-up').click()
+		else return
+	}
+	throw new Error(`camera never reached ${spot.x}, ${spot.y}`)
+}
+
+function visitorsReceived(page) {
+	return page.locator('[data-testid="arena-minimap-entity"][data-kind="visitor"]').count()
+}
+
 test.describe('cluster: /demos/arena', () => {
 	test('replicas share the authoritative world while each player command remains independently predicted', async ({ browser }) => {
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
@@ -51,6 +86,35 @@ test.describe('cluster: /demos/arena', () => {
 			expect(await x(b)).toBe(beforeB)
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
+
+	// Which replica ticks the world is decided by whoever reached it first, so
+	// both join orders run: one of them always puts the earlier visitor on a
+	// replica that does not tick. The camera is panned onto the later visitor
+	// because the 420-unit interest circle rarely covers two random spawns in a
+	// 2400x1600 world.
+	test('a visitor who joins later and stands still appears once the camera reaches them', async ({ browser }) => {
+		test.setTimeout(60_000)
+		for (const [first, second] of [[INSTANCE_A, INSTANCE_B], [INSTANCE_B, INSTANCE_A]]) {
+			const ctxEarly = await browser.newContext({ baseURL: first })
+			const ctxLate = await browser.newContext({ baseURL: second })
+			try {
+				const early = await ctxEarly.newPage()
+				await openJoined(early, first)
+				const late = await ctxLate.newPage()
+				const lateSpot = await openJoined(late, second)
+				await early.getByTestId('arena-spectate-toggle').check()
+				await panCameraTo(early, lateSpot)
+				// No key is pressed on the late page: it has to be received for
+				// having joined, not for having moved.
+				await expect.poll(() => visitorsReceived(early), {
+					message: `the visitor who joined later on ${second} must reach ${first} without moving first`,
+					timeout: 10_000
+				}).toBe(1)
+			} finally {
+				await Promise.allSettled([ctxEarly.close(), ctxLate.close()])
+			}
 		}
 	})
 
