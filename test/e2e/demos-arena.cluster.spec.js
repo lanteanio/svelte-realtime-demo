@@ -118,6 +118,30 @@ test.describe('cluster: /demos/arena', () => {
 		}
 	})
 
+	// The interest circle covers roughly a seventh of the world, so a visitor
+	// who has joined should be receiving a few dozen entities at most, on
+	// whichever replica the connection landed. One visitor opens on each
+	// replica, so one of them always joins a replica that does not tick.
+	test('a visitor joining either replica receives a culled world, not the whole of it', async ({ browser }) => {
+		test.setTimeout(60_000)
+		for (const origin of [INSTANCE_A, INSTANCE_B]) {
+			const ctx = await browser.newContext({ baseURL: origin })
+			const page = await ctx.newPage()
+			try {
+				await openAt(page, origin)
+				// Zero is what the HUD reads before any data arrives, and it is
+				// below every bar, so the join has to be seen first.
+				await expect.poll(async () => (await hud(page)).receiving, { timeout: 15_000 }).toBeGreaterThan(0)
+				await expect.poll(async () => (await hud(page)).receiving, {
+					message: `a visitor who joined on ${origin} must be sent what its interest circle covers, not the world`,
+					timeout: 15_000
+				}).toBeLessThan(75)
+			} finally {
+				await ctx.close()
+			}
+		}
+	})
+
 	test('every replica reports the authoritative 150-entity HUD denominator', async ({ browser }) => {
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
