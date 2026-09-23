@@ -78,3 +78,23 @@ export async function closestRemote(page, position) {
 export function remoteByKey(page, key) {
 	return page.locator(`[data-testid="sh-other"][data-key="${key}"]`)
 }
+
+// The page draws your dot at the client's initializer, the centre of the
+// range, until the server's join reply lands and moves it to the spawn the
+// server chose. A position read before that is the page's guess, so waiting
+// for the dot to leave the centre is what proves this visitor has joined.
+export async function joinedPosition(page) {
+	let position
+	await expect.poll(async () => {
+		position = await ownPosition(page)
+		return position.x !== 320 || position.y !== 210
+	}, { message: 'own dot never left the pre-join centre, so the join reply never arrived', timeout: 15_000 }).toBe(true)
+	return position
+}
+
+export async function remotesAt(page, position) {
+	return page.getByTestId('sh-other').evaluateAll((nodes, p) => nodes.filter((node) =>
+		Math.abs(Number(node.getAttribute('cx')) - p.x) <= 1 &&
+		Math.abs(Number(node.getAttribute('cy')) - p.y) <= 1
+	).length, position)
+}

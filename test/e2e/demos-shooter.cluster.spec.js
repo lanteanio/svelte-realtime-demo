@@ -4,9 +4,11 @@ import {
 	clickRangeAt,
 	closestRemote,
 	holdKey,
+	joinedPosition,
 	openShooter,
 	ownPosition,
 	remoteByKey,
+	remotesAt,
 	shooterStats
 } from './shooter-helpers.js'
 
@@ -40,6 +42,38 @@ test.describe('cluster: /demos/shooter', () => {
 				.toBeGreaterThan(remoteA?.x ?? ownA.x)
 		} finally {
 			await Promise.allSettled([pair.ctxA.close(), pair.ctxB.close()])
+		}
+	})
+
+	// Which replica ticks the range is decided by whoever reached it first, and
+	// it stays there while the targets exist, so the test cannot know it in
+	// advance. Running both join orders guarantees one of them puts the earlier
+	// visitor on a replica that does not tick - the side that learns about other
+	// players only from what the ticking replica sends it.
+	test('a visitor who joins later and stands still appears on both replicas', async ({ browser }) => {
+		for (const [first, second] of [[INSTANCE_A, INSTANCE_B], [INSTANCE_B, INSTANCE_A]]) {
+			const ctxEarly = await browser.newContext({ baseURL: first })
+			const ctxLate = await browser.newContext({ baseURL: second })
+			try {
+				const early = await ctxEarly.newPage()
+				await openShooter(early, `${first}/demos/shooter`)
+				const earlySpot = await joinedPosition(early)
+				const late = await ctxLate.newPage()
+				await openShooter(late, `${second}/demos/shooter`)
+				const lateSpot = await joinedPosition(late)
+				// No key is pressed on either page: the late visitor has to be
+				// visible for having joined, not for having moved.
+				await expect.poll(() => remotesAt(late, earlySpot), {
+					message: `the visitor who joined on ${first} must render on ${second}`,
+					timeout: 10_000
+				}).toBe(1)
+				await expect.poll(() => remotesAt(early, lateSpot), {
+					message: `the visitor who joined later on ${second} must render on ${first} without moving first`,
+					timeout: 10_000
+				}).toBe(1)
+			} finally {
+				await Promise.allSettled([ctxEarly.close(), ctxLate.close()])
+			}
 		}
 	})
 
