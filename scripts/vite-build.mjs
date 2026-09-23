@@ -19,11 +19,12 @@ export function buildEnvironment(base) {
 		// while the server renders HTML defining the same global from ITS
 		// evaluation; two evaluations that disagree ship a client reading another
 		// build's global, and every page dies at hydration on
-		// `Cannot read properties of undefined (reading 'data')` - observed as a
-		// 61-of-81 cluster-tier wall on a tree the main tier passed. With the
+		// `Cannot read properties of undefined (reading 'data')`. With the
 		// value pinned in the environment, every evaluation agrees by
 		// construction, and version semantics are unchanged: one fresh version
-		// per build invocation.
+		// per build invocation. `||` rather than `??` on purpose: an empty value,
+		// which is what an unset Docker ARG forwarded through ENV produces, has
+		// to be replaced too, or the config falls back to Date.now() again.
 		SRD_BUILD_VERSION: base.SRD_BUILD_VERSION || String(Date.now())
 	}
 }
