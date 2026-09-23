@@ -49,8 +49,8 @@ const config = {
 		// globalThis.__sveltekit_<hash(version.name)>, and kit's default is
 		// Date.now() at evaluation time - so a config evaluated twice within
 		// a build can ship a client that reads another evaluation's global
-		// and hydrates nothing on any page. scripts/build.mjs pins the value
-		// once per build invocation; the fallback keeps ad-hoc builds
+		// and hydrates nothing on any page. scripts/vite-build.mjs pins the
+		// value once per build invocation; the fallback keeps ad-hoc builds
 		// working with today's semantics (one fresh version per build).
 		version: { name: process.env.SRD_BUILD_VERSION || String(Date.now()) },
 		adapter: adapter({
