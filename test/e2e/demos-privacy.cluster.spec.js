@@ -125,13 +125,14 @@ test.describe('cluster: /demos/privacy', () => {
 					await expect.poll(async () => (await rawState(page)).n, { timeout: 1500 })
 						.toBe(Number.MAX_SAFE_INTEGER)
 				}
-				await unpinRoundId(page)
 				// The second window runs a REAL step the first attempt never
 				// reached, so the retry provably hands back a working sequence
-				// rather than only a fresh loop iteration.
+				// rather than only a fresh loop iteration. The staged round stays
+				// pinned through it: a real crossing never goes back.
 				const submitted = await submitMood(page, 2)
 				return { roundId: submitted.roundId, attempt }
 			}, { freshRound: { minSecondsLeft: 30, requireRoom: false } })
+			await unpinRoundId(page)
 			expect(attempts, 'the boundary must cost the attempt, not the test').toEqual([1, 2])
 			expect(outcome.attempt).toBe(2)
 		} finally {

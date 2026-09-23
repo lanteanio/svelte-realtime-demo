@@ -322,11 +322,33 @@ test.describe('/demos/privacy', () => {
 				await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
 				throw new Error('a poll timed out reading a count the tumble reset')
 			}
-			await unpinRoundId(page)
 			return 'ran after the conversion'
 		}, { freshRound: anyRound })
+		await unpinRoundId(page)
 		expect(conversions, 'an explained failure must cost the attempt, not the test').toEqual([1, 2])
 		expect(converted).toBe('ran after the conversion')
+
+		// A sequence that PASSES across a boundary is no pass either: the
+		// counts reset at the tumble, so its assertions can come out right on
+		// readings from two windows. With no retry left it fails as a
+		// crossing...
+		await expect(inStableRound(page, async (round) => {
+			await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
+			return 'passed across the boundary'
+		}, { attempts: 1, freshRound: anyRound })).rejects.toThrow(/rolled from \d+ to \d+ while a round-scoped sequence passed/)
+		await unpinRoundId(page)
+
+		// ...and by default it costs the attempt. The second attempt starts in
+		// the staged round and stays in it, so it is the one returned.
+		const passes = []
+		const repeated = await inStableRound(page, async (round, attempt) => {
+			passes.push(attempt)
+			if (attempt === 1) await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
+			return `attempt ${attempt}`
+		}, { freshRound: anyRound })
+		await unpinRoundId(page)
+		expect(passes, 'a pass spanning two windows must cost the attempt').toEqual([1, 2])
+		expect(repeated).toBe('attempt 2')
 
 		// And the conversion is evidence-gated: the same ordinary failure in a
 		// round that did NOT move stays loud and unretried, because a retry on

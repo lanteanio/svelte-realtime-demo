@@ -104,6 +104,15 @@ export async function assertSameRound(page, startRoundId, during) {
  * as-is. A genuine bug that coincides with a tumble costs one retry and then
  * fails again in a stable round, still loud.
  *
+ * Success is checked the same way. Every count resets at the tumble, so a
+ * sequence's assertions can come out right on readings taken either side of
+ * it; a pass that ends in a different round than it started in is treated as
+ * a crossing and retried, never returned.
+ *
+ * A caller staging a crossing with pinRoundId keeps the pin in place until
+ * the guard returns. A real round id never goes back, and releasing the pin
+ * inside a retry would read as the round moving a second time.
+ *
  * @param {import('@playwright/test').Page} page
  * @param {(round: { roundId: number, distinct: number, k: number, resetInSeconds: number }, attempt: number) => Promise<any>} run
  */
@@ -111,8 +120,9 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 	let rolled
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		const round = await waitForFreshRound(page, freshRound)
+		let result
 		try {
-			return await run(round, attempt)
+			result = await run(round, attempt)
 		} catch (err) {
 			if (err instanceof RoundRolled) {
 				rolled = err
@@ -141,7 +151,12 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 				`running a round-scoped step whose failure the boundary explains: ${String(err?.message ?? err).split('\n')[0]}`
 			)
 			noteRoll(`attempt ${attempt} of ${attempts}: ${rolled.message}`)
+			continue
 		}
+		const settled = await roundState(page)
+		if (settled.roundId === round.roundId) return result
+		rolled = new RoundRolled(round.roundId, settled.roundId, 'a round-scoped sequence passed on readings from two windows')
+		noteRoll(`attempt ${attempt} of ${attempts}: ${rolled.message}`)
 	}
 	throw rolled
 }
