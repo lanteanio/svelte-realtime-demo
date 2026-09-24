@@ -121,10 +121,17 @@ export async function schedulePending(client, seconds) {
 /**
  * The alarm room's stream loader: reconcile the framework alarm to the
  * recorded intent, then return the fired log, pruned.
+ *
+ * A stream loader's ctx.publish takes the topic first - only onAlarm's ctx
+ * is scoped to the room - so the pruned records' 'deleted' frames name the
+ * stream's topic explicitly. Without it they would go to a topic called
+ * 'deleted' that nobody subscribes to, and open tabs would keep showing
+ * records Redis no longer holds.
  * @param {AlarmRedis} client
- * @param {{ setAlarm(at: number): void, deleteAlarm(): void, publish(event: string, data: any): void }} ctx
+ * @param {{ setAlarm(at: number): void, deleteAlarm(): void, publish(topic: string, event: string, data: any): void }} ctx
+ * @param {string} topic the stream's own topic
  */
-export async function loadRoom(client, ctx) {
+export async function loadRoom(client, ctx, topic) {
 	try {
 		const pending = await readPending(client)
 		if (pending) ctx.setAlarm(pending.at)
@@ -133,7 +140,7 @@ export async function loadRoom(client, ctx) {
 		// ctx.setAlarm is bound on the wire-subscribe path; a loader run
 		// reached another way (or a Redis blip) leaves the alarm as-is.
 	}
-	return readLog(client, Date.now(), (event, data) => ctx.publish(event, data))
+	return readLog(client, Date.now(), (event, data) => ctx.publish(topic, event, data))
 }
 
 /**

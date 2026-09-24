@@ -67,22 +67,28 @@ function memoryRedis() {
 			else ttl.delete(key)
 		}
 	}
+	// A command named in `failing` rejects the way a dropped connection does,
+	// having changed nothing.
+	const reply = async (name) => {
+		await roundTrip()
+		if (redis.failing.has(name)) throw new Error(`connection lost during ${name}`)
+	}
 	const redis = {
-		lists, strings, ttl, multis: 0,
+		lists, strings, ttl, multis: 0, failing: new Set(),
 		async lrange(key, start, stop) {
-			await roundTrip()
+			await reply('lrange')
 			const l = list(key)
 			return l.slice(index(l.length, start), index(l.length, stop) + 1)
 		},
-		async get(key) { await roundTrip(); return strings.get(key) ?? null },
-		async set(key, value, mode, ms) { await roundTrip(); commands.set(key, value, mode, ms) },
-		async del(key) { await roundTrip(); commands.del(key) },
+		async get(key) { await reply('get'); return strings.get(key) ?? null },
+		async set(key, value, mode, ms) { await reply('set'); commands.set(key, value, mode, ms) },
+		async del(key) { await reply('del'); commands.del(key) },
 		multi() {
 			redis.multis++
 			const queued = []
 			const chain = {
 				exec: async () => {
-					await roundTrip()
+					await reply('exec')
 					for (const [name, args] of queued) {
 						try { commands[name](...args) } catch { /* fails alone, as in EXEC */ }
 					}
@@ -97,14 +103,26 @@ function memoryRedis() {
 	return redis
 }
 
-// A stand-in for the room ctx the framework hands the loader and onAlarm.
-function roomCtx(alarm) {
+// Stand-ins for the two ctx shapes the framework hands this module, which
+// differ in the one way that matters here: a stream loader's publish takes the
+// topic first, onAlarm's is already scoped to the room.
+const TOPIC = 'demos:alarms:log'
+
+function streamCtx() {
 	const calls = { setAlarm: [], deleteAlarm: 0, published: [] }
 	return {
 		calls,
-		alarm,
 		setAlarm(at) { calls.setAlarm.push(at) },
 		deleteAlarm() { calls.deleteAlarm++ },
+		publish(topic, event, data) { calls.published.push([topic, event, data]) }
+	}
+}
+
+function alarmCtx(alarm) {
+	const calls = { published: [] }
+	return {
+		calls,
+		alarm,
 		publish(event, data) { calls.published.push([event, data]) }
 	}
 }
@@ -214,7 +232,7 @@ test('the first fire on an empty log leaves it with a TTL', async () => {
 test('the alarm handler logs how the alarm fired and publishes the same record', async () => {
 	const redis = memoryRedis()
 	const alarm = { at: NOW - 40, firedAt: NOW, lateMs: 40, recovered: true }
-	const ctx = roomCtx(alarm)
+	const ctx = alarmCtx(alarm)
 	await recordFire(client(redis), ctx)
 	const logged = JSON.parse(redis.lists.get(LOG_KEY)[0])
 	assert.deepEqual({ ...logged, id: undefined }, { ...alarm, id: undefined })
@@ -232,15 +250,45 @@ test('the stream loader arms the recorded alarm and draws the 24-hour line on th
 	const inside = fired('inside', RETENTION_MS - 60_000, now)
 	redis.lists.set(LOG_KEY, [inside, fired('past', RETENTION_MS + 60_000, now)])
 	redis.strings.set(PENDING_KEY, JSON.stringify({ at: now + 30_000, setAt: now }))
-	const ctx = roomCtx()
+	const ctx = streamCtx()
 
-	const rows = await loadRoom(client(redis), ctx)
+	const rows = await loadRoom(client(redis), ctx, TOPIC)
 
 	assert.deepEqual(ctx.calls.setAlarm, [now + 30_000])
 	assert.equal(ctx.calls.deleteAlarm, 0)
 	assert.deepEqual(rows.map((row) => row.id), ['inside'])
 	assert.deepEqual(redis.lists.get(LOG_KEY), [inside])
-	assert.deepEqual(ctx.calls.published, [['deleted', { id: 'past' }]])
+	assert.deepEqual(ctx.calls.published, [[TOPIC, 'deleted', { id: 'past' }]], 'the removal must go to the stream the open tabs subscribe to')
+})
+
+test('a Redis failure while reading the intent leaves the armed alarm alone', async () => {
+	// Cancelling on a failed read would delete the durable alarm row, turning a
+	// blip into a lost alarm.
+	const redis = memoryRedis()
+	redis.lists.set(LOG_KEY, [fired('young', 1_000, Date.now())])
+	redis.failing.add('get')
+	const ctx = streamCtx()
+	assert.equal((await loadRoom(client(redis), ctx, TOPIC)).length, 1)
+	assert.deepEqual(ctx.calls.setAlarm, [])
+	assert.equal(ctx.calls.deleteAlarm, 0)
+})
+
+test('a Redis failure while reading the log fails the load rather than returning an empty one', async () => {
+	// An empty result from a re-run is broadcast to every subscriber as the
+	// new state, which would blank the log on every open tab.
+	const redis = memoryRedis()
+	redis.lists.set(LOG_KEY, [fired('young', 1_000, Date.now())])
+	redis.failing.add('lrange')
+	await assert.rejects(loadRoom(client(redis), streamCtx(), TOPIC), /lrange/)
+})
+
+test('a prune that fails to commit announces no deletions', async () => {
+	const redis = memoryRedis()
+	redis.lists.set(LOG_KEY, [fired('young', 1_000, Date.now()), fired('old', 2 * RETENTION_MS, Date.now())])
+	redis.failing.add('exec')
+	const ctx = streamCtx()
+	await loadRoom(client(redis), ctx, TOPIC).catch(() => {})
+	assert.deepEqual(ctx.calls.published, [])
 })
 
 test('a read with nothing to prune writes nothing', async () => {
@@ -251,19 +299,16 @@ test('a read with nothing to prune writes nothing', async () => {
 	assert.equal(redis.ttl.has(LOG_KEY), false)
 })
 
-test('a fire that fails to persist is not announced', async () => {
+test('a fire that fails to persist is not announced and keeps its intent', async () => {
+	// The intent is how a lost fire gets another chance: the next loader run
+	// re-arms a past fire time to fire as soon as possible.
 	const redis = memoryRedis()
-	const failing = {
-		...redis,
-		multi() {
-			const chain = redis.multi()
-			chain.exec = async () => { throw new Error('connection lost') }
-			return chain
-		}
-	}
-	const ctx = roomCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
-	await assert.rejects(recordFire(client(failing), ctx), /connection lost/)
+	redis.strings.set(PENDING_KEY, JSON.stringify({ at: NOW, setAt: NOW - 60_000 }))
+	redis.failing.add('exec')
+	const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
+	await assert.rejects(recordFire(client(redis), ctx), /connection lost/)
 	assert.deepEqual(ctx.calls.published, [])
+	assert.equal(redis.strings.has(PENDING_KEY), true)
 })
 
 test('every fire gets its own id', async () => {
@@ -271,8 +316,8 @@ test('every fire gets its own id', async () => {
 	// single row on every open tab.
 	const redis = memoryRedis()
 	const alarm = { at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false }
-	await recordFire(client(redis), roomCtx(alarm))
-	await recordFire(client(redis), roomCtx(alarm))
+	await recordFire(client(redis), alarmCtx(alarm))
+	await recordFire(client(redis), alarmCtx(alarm))
 	const ids = redis.lists.get(LOG_KEY).map((raw) => JSON.parse(raw).id)
 	assert.equal(new Set(ids).size, 2)
 })
@@ -289,13 +334,29 @@ test('a fractional delay reaches Redis as whole milliseconds, not whole seconds'
 test('the stream loader clears the alarm when no intent is recorded, and a refused alarm still returns the log', async () => {
 	const redis = memoryRedis()
 	redis.lists.set(LOG_KEY, [fired('young', 1_000, Date.now())])
-	const idle = roomCtx()
-	assert.equal((await loadRoom(client(redis), idle)).length, 1)
+	const idle = streamCtx()
+	assert.equal((await loadRoom(client(redis), idle, TOPIC)).length, 1)
 	assert.equal(idle.calls.deleteAlarm, 1)
 
+	const unbound = { ...streamCtx(), deleteAlarm() { throw new Error('not bound on this path') } }
+	assert.equal((await loadRoom(client(redis), unbound, TOPIC)).length, 1)
+
 	redis.strings.set(PENDING_KEY, JSON.stringify({ at: Date.now() + 5_000, setAt: Date.now() }))
-	const refusing = { ...roomCtx(), setAlarm() { throw new Error('not bound on this path') } }
-	assert.equal((await loadRoom(client(redis), refusing)).length, 1)
+	const refusing = { ...streamCtx(), setAlarm() { throw new Error('not bound on this path') } }
+	assert.equal((await loadRoom(client(redis), refusing, TOPIC)).length, 1)
+})
+
+test('a failed write surfaces to the caller instead of reporting success', async () => {
+	// schedule answers the visitor with the fire time and cancel answers ok;
+	// either one swallowing a Redis failure would claim a state that is not there.
+	const redis = memoryRedis()
+	redis.failing.add('set')
+	await assert.rejects(schedulePending(client(redis), 5), /set/)
+	redis.failing.clear()
+	redis.strings.set(PENDING_KEY, JSON.stringify({ at: NOW, setAt: NOW }))
+	redis.failing.add('del')
+	await assert.rejects(clearPending(client(redis)), /del/)
+	assert.equal(redis.strings.has(PENDING_KEY), true)
 })
 
 test('scheduling records the intent with a TTL a full retention window past its fire time', async () => {

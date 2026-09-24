@@ -72,7 +72,7 @@ const MAX_SECONDS = 600
  * intent key, and publishes 'created' into this room so open tabs see
  * the record land live.
  */
-export const timers = live.stream(TOPICS.demoAlarmsLog, (ctx) => loadRoom(redis.redis, ctx), {
+export const timers = live.stream(TOPICS.demoAlarmsLog, (ctx) => loadRoom(redis.redis, ctx, TOPICS.demoAlarmsLog), {
 	merge: 'crud',
 	key: 'id',
 	invalidateOn: TOPICS.demoAlarmsControl,
