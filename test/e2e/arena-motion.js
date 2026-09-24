@@ -22,17 +22,17 @@ export async function countWebSocketMessages(page) {
 // client draws a packet in the frame it lands in, so a stepping renderer moves
 // nothing on those frames. If a stepping renderer drew each packet one frame
 // late instead, its motion would land on quiet frames - at 30fps on nearly
-// all of them - and what keeps it well under the bar is that one packet only
-// updates the dots in its level-of-detail band, about a third of those
-// visible (measured 0.15-0.34). On quiet frames, count per DOT how many of
+// all of them - and what keeps it well under the bar is that each packet
+// carries only the dots whose level-of-detail band is due that tick, about a
+// third of those visible (measured 0.15-0.34). On quiet frames, count per DOT how many of
 // the dots drawn in both frames moved by more than float noise. Positions are
 // read against the world's wall rect, so a moving camera, which shifts every
 // dot on screen, does not count as the dots moving.
 //
 // Samples for at least minMs and then until wantQuiet quiet frames have
 // accumulated or maxMs is up, which carries the sample down to about 25fps.
-// Below roughly 20fps a frame interval outlasts the gap between packets, no
-// frame is quiet, and the caller's evidence guards fail the run as
+// Below roughly 20fps a frame interval outlasts the gap between packets, few
+// or no frames are quiet, and the caller's evidence guards fail the run as
 // inconclusive rather than pass it.
 export async function sampleRemoteMotion(page, { minMs = 4_000, maxMs = 12_000, wantQuiet = 60 } = {}) {
 	const totals = await page.evaluate((opts) => new Promise((resolve) => {
