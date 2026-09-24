@@ -250,6 +250,7 @@
 					<rect
 						x={toX(0)} y={toY(0)} width={WORLD_W} height={WORLD_H}
 						class="fill-none stroke-base-content/20" stroke-width="3"
+						data-testid="arena-walls"
 					/>
 					{#each gridXs as gx (gx)}
 						<line x1={toX(gx)} y1={toY(0)} x2={toX(gx)} y2={toY(WORLD_H)} class="stroke-base-content/10" data-testid="arena-grid-line" />
