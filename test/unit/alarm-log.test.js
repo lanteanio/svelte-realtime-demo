@@ -13,10 +13,17 @@ import { RETENTION_MS } from '../../src/lib/server/alarm-retention.js'
 
 const NOW = 1_700_000_000_000
 
+// Every command reaches "the server" a macrotask later, in order, the way a
+// socket round trip does, so a write the module forgot to await has not
+// happened yet when the module returns.
+const roundTrip = () => new Promise((resolve) => setImmediate(resolve))
+
 // Enough of a Redis client for this module, and no more forgiving than Redis
-// where a difference could hide a bug: PEXPIRE on a missing key does nothing,
-// a list emptied by LREM or LTRIM stops existing (taking its TTL with it),
-// LREM honours zero and negative counts, and indexes may be negative.
+// where a difference could hide a bug: writes land a round trip later, PEXPIRE
+// on a missing key does nothing, a list emptied by LREM or LTRIM stops existing
+// (taking its TTL with it), LREM honours zero and negative counts, indexes may
+// be negative, and a TTL must be a positive integer. Inside MULTI a rejected
+// command fails alone and the rest still apply, as EXEC does.
 function memoryRedis() {
 	const lists = new Map()
 	const strings = new Map()
@@ -27,6 +34,9 @@ function memoryRedis() {
 		else { lists.delete(key); ttl.delete(key) }
 	}
 	const index = (length, i) => (i < 0 ? Math.max(length + i, 0) : i)
+	const integer = (ms) => {
+		if (!Number.isInteger(ms)) throw new Error('ERR value is not an integer or out of range')
+	}
 	const commands = {
 		lpush(key, value) { lists.set(key, [value, ...list(key)]) },
 		ltrim(key, start, stop) {
@@ -40,27 +50,43 @@ function memoryRedis() {
 			const kept = l.filter((v) => !(v === value && removed < limit && ++removed))
 			store(key, count < 0 ? kept.reverse() : kept)
 		},
-		pexpire(key, ms) { if (lists.has(key) || strings.has(key)) ttl.set(key, ms) },
+		pexpire(key, ms) {
+			integer(ms)
+			if (!(lists.has(key) || strings.has(key))) return
+			if (ms <= 0) commands.del(key)
+			else ttl.set(key, ms)
+		},
 		del(key) { lists.delete(key); strings.delete(key); ttl.delete(key) },
 		set(key, value, mode, ms) {
+			if (mode === 'PX') {
+				integer(ms)
+				if (ms <= 0) throw new Error("ERR invalid expire time in 'set' command")
+			}
 			strings.set(key, value)
 			if (mode === 'PX') ttl.set(key, ms)
 			else ttl.delete(key)
 		}
 	}
-	return {
-		lists, strings, ttl,
+	const redis = {
+		lists, strings, ttl, multis: 0,
 		async lrange(key, start, stop) {
+			await roundTrip()
 			const l = list(key)
 			return l.slice(index(l.length, start), index(l.length, stop) + 1)
 		},
-		async get(key) { return strings.get(key) ?? null },
-		async set(key, value, mode, ms) { commands.set(key, value, mode, ms) },
-		async del(key) { commands.del(key) },
+		async get(key) { await roundTrip(); return strings.get(key) ?? null },
+		async set(key, value, mode, ms) { await roundTrip(); commands.set(key, value, mode, ms) },
+		async del(key) { await roundTrip(); commands.del(key) },
 		multi() {
+			redis.multis++
 			const queued = []
 			const chain = {
-				exec: async () => { for (const [name, args] of queued) commands[name](...args) }
+				exec: async () => {
+					await roundTrip()
+					for (const [name, args] of queued) {
+						try { commands[name](...args) } catch { /* fails alone, as in EXEC */ }
+					}
+				}
 			}
 			for (const name of ['lpush', 'ltrim', 'lrem', 'pexpire', 'del']) {
 				chain[name] = (...args) => { queued.push([name, args]); return chain }
@@ -68,6 +94,7 @@ function memoryRedis() {
 			return chain
 		}
 	}
+	return redis
 }
 
 // A stand-in for the room ctx the framework hands the loader and onAlarm.
@@ -196,11 +223,14 @@ test('the alarm handler logs how the alarm fired and publishes the same record',
 	assert.equal(redis.ttl.get(LOG_KEY), RETENTION_MS)
 })
 
-test('the stream loader arms the recorded alarm and prunes against the real clock', async () => {
+test('the stream loader arms the recorded alarm and draws the 24-hour line on the real clock', async () => {
+	// A minute either side of the line, so a loader clock that is off by more
+	// than that - a cutoff passed as now, seconds for milliseconds - lands one
+	// of them on the wrong side.
 	const redis = memoryRedis()
 	const now = Date.now()
-	const young = fired('young', 1_000, now)
-	redis.lists.set(LOG_KEY, [young, fired('old', 2 * RETENTION_MS, now)])
+	const inside = fired('inside', RETENTION_MS - 60_000, now)
+	redis.lists.set(LOG_KEY, [inside, fired('past', RETENTION_MS + 60_000, now)])
 	redis.strings.set(PENDING_KEY, JSON.stringify({ at: now + 30_000, setAt: now }))
 	const ctx = roomCtx()
 
@@ -208,9 +238,52 @@ test('the stream loader arms the recorded alarm and prunes against the real cloc
 
 	assert.deepEqual(ctx.calls.setAlarm, [now + 30_000])
 	assert.equal(ctx.calls.deleteAlarm, 0)
-	assert.deepEqual(rows.map((row) => row.id), ['young'])
-	assert.deepEqual(redis.lists.get(LOG_KEY), [young])
-	assert.deepEqual(ctx.calls.published, [['deleted', { id: 'old' }]])
+	assert.deepEqual(rows.map((row) => row.id), ['inside'])
+	assert.deepEqual(redis.lists.get(LOG_KEY), [inside])
+	assert.deepEqual(ctx.calls.published, [['deleted', { id: 'past' }]])
+})
+
+test('a read with nothing to prune writes nothing', async () => {
+	const redis = memoryRedis()
+	redis.lists.set(LOG_KEY, [fired('young', 1_000)])
+	await readLog(client(redis), NOW)
+	assert.equal(redis.multis, 0)
+	assert.equal(redis.ttl.has(LOG_KEY), false)
+})
+
+test('a fire that fails to persist is not announced', async () => {
+	const redis = memoryRedis()
+	const failing = {
+		...redis,
+		multi() {
+			const chain = redis.multi()
+			chain.exec = async () => { throw new Error('connection lost') }
+			return chain
+		}
+	}
+	const ctx = roomCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
+	await assert.rejects(recordFire(client(failing), ctx), /connection lost/)
+	assert.deepEqual(ctx.calls.published, [])
+})
+
+test('every fire gets its own id', async () => {
+	// The stream merges by id, so two fires sharing one would collapse into a
+	// single row on every open tab.
+	const redis = memoryRedis()
+	const alarm = { at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false }
+	await recordFire(client(redis), roomCtx(alarm))
+	await recordFire(client(redis), roomCtx(alarm))
+	const ids = redis.lists.get(LOG_KEY).map((raw) => JSON.parse(raw).id)
+	assert.equal(new Set(ids).size, 2)
+})
+
+test('a fractional delay reaches Redis as whole milliseconds, not whole seconds', async () => {
+	for (const [seconds, ms] of [[2.5, 2_500], [2.0004, 2_000], [2.0006, 2_001]]) {
+		const redis = memoryRedis()
+		const at = await schedulePending(client(redis), seconds)
+		assert.equal(redis.ttl.get(PENDING_KEY), ms + RETENTION_MS, `${seconds}s`)
+		assert.equal(at - (await readPending(client(redis))).setAt, ms, `${seconds}s`)
+	}
 })
 
 test('the stream loader clears the alarm when no intent is recorded, and a refused alarm still returns the log', async () => {
@@ -236,13 +309,16 @@ test('scheduling records the intent with a TTL a full retention window past its 
 	assert.equal(pending?.at, at)
 	assert.equal(at - pending.setAt, 120_000)
 
+	// Read Redis directly the moment clearPending resolves: a command sent
+	// after it would queue behind an unawaited DEL and hide the missing await.
 	await clearPending(client(redis))
+	assert.equal(redis.strings.has(PENDING_KEY), false)
 	assert.equal(await readPending(client(redis)), null)
 })
 
 test('an intent without a usable fire time reads as none', async () => {
 	const redis = memoryRedis()
-	for (const raw of ['{not json', '{"at":"soon"}', '{"at":null}', '{}']) {
+	for (const raw of ['{not json', '{"at":"soon"}', '{"at":null}', '{"at":1e999}', '{}']) {
 		redis.strings.set(PENDING_KEY, raw)
 		assert.equal(await readPending(client(redis)), null, raw)
 	}
