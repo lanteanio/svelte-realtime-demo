@@ -45,7 +45,8 @@ export const TOPICS = defineTopics({
 	// every open page. The values live in Redis, which the cron already reads,
 	// so the simulation was shared before this existed; the topic is what makes
 	// the READOUT shared, instead of a number each page sampled once on load.
-	demoTopkControl: 'demos:topk:control',
+	demoTopkSpeed: 'demos:topk:control:speed',
+	demoTopkBias: 'demos:topk:control:bias',
 	demoNewsStories: 'demos:news:stories',
 	demoNewsView: 'demos:news:view',
 	demoNewsControl: 'demos:news:control',

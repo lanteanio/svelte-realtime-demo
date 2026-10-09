@@ -166,8 +166,8 @@ test.describe('/demos/topk', () => {
 			await page.reload()
 			await waitForWS(page)
 
-			// These can only read back this way if the control stream's initial
-			// load delivered them: the page initializes 5 and uniform, and
+			// These can only read back this way if the control streams' initial
+			// loads delivered them: the page initializes 5 and uniform, and
 			// neither target is either.
 			await expect(page.getByTestId('speed-input')).toHaveValue(String(targetSpeed), { timeout: 10_000 })
 			await expect(page.getByTestId(`bias-${targetBias}`)).toHaveClass(/btn-primary/, { timeout: 10_000 })
@@ -718,19 +718,17 @@ test.describe('/demos/topk', () => {
 			await setSpeed(a, 9)
 			await expect(b.getByTestId('speed-input')).toHaveValue('9', { timeout: 10_000 })
 
-			// Bias travels on the same topic, and is asserted separately
+			// Bias travels on its own stream, and is asserted separately
 			// because a subscriber told about one and not the other would be a
 			// smaller version of the same bug.
 			await setBias(a, 'monopoly')
 			await expect(b.getByTestId('bias-monopoly')).toHaveClass(/btn-primary/, { timeout: 10_000 })
 			await expect(b.getByTestId('bias-uniform')).not.toHaveClass(/btn-primary/)
-			// Changing one must not reset the other, which a single shared
-			// payload makes possible to get wrong. Read on the browser that
-			// did not act, once the bias has moved there: the frame that moved
-			// it carried the speed too, so a wrong speed in it is showing now.
-			// The acting browser's own bias moves before any frame arrives, so
-			// a speed read there could pass on the value it already had before
-			// the frame lands.
+			// Changing one must not move the other. Read on the browser that
+			// did not act, once the bias has moved there, so the bias change
+			// has been applied. The acting browser's own bias moves before any
+			// frame arrives, so a speed read there could pass before the frame
+			// lands.
 			await expect(b.getByTestId('speed-input')).toHaveValue('9')
 
 			await setSpeed(a, 2)
@@ -749,4 +747,146 @@ test.describe('/demos/topk', () => {
 			await ctxB.close()
 		}
 	})
+
+	// On a cluster, publishes from two replicas can reach a page in the other
+	// order from the one Redis applied their writes in. The watcher's socket is
+	// routed to make that order certain: the first control change's frame is
+	// held until the second change's frame has been delivered, and only then
+	// let through. Run once with each control as the one held, since a setter
+	// that sent the other control's value along would put back a stale copy of
+	// whichever it read.
+	const CHANGES = {
+		bias: { act: (page) => setBias(page, 'hot'), carries: (data) => data?.bias === 'hot' },
+		speed: { act: (page) => setSpeed(page, 20), carries: (data) => data?.speed === 20 }
+	}
+	for (const [held, other] of [['bias', 'speed'], ['speed', 'bias']]) {
+		test(`a late ${held} frame does not put back an older ${other}`, async ({ browser }) => {
+			test.setTimeout(60_000)
+			const ctxA = await browser.newContext()
+			const ctxW = await browser.newContext()
+			// Both control topics, by their shared prefix.
+			const isControl = (event) => typeof event?.topic === 'string' && event.topic.startsWith('demos:topk:control')
+			const parse = (message) => {
+				try { return typeof message === 'string' ? JSON.parse(message) : null } catch { return null }
+			}
+			let forwarded = 0
+			let armed = false
+			/** @type {null | (() => void)} */
+			let heldFrame = null
+			let released = false
+			// Every control payload the watcher's socket carried, for the failure
+			// messages below.
+			const seen = []
+			try {
+				const a = await ctxA.newPage()
+				const w = await ctxW.newPage()
+				await w.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+					const server = ws.connectToServer()
+					ws.onMessage((message) => server.send(message))
+					// A control publish is sent on as a frame of its own, which the
+					// client applies the same way as one inside a batch; the rest of
+					// a batch goes on unchanged and in order.
+					const control = (event) => {
+						seen.push(JSON.stringify(event.data))
+						if (armed && !heldFrame && CHANGES[held].carries(event.data)) {
+							heldFrame = () => { forwarded++; ws.send(JSON.stringify(event)) }
+							return
+						}
+						forwarded++
+						ws.send(JSON.stringify(event))
+						if (heldFrame && !released && CHANGES[other].carries(event.data)) {
+							heldFrame()
+							released = true
+						}
+					}
+					server.onMessage((message) => {
+						const frame = parse(message)
+						const batch = frame?.type === 'batch' && Array.isArray(frame.events)
+						const events = batch ? frame.events : [frame]
+						if (!events.some(isControl)) return ws.send(message)
+						const others = events.filter((event) => !isControl(event))
+						if (others.length > 0) ws.send(JSON.stringify({ ...frame, events: others }))
+						for (const event of events.filter(isControl)) control(event)
+					})
+				})
+				// Counted on the socket the app reads. Routing replaces the page's
+				// WebSocket with Playwright's stand-in, which delivers each frame
+				// to the app by dispatching it on itself, so the counter wraps
+				// whatever WebSocket the page has once the route is in place, and
+				// its listener, added before the app's own, runs in the same
+				// dispatch. Once the count reaches a frame, the app has received
+				// it. A publish can arrive alone or inside a batch frame, so both
+				// are counted.
+				await w.addInitScript(() => {
+					const Base = window.WebSocket
+					window.__controlFrames = 0
+					window.__countingSockets = 0
+					// The browser's own WebSocket extends EventTarget directly; the
+					// stand-in extends a class of its own.
+					window.__wrapsStandIn = Object.getPrototypeOf(Base) !== EventTarget
+					class Counting extends Base {
+						constructor(...args) {
+							super(...args)
+							window.__countingSockets++
+							this.addEventListener('message', (message) => {
+								try {
+									const frame = JSON.parse(message.data)
+									const events = frame?.type === 'batch' && Array.isArray(frame.events) ? frame.events : [frame]
+									for (const event of events) {
+										if (typeof event?.topic === 'string' && event.topic.startsWith('demos:topk:control')) window.__controlFrames++
+									}
+								} catch {}
+							})
+						}
+					}
+					window.WebSocket = Counting
+				})
+				await open(a)
+				await open(w)
+				// The count means something only if the app's socket is the
+				// counting one, wrapped around the stand-in rather than inside it.
+				// The global itself is not compared: waitForWS's connection probe
+				// replaces it after load with a wrapper that builds each later
+				// socket from the class it found, which is this one.
+				expect(await w.evaluate(() => ({
+					constructed: window.__countingSockets > 0,
+					wrapsStandIn: window.__wrapsStandIn
+				})), 'the page must build its socket from the counting WebSocket, which wraps the route\'s stand-in')
+					.toEqual({ constructed: true, wrapsStandIn: true })
+				await restoreDefaults(a)
+				await expect(w.getByText('Firehose (5 events/sec)')).toBeVisible({ timeout: 10_000 })
+				await expect(w.getByTestId('bias-uniform')).toHaveClass(/btn-primary/)
+
+				armed = true
+				await CHANGES[held].act(a)
+				// The second change waits until the first setter has published, so
+				// anything that setter read back was read before the second write.
+				await expect.poll(() => heldFrame !== null, {
+					timeout: 10_000,
+					message: () => `no ${held} frame reached the watcher; control payloads seen: ${seen.join(' ') || 'none'}`
+				}).toBe(true)
+				await CHANGES[other].act(a)
+				await expect.poll(() => released, {
+					timeout: 10_000,
+					message: () => `the ${other} frame never followed the held ${held} frame; control payloads seen: ${seen.join(' ')}`
+				}).toBe(true)
+				await expect.poll(() => w.evaluate(() => window.__controlFrames), { timeout: 10_000 }).toBe(forwarded)
+				// Received is not yet applied: the stream queues what arrives and
+				// applies it in an animation frame it requests at the time, which
+				// runs ahead of the frames requested here.
+				await w.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+
+				// Both frames have been applied, the late one last. Redis holds 20
+				// and hot, and so must the page.
+				await expect(w.getByText('Firehose (20 events/sec)')).toBeVisible()
+				await expect(w.getByTestId('bias-hot')).toHaveClass(/btn-primary/)
+			} finally {
+				const restore = await ctxA.newPage()
+				await open(restore, NAV).catch(() => {})
+				await restoreDefaults(restore)
+				await ctxA.close()
+				await ctxW.close()
+			}
+		})
+	}
 })

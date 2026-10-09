@@ -412,7 +412,8 @@ declare module "$live/demos/topk" {
   export const setBias: (...args: any[]) => Promise<any>;
   export const myTopkState: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const topkControls: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const topkSpeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const topkBias: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const trending: {
     "last10s": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
     "last1min": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };

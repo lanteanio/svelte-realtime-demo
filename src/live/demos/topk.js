@@ -122,7 +122,7 @@ export const setSpeed = live(async (ctx, n) => {
 	await redis.redis.set(SPEED_KEY, num)
 	// Published after the write, so a subscriber that reacts by re-reading
 	// cannot observe the old value.
-	ctx.publish(TOPICS.demoTopkControl, 'set', { speed: num, bias: await getBias() })
+	ctx.publish(TOPICS.demoTopkSpeed, 'set', { speed: num })
 	return { ok: true, speed: num }
 })
 
@@ -136,7 +136,7 @@ export const setBias = live(async (ctx, b) => {
 		throw new LiveError('VALIDATION', 'invalid bias')
 	}
 	await redis.redis.set(BIAS_KEY, b)
-	ctx.publish(TOPICS.demoTopkControl, 'set', { speed: await getSpeed(), bias: b })
+	ctx.publish(TOPICS.demoTopkBias, 'set', { bias: b })
 	return { ok: true, bias: b }
 })
 
@@ -150,22 +150,33 @@ export const setBias = live(async (ctx, b) => {
  * never told they changed, so two browsers sat at different settings above an
  * identical firehose and reloading looked like the fix.
  *
- * Both values ride one topic because they describe one control panel: a
- * subscriber that learned about a bias change but not the rate beside it would
- * be a smaller version of the same bug. The loader returns the same shape the
- * setters publish, so a subscriber cannot tell the initial read from a change.
+ * One stream per control, and each setter publishes only the value it wrote.
+ * A payload carrying both would need the other value read back first, and on
+ * a cluster, publishes from different replicas can reach a page in another
+ * order than Redis applied the writes: a copy read before a concurrent write
+ * could land after that write's own publish and put the old value back on
+ * every page. One `merge: 'set'` stream with one field per payload is not an
+ * alternative either. The client applies the events that arrive within one
+ * animation frame and then notifies once, with the last value, so a speed
+ * and a bias change landing together would lose one of them.
  */
-export const topkControls = live.stream(
-	TOPICS.demoTopkControl,
-	async () => ({ speed: await getSpeed(), bias: await getBias() }),
+export const topkSpeed = live.stream(
+	TOPICS.demoTopkSpeed,
+	async () => ({ speed: await getSpeed() }),
+	{ merge: 'set' }
+)
+
+export const topkBias = live.stream(
+	TOPICS.demoTopkBias,
+	async () => ({ bias: await getBias() }),
 	{ merge: 'set' }
 )
 
 /**
  * Page-load probe for the item catalog, which is fixed server config, so
  * one read on mount is enough. It also reports the current speed and bias;
- * the page takes those from topkControls instead, where a change made in
- * another browser reaches it.
+ * the page takes those from topkSpeed and topkBias instead, where a change
+ * made in another browser reaches it.
  */
 export const myTopkState = live(async () => {
 	const [speed, bias] = await Promise.all([getSpeed(), getBias()])
