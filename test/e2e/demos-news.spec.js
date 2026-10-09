@@ -29,6 +29,21 @@ async function setSpeed(page, n) {
 	await page.getByTestId('news-speed-input').fill(String(n))
 }
 
+// Drive the same onchange -> setSpeed RPC path with a value the slider cannot
+// produce. A range input sanitizes any value assigned to it into its min, max
+// and step, and removing an attribute does not lift the limit (the defaults
+// are 0, 100 and 1), so this widens all three before writing. They stay
+// widened until the page reloads.
+async function setRawSpeed(page, n) {
+	await page.getByTestId('news-speed-input').evaluate((el, value) => {
+		el.setAttribute('min', '-100')
+		el.setAttribute('max', '100')
+		el.setAttribute('step', 'any')
+		el.value = String(value)
+		el.dispatchEvent(new Event('change', { bubbles: true }))
+	}, n)
+}
+
 // Publish a headline through the webhook form and wait for the success banner.
 async function publishStory(page, headline, summary = '') {
 	await page.getByTestId('news-headline-input').fill(headline)
@@ -275,6 +290,49 @@ test.describe('/demos/news', () => {
 			// And it travels both ways, not just from whoever loaded first.
 			await setSpeed(b, 3)
 			await expect(a.getByTestId('news-speed-input')).toHaveValue('3', { timeout: 10_000 })
+		} finally {
+			const restore = await ctxA.newPage()
+			await open(restore)
+			await setSpeed(restore, 5)
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
+	test('the server clamps the firehose rate to 0..50 and rounds it, live and after a reload', async ({ browser }) => {
+		test.setTimeout(90_000)
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		try {
+			const actor = await ctxA.newPage()
+			const watcher = await ctxB.newPage()
+			await open(actor)
+			await open(watcher)
+			const label = (page) => page.getByTestId('news-speed-label')
+
+			// A starting rate none of the cases below produces, set from the
+			// watcher, so the actor's readout is known to follow the stream.
+			await setSpeed(watcher, 12)
+			await expect(label(actor)).toHaveText('12 view events/sec', { timeout: 10_000 })
+
+			// The labels render the value unclamped, unlike the slider. The
+			// actor's change handler shows the raw value it sent until the
+			// published value replaces it, so both pages reading the expected
+			// text is the server's value. Reloading the watcher reads it again
+			// through the stream's loader, which returns what Redis holds; no
+			// expected text matches the page's initial rate of 5. 7.6 and 2.4
+			// round in opposite directions, so truncating or rounding up each
+			// fails one of them.
+			const cases = [[77, '50 view events/sec'], [-3, 'paused'], [7.6, '8 view events/sec'], [2.4, '2 view events/sec']]
+			for (const [raw, shown] of cases) {
+				await setRawSpeed(actor, raw)
+				for (const page of [actor, watcher]) {
+					await expect(label(page)).toHaveText(shown, { timeout: 10_000 })
+				}
+				await watcher.reload()
+				await waitForWS(watcher)
+				await expect(label(watcher)).toHaveText(shown, { timeout: 10_000 })
+			}
 		} finally {
 			const restore = await ctxA.newPage()
 			await open(restore)
