@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, posix } from 'node:path'
 import test from 'node:test'
@@ -321,30 +321,70 @@ function onlySpawn(run) {
 	return run.spawns[0]
 }
 
-// The Dockerfile's instructions as Docker reads them with its default escape
-// character: leading whitespace is ignored, a line ending in a backslash
-// continues on the next, and comment and blank lines are skipped, including
-// inside a continuation. Keywords come back upper-cased, the leading
-// `--flag` options split off from the rest, and whitespace collapsed.
-// Heredocs and an `# escape=` directive are not modelled; the Dockerfile
-// test refuses both (HEREDOC_WORD, ESCAPE_DIRECTIVE).
+// The Dockerfile's instructions as BuildKit reads them with its default escape
+// character. An instruction's first line loses its leading whitespace. A line
+// ending in a backslash, trailing spaces or tabs allowed, continues on the
+// next, which is appended as it stands: its own leading whitespace kept and
+// nothing put in between, so a word split across two lines is one word.
+// Comment and blank lines are skipped, inside a continuation too. Keywords
+// come back upper-cased, the leading `--flag` options split off from the
+// rest, and whitespace collapsed. Heredocs and an `# escape=` directive are
+// not modelled; the Dockerfile test refuses both (HEREDOC_WORD,
+// ESCAPE_DIRECTIVE).
 function dockerInstructions(text) {
 	const instructions = []
 	let pending = null
 	for (const raw of text.split('\n')) {
-		const line = raw.trim()
-		if (line === '' || line.startsWith('#')) continue
-		const continued = line.endsWith('\\')
-		const body = continued ? line.slice(0, -1) : line
-		pending = pending === null ? body : `${pending} ${body}`
+		const line = raw.replace(/\r$/, '')
+		const trimmed = line.trim()
+		if (trimmed === '' || trimmed.startsWith('#')) continue
+		const continued = /\\[ \t]*$/.test(line)
+		const body = (pending === null ? line.trimStart() : line).replace(/\\[ \t]*$/, '')
+		pending = pending === null ? body : pending + body
 		if (continued) continue
-		const [keyword, ...tokens] = pending.split(/\s+/)
-		const flags = []
-		while (tokens[0]?.startsWith('--')) flags.push(tokens.shift())
-		instructions.push({ keyword: keyword.toUpperCase(), flags, rest: tokens.join(' ') })
+		instructions.push(dockerInstruction(pending))
 		pending = null
 	}
+	// A continuation that runs into the end of the file still ends the
+	// instruction; BuildKit runs it.
+	if (pending !== null && pending.trim() !== '') instructions.push(dockerInstruction(pending))
 	return instructions
+}
+
+// One instruction's text as dockerInstructions returns it.
+function dockerInstruction(text) {
+	const [keyword, ...tokens] = text.trim().split(/\s+/)
+	const flags = []
+	while (tokens[0]?.startsWith('--')) flags.push(tokens.shift())
+	return { keyword: keyword.toUpperCase(), flags, rest: tokens.join(' ') }
+}
+
+// An instruction's text split into words on whitespace outside quotes, each
+// word as written: quotes and backslashes kept, a backslash also keeping the
+// character after it in the word.
+function dockerWords(text) {
+	const words = []
+	let word = ''
+	let quote = null
+	for (let i = 0; i < text.length; i++) {
+		const c = text[i]
+		if (c === '\\' && quote !== "'" && i + 1 < text.length) {
+			word += c + text[++i]
+		} else if (quote) {
+			if (c === quote) quote = null
+			word += c
+		} else if (c === '"' || c === "'") {
+			quote = c
+			word += c
+		} else if (/\s/.test(c)) {
+			if (word !== '') words.push(word)
+			word = ''
+		} else {
+			word += c
+		}
+	}
+	if (word !== '') words.push(word)
+	return words
 }
 
 // The Dockerfile's stages in order: each with its name (lower-cased, null
@@ -435,8 +475,11 @@ const isCopy = (instruction) => instruction.keyword === 'COPY' || instruction.ke
 const spelled = (instruction) => [instruction.keyword, ...instruction.flags, instruction.rest].join(' ')
 
 // The package.json scripts a shell command runs, as this reads it. Words are
-// split on whitespace with quotes around them taken off, so a name in quotes,
-// or a command inside sh -c "...", is read too. In each part of the command
+// split on whitespace with quotes and parentheses at either end taken off, so
+// a name in quotes, a command inside sh -c "..." or a ( subshell ) is read
+// too, while npm glued to a $( or a backtick, as in $(npm, is not read as
+// npm. Only the first npm word in each part counts, so npm exec -- npm run
+// ... is not followed. In each part of the command
 // between &&, ||, ; and |, after an `npm` word (a path ending in npm, or
 // npm@version as npx takes it) and before a lone `--`: every
 // word that follows run, run-script, rum or urn and names a script (npm's own
@@ -515,11 +558,18 @@ test('every build entry point runs scripts/build.mjs: npm run build and the e2e 
 	// to expand, substitute, chain or comment out. Split on spaces it is then
 	// `node`, only options from BUILD_NODE_OPTIONS, and scripts/build.mjs or
 	// ./scripts/build.mjs, compared as written. The option list is short on
-	// purpose: memory sizing, a process title, and how warnings, deprecations
-	// and unhandled rejections are handled. Any other option fails here, a
-	// harmless one included. The repo's .npmrc, if there is one, sets neither
-	// node-options nor script-shell, which would add a preload to every script
-	// npm runs or run it with another shell.
+	// purpose: memory sizing, a process title, source maps, and how warnings,
+	// deprecations and unhandled rejections are handled. Any other option fails
+	// here, a harmless one included.
+	//
+	// The repo's .npmrc, if there is one, may set only keys on a short list of
+	// settings that govern installs and output, never what a script runs.
+	// Lines are split on any run of CR and LF characters, as npm's ini reader
+	// splits them; a line whose first non-blank character is ; or # is a
+	// comment; a key is the text before the first `=`, trimmed, and must be
+	// lower-case letters, digits and - as written, so a quoted, escaped,
+	// bracketed or commented key, which ini reads differently, is refused
+	// whatever it would mean.
 	const pkg = JSON.parse(readRepoFile('package.json'))
 	const script = pkg.scripts.build ?? ''
 	assert.match(script, /^[\w ./=:-]+$/, `the build script may hold only letters, digits, spaces and . / = : _ -: ${script}`)
@@ -528,7 +578,11 @@ test('every build entry point runs scripts/build.mjs: npm run build and the e2e 
 		&& words.slice(1, -1).every((option) => BUILD_NODE_OPTIONS.test(option)),
 		`the build script must be node, then only options matching ${BUILD_NODE_OPTIONS}, then scripts/build.mjs or ./scripts/build.mjs: ${script}`)
 	const npmrc = existsSync(new URL('../../.npmrc', import.meta.url)) ? readRepoFile('.npmrc') : ''
-	assert.doesNotMatch(npmrc, /^\s*(?:node[-_]options|script[-_]shell)\s*=/im, '.npmrc may not set node-options or script-shell')
+	const NPMRC_KEYS = ['engine-strict', 'fund', 'audit', 'loglevel', 'progress', 'update-notifier', 'save-exact', 'save-prefix', 'package-lock', 'legacy-peer-deps', 'strict-peer-deps']
+	const npmrcKeys = npmrc.split(/[\r\n]+/).map((line) => line.trim()).filter((line) => line !== '' && !/^[;#]/.test(line))
+		.map((line) => line.split('=')[0].trim())
+	assert.deepEqual(npmrcKeys.filter((key) => !/^[a-z0-9-]+$/.test(key) || !NPMRC_KEYS.includes(key)), [],
+		`.npmrc may set only ${NPMRC_KEYS.join(', ')}, each spelled plainly`)
 	// npm runs these around `build` on its own, outside the pin.
 	for (const hook of ['prebuild', 'postbuild']) {
 		assert.equal(pkg.scripts[hook], undefined, `npm run build would also run ${hook}`)
@@ -542,10 +596,12 @@ test('every build entry point runs scripts/build.mjs: npm run build and the e2e 
 	// (logged). That exemption holds only while the file uses console for
 	// nothing but calling its methods: every `console` is the object of a
 	// member access that is called (console.x(...) or a tagged console.x`...`),
-	// and no string in the file is "console". That catches the harness
-	// starting either one by command, path or module specifier. It does not
-	// see a name assembled at run time from pieces, or a launch made by a
-	// script or npm script the harness runs.
+	// and no string in the file is "console". A string naming either one as a
+	// command, a path or a module specifier therefore fails here unless it is
+	// logged. Not looked at: a name assembled at run time from pieces, console
+	// reached through a computed name (globalThis['cons' + 'ole']), a logged
+	// object whose own inspect method runs code, and a launch made by a script
+	// or npm script the harness runs.
 	const harness = parseRepoFile('scripts/run-local-e2e.mjs')
 	let consoleOnlyCalled = true
 	walk(harness.ast, (node, ancestors) => {
@@ -570,18 +626,34 @@ test('every build entry point runs scripts/build.mjs: npm run build and the e2e 
 	})
 	assert.ok(buildArray, 'the e2e harness must give some call an array literal holding the path scripts/build.mjs')
 	assert.deepEqual(named, [],
-		'no string in the e2e harness code may name vite or svelte-kit unless a console.* call is logging it, in a file that uses console only by calling its methods')
+		'no string in the e2e harness code may name vite or svelte-kit unless a console.* call is logging it, in a file that uses console only by calling its methods'
+		+ (consoleOnlyCalled ? '' : ' (this file does not: it reaches console other than by calling a method on it, or holds the string "console")'))
 })
 
 test('the image is built by npm run build, and takes only that build from the build stage', QUICK, () => {
 	const dockerfile = readRepoFile('Dockerfile')
 	assert.doesNotMatch(dockerfile, ESCAPE_DIRECTIVE, 'the Dockerfile may not have an `# escape=` line; dockerInstructions reads only the default escape')
-	// A SHELL instruction changes what runs every later RUN, and NODE_OPTIONS
-	// or an npm_config_* variable can change what npm run build runs; none may
-	// be set anywhere in the Dockerfile.
-	const reshaping = dockerInstructions(dockerfile).filter((instruction) => instruction.keyword === 'SHELL'
-		|| (['ENV', 'ARG'].includes(instruction.keyword) && /\b(?:NODE_OPTIONS|npm_config_\w*)/i.test(instruction.rest)))
-	assert.deepEqual(reshaping.map(spelled), [], 'the Dockerfile may not have a SHELL instruction, or an ENV or ARG naming NODE_OPTIONS or npm_config_*')
+	// A SHELL instruction changes what runs every later RUN; NODE_OPTIONS or an
+	// npm_config_* variable can change what npm run build runs; HOME, PREFIX
+	// and DESTDIR move the config files npm reads; and ONBUILD carries any
+	// instruction into every stage built FROM its own, past every rule here.
+	// Refused in every stage: any SHELL and any ONBUILD; an ENV or ARG whose
+	// text names NODE_OPTIONS or npm_config_*; and an ENV or ARG declaring a
+	// name that is not a plain word of letters, digits and _, or is HOME,
+	// PREFIX or DESTDIR. BuildKit drops quotes and backslashes from an ENV
+	// name, so NODE_OPT"IONS" would set NODE_OPTIONS. Names are read from
+	// dockerWords.
+	const declaredNames = (instruction) => {
+		const words = dockerWords(instruction.rest)
+		if (instruction.keyword === 'ENV' && !words[0]?.includes('=')) return words.slice(0, 1)
+		return words.filter((word) => instruction.keyword === 'ARG' || word.includes('=')).map((word) => word.split('=')[0])
+	}
+	const reshaping = dockerInstructions(dockerfile).filter((instruction) => ['SHELL', 'ONBUILD'].includes(instruction.keyword)
+		|| (['ENV', 'ARG'].includes(instruction.keyword)
+			&& (/\b(?:NODE_OPTIONS|npm_config_\w*)/i.test(instruction.rest)
+				|| declaredNames(instruction).some((name) => !/^\w+$/.test(name) || /^(?:HOME|PREFIX|DESTDIR)$/i.test(name)))))
+	assert.deepEqual(reshaping.map(spelled), [],
+		'the Dockerfile may not have a SHELL or ONBUILD instruction, or an ENV or ARG naming NODE_OPTIONS or npm_config_*, declaring a name that is not a plain word, or setting HOME, PREFIX or DESTDIR')
 	const instructions = dockerInstructions(dockerfile)
 	assert.deepEqual(instructions.filter((instruction) => instruction.rest.split(' ').some((word) => HEREDOC_WORD.test(word))).map(spelled), [],
 		'the Dockerfile may not have a word matching HEREDOC_WORD; dockerInstructions does not read heredocs')
@@ -606,6 +678,107 @@ test('the image is built by npm run build, and takes only that build from the bu
 		.filter(([, command]) => LAUNCH_NAME.test(command))
 		.map(([where, command]) => `${where}: ${command}`)
 	assert.deepEqual(named, [], 'no RUN, and no package.json script scriptsRunBy finds one running, may name vite or svelte-kit')
+
+	// npm reads config from the project's .npmrc, the user's ~/.npmrc, a
+	// global npmrc under its prefix and its own builtin npmrc, and any of them
+	// can give npm run build a preload or another script shell. In the build
+	// stage and the stages it is built FROM, refused:
+	// - any ADD; a COPY with a source that is not `.` or an existing file in
+	//   the repo (a directory, a wildcard, a path in another stage, a missing
+	//   file), or that names an npmrc other than the root .npmrc, which the
+	//   first test vets; a COPY whose destination, resolved against its
+	//   WORKDIR, is named npmrc or .npmrc; a COPY of `.` anywhere but the
+	//   WORKDIR npm run build runs in; and a COPY that puts a file inside that
+	//   WORKDIR anywhere but at the file's own path in the repo, so the tree
+	//   npm run build sees there, its package.json and scripts/build.mjs
+	//   included, is the repo's;
+	// - a RUN flag holding a quote or a backslash, a --mount with an env= key,
+	//   and a --mount whose target is a file named npmrc or .npmrc, or a
+	//   directory holding one of those config files: /, /root, /home and the
+	//   directories in it, /etc, /usr, /usr/local, /usr/local/etc,
+	//   /usr/local/lib and npm's own directories under it, and the WORKDIR and
+	//   its parents; and a --mount whose target is the WORKDIR npm run build
+	//   runs in or anything inside it;
+	// - a RUN, or a package.json script scriptsRunBy finds one running, whose
+	//   text holds a quote, a backslash or a `$`, so every word in it is
+	//   spelled out; that names npmrc, package.json, NODE_OPTIONS or
+	//   npm_config_; or that has, after an npm word (npm, or a path ending in
+	//   npm or npm-cli.js), a word in the same part of the command that is
+	//   config or a prefix of it, set, pkg or edit.
+	// npm run build reads the package.json in its WORKDIR, so that WORKDIR
+	// must be one a COPY of `.` or of package.json put the repo's own
+	// package.json in: a COPY of `.`, or of several sources or into a
+	// destination ending in /, read as a directory.
+	// Not looked at: a file a RUN writes without naming it (from a script the
+	// RUN runs, say), and a program a mount or a COPY puts in place outside
+	// the WORKDIR npm run build runs in.
+	const stagesUpFrom = (stage) => {
+		const stages = []
+		for (let current = stage; current; current = current.parent) stages.push(current)
+		return stages
+	}
+	const buildLineage = stagesUpFrom(build).flatMap((stage) => stage.instructions)
+	const repoFile = (path) => {
+		try {
+			return statSync(new URL(`../../${path}`, import.meta.url)).isFile()
+		} catch {
+			return false
+		}
+	}
+	const npmrcName = (path) => /(?:^|\/)\.?npmrc$/i.test(path)
+	const copySources = (instruction) => dockerArgs(instruction).slice(0, -1)
+	const copyDestination = (instruction) => tidyPath(posix.resolve(instruction.workdir, dockerArgs(instruction).at(-1)))
+	// A COPY whose destination is a directory: several sources, `.`, or a
+	// destination ending in /. Otherwise its one source lands at that name.
+	const intoDirectory = (instruction) => copySources(instruction).length > 1
+		|| dockerArgs(instruction).at(-1).endsWith('/') || ['.', ''].includes(tidyPath(copySources(instruction)[0] ?? '').replace(/^\/+/, ''))
+	const buildDir = tidyPath(lastRun.workdir)
+	const inBuildDir = (path) => path === buildDir || path.startsWith(`${buildDir}/`)
+	// Where a COPY puts a source: under the destination by its own name, or
+	// at the destination itself when that is a file.
+	const landsAt = (instruction, path) => intoDirectory(instruction)
+		? tidyPath(posix.join(copyDestination(instruction), posix.basename(path)))
+		: copyDestination(instruction)
+	const looseCopies = buildLineage.filter((instruction) => instruction.keyword === 'ADD'
+		|| (instruction.keyword === 'COPY' && (npmrcName(copyDestination(instruction)) || copySources(instruction).some((source) => {
+			const path = tidyPath(source).replace(/^\/+/, '')
+			if (path === '.' || path === '') return copyDestination(instruction) !== buildDir
+			if (instruction.flags.some((flag) => /^--from=/i.test(flag)) || /[*?[\\]/.test(source) || source.endsWith('/') || !repoFile(path)) return true
+			const target = landsAt(instruction, path)
+			if (inBuildDir(target) && target !== `${buildDir}/${path}`) return true
+			return npmrcName(path) && path !== '.npmrc'
+		}))))
+	const holdsConfig = (target, workdir) => {
+		const path = tidyPath(posix.resolve(workdir, target))
+		const parents = (dir) => dir.split('/').map((_, i, parts) => parts.slice(0, i + 1).join('/') || '/')
+		return npmrcName(path)
+			|| ['/', '/root', '/home', '/etc', '/usr', '/usr/local', '/usr/local/etc', '/usr/local/lib', '/usr/local/lib/node_modules', '/usr/local/lib/node_modules/npm'].includes(path)
+			|| /^\/home\/[^/]+$/.test(path)
+			|| parents(workdir).includes(path)
+	}
+	const mountTargets = (flag) => flag.slice('--mount='.length).split(',')
+		.filter((pair) => /^(?:target|dst|destination)=/i.test(pair)).map((pair) => pair.split('=').slice(1).join('='))
+	const looseFlags = buildLineage.filter((instruction) => instruction.keyword === 'RUN' && instruction.flags.some((flag) => /["'\\]/.test(flag)
+		|| (/^--mount=/i.test(flag) && (flag.split(',').some((pair) => /^(?:--mount=)?env=/i.test(pair))
+			|| mountTargets(flag).some((target) => holdsConfig(target, instruction.workdir)
+				|| inBuildDir(tidyPath(posix.resolve(instruction.workdir, target))))))))
+	const CONFIG_WORD = /^(?:c|co|con|conf|confi|config|set|pkg|edit)$/i
+	const configWriters = buildLineage.filter((instruction) => instruction.keyword === 'RUN')
+		.flatMap((run) => commandsReachedBy(run, scripts))
+		.filter(([, command]) => /["'\\$]/.test(command) || /npmrc|package\.json|NODE_OPTIONS|npm_config_/i.test(command)
+			|| command.split(/&&|\|\||[;|\n]/).some((part) => {
+				const words = part.trim().split(/\s+/).map((word) => word.replace(/^[("']+|[)"']+$/g, ''))
+				const npm = words.findIndex((word) => /^(?:.*\/)?npm(?:-cli\.js)?(?:@\S*)?$/.test(word))
+				return npm >= 0 && words.slice(npm + 1).some((word) => CONFIG_WORD.test(word))
+			}))
+		.map(([where, command]) => `${where}: ${command}`)
+	assert.deepEqual([...looseCopies.map(spelled), ...looseFlags.map(spelled), ...configWriters], [],
+		'in the build stage and the stages it is built FROM: no ADD; no COPY of anything but . into the build WORKDIR or existing repo files (the root .npmrc the only npmrc), none onto an npmrc, and none putting a file in the build WORKDIR anywhere but its own repo path; no RUN flag with a quote or backslash, no --mount with env=, onto an npm config location or into the build WORKDIR; and no RUN or script it reaches with a quote, backslash or $, or that runs npm config, set, pkg or edit or names npmrc, package.json, NODE_OPTIONS or npm_config_')
+	const manifestDirs = buildLineage.filter((instruction) => instruction.keyword === 'COPY'
+		&& copySources(instruction).some((source) => ['.', 'package.json'].includes(tidyPath(source).replace(/^\/+/, ''))) && intoDirectory(instruction))
+		.map(copyDestination)
+	assert.ok(manifestDirs.includes(tidyPath(lastRun.workdir)),
+		`npm run build must run in a WORKDIR a COPY put the repo's package.json in (${manifestDirs.join(', ') || 'none'}), not ${lastRun.workdir}`)
 
 	// Every stage an instruction reads files from, by --from= or a RUN
 	// --mount's from=, is the build stage, by name or by index; and exactly
@@ -681,7 +854,9 @@ test('scripts/build.mjs hands vite a pinned version, and the config reads exactl
 	// produces the pin and passes it to the process that evaluates the config.
 	// An environment without it falls back to Date.now() per evaluation, which
 	// is the failure this pin exists to prevent. Driven through the real entry
-	// point, so the defaults it relies on are the ones under test.
+	// point, so the defaults it relies on are the ones under test. Of the lock,
+	// what is checked is that its file holds this build's pid while vite runs
+	// and when it exits; that a second build waits for it is not.
 	assert.ok(buildLock(), 'scripts/build.mjs must call withBuildLock with a path staticString reads: a string, a join imported from node:path, or a top-level const holding one')
 	const run = runBuildScript({ SRD_TEST_SENTINEL: 'passed-through' })
 	const child = onlySpawn(run)
