@@ -304,7 +304,7 @@ test.describe('/demos/privacy', () => {
 			})
 			const found = await pinReadout(page, 'pv-round-reset', pinned[0])
 			await page.waitForTimeout(3_000)
-			await pinReadout(page, 'pv-round-reset', pinned[1])
+			const foundMoved = await pinReadout(page, 'pv-round-reset', pinned[1])
 			await unpinReadouts(page)
 			const { replaced, current } = await page.evaluate(() => {
 				const replaced = window.__pvResetReplaced
@@ -325,6 +325,15 @@ test.describe('/demos/privacy', () => {
 			const pageWrites = fromPinned.slice(0, -1)
 			expect(pageWrites.length, 'the page must have written to the pinned readout at least twice').toBeGreaterThanOrEqual(2)
 			expect(putBack, 'unpinning must put back the text the page last wrote while pinned').toBe(pageWrites.at(-1))
+			// Moving the pin returns what the page last wrote before the move:
+			// the last change from 99 to a text that is not pinned before the
+			// change from 99 to 98, or the text the first pin replaced.
+			const moved = changes.findIndex(([old, text]) => old === pinned[0] && text === pinned[1])
+			const writtenBeforeMove = changes.slice(0, moved)
+				.filter(([old, text]) => pinned.includes(old) && !pinned.includes(text))
+				.map(([, text]) => text)
+			expect(moved, 'the second pin must have taken hold').toBeGreaterThan(-1)
+			expect(foundMoved, 'a moved pin must return the text the page last wrote before the move').toBe(writtenBeforeMove.at(-1) ?? found)
 		} finally {
 			await unpinReadouts(page)
 		}
@@ -346,10 +355,10 @@ test.describe('/demos/privacy', () => {
 		// move past, and the moves past come 4.5, 7, 2 and 12 s after the
 		// attempt ends, each more than 2 s from every other: no fixed delay
 		// falls within 2 s after two of them, so a retry that slept instead of
-		// waiting for the round fails at least one case. No move of the pin
-		// comes sooner than 2 s after the attempt ends, so the guard's own
-		// re-read of the page, which a moved pin would mislead, has that long to
-		// land. About 30 s in all.
+		// waiting for the round fails at least one case. The pinned id does not
+		// change sooner than 2 s after the attempt ends, so the guard's own
+		// re-read of the page, which a changed id would mislead, has that long
+		// to land. About 30 s in all.
 		test.setTimeout(60_000)
 		await openPrivacy(page)
 		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
