@@ -707,6 +707,7 @@ export function watchWire(page) {
 	const record = createWireRecord();
 	wireRecords.set(page, record);
 	const t0 = Date.now();
+	record.armedAt = t0;
 	const since = () => Date.now() - t0;
 
 	page.on('websocket', (ws) => {

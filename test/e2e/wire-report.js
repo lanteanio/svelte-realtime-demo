@@ -57,9 +57,15 @@ const WIRE_RPC_CAP = 64;
  */
 const WIRE_PAYLOAD_CAP = 16;
 
-/** A fresh record. Everything that follows only ever adds to one of these. */
+/**
+ * A fresh record. Everything that follows only ever adds to one of these.
+ *
+ * Every `at` in it is milliseconds since `armedAt`, the epoch time whoever arms
+ * the record sets (null in a record built without a page).
+ */
 export function createWireRecord() {
 	return {
+		armedAt: null,
 		routed: false,
 		sockets: 0,
 		sawHandshake: false,
@@ -307,6 +313,37 @@ export function streamTopic(record, streamName) {
 export function markDelivery(record, streamName) {
 	const topic = streamTopic(record, streamName);
 	return { stream: streamName, topic, count: topic ? (record.deliveries.get(topic)?.count ?? 0) : null };
+}
+
+/**
+ * The newest frame the marked topic delivered after the mark, as
+ * `{ at, data }`, or null when nothing arrived since it. The ring always keeps
+ * the newest frame, so this holds however many arrived.
+ */
+export function newestSince(record, mark) {
+	const seen = mark?.topic ? record.deliveries.get(mark.topic) : undefined;
+	if (!seen || seen.count <= (mark.count ?? 0)) return null;
+	return heldFrames(seen).at(-1) ?? null;
+}
+
+/**
+ * When the value a topic currently holds arrived, in the record's own time:
+ * the later of the topic's last delivery and the last successful stream reply
+ * that named the topic, since a subscription's first value comes back in that
+ * reply. Null when the record holds neither.
+ *
+ * Requests past WIRE_RPC_CAP are not recorded, so after a resubscribe late in a
+ * long run this can return an earlier time than the one the value arrived at.
+ */
+export function valueArrivedAt(record, topic) {
+	const delivered = record.deliveries.get(topic)?.last;
+	let replied;
+	for (const call of record.rpcs) {
+		if (!call.stream || call.ok !== true || call.topic !== topic) continue;
+		if (replied === undefined || call.replyAt > replied) replied = call.replyAt;
+	}
+	if (delivered === undefined && replied === undefined) return null;
+	return Math.max(delivered ?? -Infinity, replied ?? -Infinity);
 }
 
 /**

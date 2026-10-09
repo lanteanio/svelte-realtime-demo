@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyWireFrame, createWireRecord, formatDeliverySince, formatWire, markDelivery, streamTopic } from '../e2e/wire-report.js'
+import { applyWireFrame, createWireRecord, formatDeliverySince, formatWire, markDelivery, newestSince, streamTopic, valueArrivedAt } from '../e2e/wire-report.js'
 
 // The verdict this report reaches decides where someone looks next, and its
 // four interesting states have four different owners: a request never sent is
@@ -506,4 +506,48 @@ test('a reconnect leaves an unanswered request first, and the answered one still
 		]
 	})
 	assert.equal(streamTopic(built, 'rawMood'), 'demos:privacy:agg-raw:round')
+})
+
+test('the newest frame since the mark is the last one to arrive, and none is named when nothing did', () => {
+	const { built } = delivered([{ sum: 3, n: 1 }], [])
+	const mark = markDelivery(built, 'rawMood')
+	assert.equal(newestSince(built, mark), null, 'a frame from before the mark is not one the action caused')
+	const send = (data, at) => applyWireFrame(built, 'in', { topic: 'demos:privacy:agg-raw:round', event: 'set', data }, at)
+	send({ sum: 5, n: 2 }, 500)
+	send({ sum: 9, n: 3 }, 520)
+	assert.deepEqual(newestSince(built, mark), { at: 520, data: { sum: 9, n: 3 } })
+	assert.equal(newestSince(built, markDelivery(built, 'nothingLikeThis')), null, 'a mark with no topic names no frame')
+})
+
+test('the newest frame since the mark survives a wrapped ring', () => {
+	// Twenty frames after the mark against sixteen slots: the newest sits in
+	// slot 3, not in the last slot.
+	const { built } = delivered([{ sum: 0, n: 0 }], [])
+	const mark = markDelivery(built, 'rawMood')
+	for (let i = 1; i <= 20; i++) applyWireFrame(built, 'in', { topic: 'demos:privacy:agg-raw:round', event: 'set', data: { n: i } }, 1000 + i)
+	assert.deepEqual(newestSince(built, mark), { at: 1020, data: { n: 20 } })
+})
+
+test('a value arrived with the later of its topic\'s last delivery and its last answered stream reply', () => {
+	const topic = 'demos:privacy:agg-raw:round'
+	const subscribed = record({ rpcs: [stream('demos/privacy/rawMood/__window/round', bound)] })
+	assert.equal(valueArrivedAt(subscribed, topic), 140, 'with no delivery, the reply carried the value')
+	applyWireFrame(subscribed, 'in', { topic, event: 'set', data: { n: 1 } }, 300)
+	assert.equal(valueArrivedAt(subscribed, topic), 300, 'a delivery after the reply replaced the value')
+	// A resubscribe answered after the last delivery hands over a fresh value.
+	subscribed.rpcs.push(stream('demos/privacy/rawMood/__window/round', { ...bound, id: 'again', replyAt: 450 }))
+	assert.equal(valueArrivedAt(subscribed, topic), 450)
+})
+
+test('only an answered, successful stream reply for the same topic counts as a value arriving', () => {
+	const topic = 'demos:privacy:agg-raw:round'
+	const notValues = record({
+		rpcs: [
+			stream('demos/privacy/rawMood/__window/round', { ...bound, ok: false }),
+			stream('demos/privacy/rawMood/__window/round', { id: 'none' }),
+			stream('demos/privacy/privateMood/__window/round', { ...bound, id: 'other', topic: 'demos:privacy:agg-private:round', replyAt: 900 }),
+			{ rpc: 'demos/privacy/roundInfo', id: 'info', stream: false, at: 100, replyAt: 800, ok: true, topic }
+		]
+	})
+	assert.equal(valueArrivedAt(notValues, topic), null)
 })

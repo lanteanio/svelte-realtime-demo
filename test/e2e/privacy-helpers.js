@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { waitForWS, watchWire } from './helpers.js'
-import { formatDeliverySince, markDelivery } from './wire-report.js'
+import { CLOSE_GRACE_MS, rawBaseline, rawCounted } from './raw-count.js'
+import { formatDeliverySince, markDelivery, newestSince, valueArrivedAt } from './wire-report.js'
 
 /**
  * Thrown when a round boundary crossed a sequence that can only be asserted
@@ -350,12 +351,64 @@ export async function rawState(page) {
 	}
 }
 
+/**
+ * The raw count of the window a submission made now lands in: rawBaseline
+ * (raw-count.js) over the raw readout's n and the time its value arrived, by
+ * the wire record. `n` equals the readout's n when that value arrived at least
+ * CLOSE_GRACE_MS into the minute `now` falls in, and 0 otherwise, since a page
+ * that lived through a tumble keeps showing the closing window's count. The
+ * minute is taken from this process's clock and the server names windows from
+ * its own, so this relies on the two agreeing to well under CLOSE_GRACE_MS, as
+ * on one host.
+ * A closing publish later than the grace is taken as the current window's, and
+ * the arrival time is when this process received the frame, so a busy test
+ * process can also push a closing publish past the grace.
+ *
+ * `now` picks the minute (default: this process's clock now). Needs a page
+ * opened with openPrivacy, whose wire record saw the raw stream's subscribe.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {{ now?: number }} [options]
+ */
+export async function windowRawCount(page, { now = Date.now() } = {}) {
+	const wire = watchWire(page)
+	const topic = markDelivery(wire, 'rawMood').topic
+	if (topic === null) {
+		throw new Error('the wire record holds no answered rawMood stream, so the raw count cannot be placed in a window')
+	}
+	// The arrival time is taken before the readout is read: a frame landing
+	// between the two then pairs an older time with a newer count, which can
+	// only lower the result, never leave it at an earlier window's count. Not
+	// covered: the page applies stream frames on its next animation frame, so
+	// a frame recorded just before this read can pair a newer time with the
+	// older count still showing.
+	const windowStart = Math.floor(now / 60_000) * 60_000
+	const arrived = valueArrivedAt(wire, topic)
+	const shown = (await rawState(page)).n
+	const arrivedAt = arrived === null ? null : wire.armedAt + arrived
+	const { before, fromEarlierWindow } = rawBaseline({ shown, arrivedAt, windowStart })
+	return { n: before, shown, arrivedAt, fromEarlierWindow }
+}
+
 export async function protectedSnapshot(page) {
 	return (await page.getByTestId('pv-protected-value-area').innerText()).replace(/\s+/g, ' ').trim()
 }
 
 /**
  * Submit one mood and confirm the raw aggregate counted it.
+ *
+ * Counted means: the newest raw frame delivered since the mark, which is taken
+ * just before the click, carries an n above the baseline, and the card shows
+ * that frame's n. The frame is read off the wire (watchWire), so a card that
+ * already showed a high enough number cannot pass on its own. The card must
+ * show the frame's n, so a page that never applies the frame passes only when
+ * its card already showed that same n.
+ *
+ * The baseline is windowRawCount's: the count of the window this click lands
+ * in, which the card cannot always say. A page that lived through a tumble
+ * keeps showing the closing window's final count until the new window first
+ * publishes, and the new window's first submission then publishes an n of 1,
+ * which a baseline of that old count would refuse.
  *
  * The raw count is round-scoped, so "it went up" is only evidence inside
  * one window. When the round tumbles while this is waiting, the count
@@ -382,19 +435,20 @@ export async function protectedSnapshot(page) {
  *
  * @param {import('@playwright/test').Page} page
  * @param {number} score
- * @param {{ onRoll?: 'throw' | 'skip' }} [options]
+ * @param {{ onRoll?: 'throw' | 'skip', now?: number }} [options] `now` is
+ * passed to windowRawCount, to place the click in a different minute.
  */
-export async function submitMood(page, score, { onRoll = 'throw' } = {}) {
+export async function submitMood(page, score, { onRoll = 'throw', now } = {}) {
 	await expect.poll(async () => (await roundState(page)).resetInSeconds, {
 		timeout: 10_000,
 		message: 'the round countdown stayed at 0, so the page never showed the round this submission lands in'
 	}).toBeGreaterThan(0)
 	const startRoundId = (await roundState(page)).roundId
-	const before = (await rawState(page)).n
+	const wire = watchWire(page)
+	const { n: before, shown, arrivedAt, fromEarlierWindow } = await windowRawCount(page, { now })
 	// Marked BEFORE the click. The publish this waits for is the one the click
 	// causes, and the record counts deliveries cumulatively, so a count read
 	// afterwards cannot be separated from what had already arrived.
-	const wire = watchWire(page)
 	const mark = markDelivery(wire, 'rawMood')
 	await page.getByTestId(`pv-submit-${score}`).click()
 	await expect(page.getByTestId('pv-submit-note')).toContainText(`Submitted ${score}/5`)
@@ -410,21 +464,36 @@ export async function submitMood(page, score, { onRoll = 'throw' } = {}) {
 			rolledTo = roundId
 			return true
 		}
-		return (await rawState(page)).n > before
+		const delivered = newestSince(wire, mark)?.data?.n
+		return rawCounted({ before, delivered, shown: (await rawState(page)).n })
 	}
 	try {
 		await expect.poll(counted, {
 			timeout: 10_000,
 			message:
-				`the raw aggregate never counted the ${score}/5 submission: n stayed at ${before} ` +
-				`for 10s inside round ${startRoundId}, with no round boundary to explain it`
+				`the raw aggregate never counted the ${score}/5 submission within 10s inside round ${startRoundId}, ` +
+				`with no round boundary to explain it; the baseline was ${before}` +
+				(arrivedAt === null
+					? ' (the wire record cannot say when the card\'s n arrived)'
+					: fromEarlierWindow
+						? ` (the card's n arrived before this minute was ${CLOSE_GRACE_MS / 1000}s old, so it was taken as an earlier window's)`
+						: '')
 		}).toBe(true)
 	} catch (error) {
 		// The note asserted above renders only after the RPC resolves, so the
 		// submission is already proven accepted by the time this fails. What is
-		// left is whether the aggregate published at all, which no number on the
-		// page can answer and the wire can.
+		// left is what the page showed against what arrived, and whether the
+		// aggregate published at all, which no number on the page can answer
+		// and the wire can.
+		const after = await page.getByTestId('pv-raw-n').textContent({ timeout: 1_000 }).catch(() => page.getByTestId('pv-raw-empty').count()
+			.then((empty) => (empty ? 'empty' : 'not on the page'), () => 'unreadable'))
+		const newest = newestSince(wire, mark)?.data?.n
 		error.message = `${error.message}
+
+--- raw counts ---
+card before the click: ${shown}
+card after the poll: ${after}
+newest frame since the mark: ${newest === undefined ? 'none' : `n ${newest}`}
 
 --- aggregate probe ---
 ${formatDeliverySince(wire, mark)}`
@@ -544,32 +613,25 @@ export async function unpinRoundId(page) {
  * report refuses to speak for, so intercepting to produce the failure would
  * make the very verdict under test unreachable.
  *
- * Re-applied on an interval for the same reason the round pin is: the page
- * rewrites the node whenever the aggregate changes, which is exactly what is
- * being suppressed.
+ * Held with pinReadout, whose observer puts the count back before the page
+ * yields, so no read can land between the page applying a frame and the pin
+ * undoing it. A pin re-applied on a timer leaves that gap open, and a poll that
+ * reads inside it sees the applied count and passes. Needs the card to show a
+ * count, and to keep showing one: the readout is one text node, which an empty
+ * card does not have, and a card that empties and fills again renders a new
+ * node the pin does not hold.
  *
  * @returns the value the readout is held at, which the failure message quotes
  */
 export async function pinRawCount(page) {
-	return page.evaluate(() => {
-		const node = () => document.querySelector('[data-testid="pv-raw-n"]')
-		const frozen = node()?.textContent ?? '0'
-		const apply = () => {
-			const el = node()
-			if (el && el.textContent !== frozen) el.textContent = frozen
-		}
-		apply()
-		window.__pvPinnedRaw = setInterval(apply, 25)
-		return frozen
-	})
+	const frozen = await page.getByTestId('pv-raw-n').textContent({ timeout: 5_000 })
+	await pinReadout(page, 'pv-raw-n', frozen)
+	return frozen
 }
 
-/** Release the freeze and let the page show the aggregate again. */
+/** Release the freeze (and any other pinned readout) and show the page's count again. */
 export async function unpinRawCount(page) {
-	await page.evaluate(() => {
-		clearInterval(window.__pvPinnedRaw)
-		delete window.__pvPinnedRaw
-	})
+	await unpinReadouts(page)
 }
 
 /**
@@ -583,39 +645,60 @@ export async function unpinRawCount(page) {
  * writes are taken off its queue as they are made, so what it records is only
  * what the page wrote. Calling it again for the same readout moves the pin.
  *
+ * With `onNextSubmit`, the pin is placed when the next mood button is clicked
+ * (in the capture phase, before the app's own handler runs) rather than now,
+ * so a reading taken before that click still sees the page's own text.
+ *
  * @returns the text the pin holds as the page's own when it is placed: the
  * text showing for a first pin, the last text it recorded for a moved one. It
  * is taken in the same step as the pin, so no page write can fall between.
+ * Null with `onNextSubmit`, as the pin is not placed yet.
  */
-export async function pinReadout(page, testId, value) {
-	return page.evaluate(([id, pinned]) => {
-		const text = document.querySelector(`[data-testid="${id}"]`)?.firstChild
-		if (!(text instanceof Text)) throw new Error(`${id} holds no text node to pin`)
-		const pins = (window.__pvPins ??= {})
-		const pin = (pins[id] ??= { text, real: text.nodeValue })
-		const found = pin.real
-		pin.observer?.disconnect()
-		const observer = new MutationObserver(() => {
-			pin.real = text.nodeValue
+export async function pinReadout(page, testId, value, { onNextSubmit = false } = {}) {
+	return page.evaluate(([id, pinned, deferred]) => {
+		const place = () => {
+			const text = document.querySelector(`[data-testid="${id}"]`)?.firstChild
+			if (!(text instanceof Text)) throw new Error(`${id} holds no text node to pin`)
+			const pins = (window.__pvPins ??= {})
+			const pin = (pins[id] ??= { text, real: text.nodeValue })
+			const found = pin.real
+			pin.observer?.disconnect()
+			const observer = new MutationObserver(() => {
+				pin.real = text.nodeValue
+				apply()
+			})
+			const apply = () => {
+				text.nodeValue = pinned
+				observer.takeRecords()
+			}
+			observer.observe(text, { characterData: true })
 			apply()
-		})
-		const apply = () => {
-			text.nodeValue = pinned
-			observer.takeRecords()
+			pin.observer = observer
+			return found
 		}
-		observer.observe(text, { characterData: true })
-		apply()
-		pin.observer = observer
-		return found
-	}, [testId, String(value)])
+		if (!deferred) return place()
+		const pending = (window.__pvPendingPins ??= new Set())
+		const onClick = (event) => {
+			if (!event.target.closest('button[data-testid^="pv-submit-"]')) return
+			document.removeEventListener('click', onClick, true)
+			pending.delete(onClick)
+			place()
+		}
+		pending.add(onClick)
+		document.addEventListener('click', onClick, true)
+		return null
+	}, [testId, String(value), onNextSubmit])
 }
 
 /**
  * Release every pinned readout and put back the text the page last wrote to
- * it, which is what the page's own renderer expects to find there.
+ * it, which is what the page's own renderer expects to find there. A pin
+ * waiting for its click (onNextSubmit) is cancelled.
  */
 export async function unpinReadouts(page) {
 	await page.evaluate(() => {
+		for (const onClick of window.__pvPendingPins ?? []) document.removeEventListener('click', onClick, true)
+		delete window.__pvPendingPins
 		for (const pin of Object.values(window.__pvPins ?? {})) {
 			pin.observer.disconnect()
 			pin.text.nodeValue = pin.real

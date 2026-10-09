@@ -13,7 +13,8 @@ import {
 	submitMood,
 	unpinRoundId,
 	waitForDistinct,
-	waitForProtected
+	waitForProtected,
+	windowRawCount
 } from './privacy-helpers.js'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
@@ -66,7 +67,7 @@ test.describe('cluster: /demos/privacy', () => {
 			// into the sequence's counts.
 			await inStableRound(a, async (initialRound) => {
 				expect(initialRound.distinct).toBeLessThan(initialRound.k - 1)
-				const initialRaw = await rawState(a)
+				const initialRaw = await windowRawCount(a)
 				const held = await protectedSnapshot(a)
 				await submitMood(a, 1)
 				await submitMood(sameB, 5)

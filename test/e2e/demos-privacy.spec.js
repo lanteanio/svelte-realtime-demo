@@ -20,7 +20,8 @@ import {
 	unpinRoundId,
 	waitForDistinct,
 	waitForFreshRound,
-	waitForProtected
+	waitForProtected,
+	windowRawCount
 } from './privacy-helpers.js'
 
 test.describe.configure({ mode: 'serial' })
@@ -82,7 +83,7 @@ test.describe('/demos/privacy', () => {
 		// submissions if the window is allowed to change underneath it.
 		await inStableRound(page, async (initialRound) => {
 			expect(initialRound.distinct).toBeLessThan(initialRound.k - 1)
-			const initialRaw = await rawState(page)
+			const initialRaw = await windowRawCount(page)
 			const protectedBefore = await protectedSnapshot(page)
 
 			for (const score of [1, 2, 3, 4, 5]) await submitMood(page, score)
@@ -666,6 +667,10 @@ test.describe('/demos/privacy', () => {
 		// Headroom, so the ten-second poll below fails on the aggregate rather
 		// than straddling a boundary and raising the other error entirely.
 		await waitForFreshRound(page, { requireRoom: false })
+		// One counted submission first, so the card shows this window's count.
+		// Frozen at that count, the card cannot equal the next publish's n, which
+		// is one more; frozen at an earlier window's count it could.
+		await submitMood(page, 4)
 
 		// Stage the one fault the count cannot distinguish on its own: the write
 		// is accepted, the aggregate publishes, the frames arrive, and the page
@@ -678,9 +683,15 @@ test.describe('/demos/privacy', () => {
 			const failure = await submitMood(page, 3).then(() => null, (error) => error)
 			expect(failure, 'a frozen readout must fail the poll').not.toBeNull()
 			expect(failure.message, 'the timeout must carry the wire verdict').toContain('--- aggregate probe ---')
-			// The count the helper reports is the frozen one, which is what ties
-			// the message to the staged condition rather than to any old failure.
-			expect(failure.message).toContain(`n stayed at ${frozen}`)
+			// The counts the helper reports are the staged ones, which is what ties
+			// the message to the staged condition rather than to any old failure:
+			// the card held the frozen count throughout while the newest frame
+			// carried one more. The frozen count arrived in this window, so it is
+			// also the baseline.
+			expect(failure.message).toContain(`card before the click: ${frozen}\n`)
+			expect(failure.message).toContain(`card after the poll: ${frozen}\n`)
+			expect(failure.message).toContain(`newest frame since the mark: n ${Number(frozen) + 1}\n`)
+			expect(failure.message, 'the baseline is this window\'s count').toContain(`the baseline was ${frozen}\n`)
 
 			// The verdict, and the three readings it must not reach, each excluded
 			// by name. Matched with startsWith rather than a substring test,
@@ -701,6 +712,83 @@ test.describe('/demos/privacy', () => {
 		}
 	})
 
+	test('a submission is judged by its window and by the newest frame, not by the card alone', async ({ page }) => {
+		// The fresh-round wait can take most of a minute.
+		test.setTimeout(120_000)
+		await openPrivacy(page)
+		await waitForFreshRound(page, { requireRoom: false })
+		const submitted = Date.now()
+		await submitMood(page, 4)
+		const counted = Date.now()
+		const shown = Number(await page.getByTestId('pv-raw-n').textContent())
+		await page.waitForTimeout(500)
+		// The count's arrival is the time its frame came in during the
+		// submission, not the time it is read. It came in this minute, so it is
+		// this window's; read as of a minute later, the same count is an
+		// earlier window's.
+		const now = await windowRawCount(page)
+		expect(now.arrivedAt, 'the count arrived during its submission').toBeGreaterThanOrEqual(submitted)
+		expect(now.arrivedAt, 'the count arrived during its submission').toBeLessThanOrEqual(counted)
+		expect(now, 'a count from this minute').toMatchObject({ n: shown, shown, fromEarlierWindow: false })
+		expect(await windowRawCount(page, { now: Date.now() + 60_000 }), 'the same count a minute on')
+			.toMatchObject({ n: 0, shown, fromEarlierWindow: true })
+
+		// A pin still waiting for its click is cancelled by unpinReadouts, so the
+		// next submission counts as usual.
+		await pinReadout(page, 'pv-raw-n', shown + 50, { onNextSubmit: true })
+		await unpinReadouts(page)
+		await submitMood(page, 5)
+		const next = Number(await page.getByTestId('pv-raw-n').textContent())
+		expect(next, 'a cancelled pin never takes hold').toBe(shown + 1)
+
+		// The poll judges against the baseline. Held at one above this window's
+		// count, the card is the baseline, and the next publish only reaches it:
+		// the submission must not count, although the card shows that frame's n.
+		await pinReadout(page, 'pv-raw-n', next + 1)
+		try {
+			const refused = await submitMood(page, 1).then(() => null, (error) => error)
+			expect(refused, 'a frame that does not raise the baseline must fail the poll').not.toBeNull()
+			expect(refused.message).toContain(`the baseline was ${next + 1}\n`)
+			expect(refused.message).toContain(`newest frame since the mark: n ${next + 1}\n`)
+		} finally {
+			await unpinReadouts(page)
+		}
+		// The defect this guards against, staged: the card shows the same n the
+		// next publish brings, but the click is placed a minute on, so the
+		// card's count is an earlier window's, the baseline is 0, and the
+		// submission must count.
+		await pinReadout(page, 'pv-raw-n', next + 2)
+		try {
+			await submitMood(page, 2, { now: Date.now() + 60_000 })
+		} finally {
+			await unpinReadouts(page)
+		}
+		const current = Number(await page.getByTestId('pv-raw-n').textContent())
+		expect(current, 'both staged submissions were counted by the server').toBe(next + 2)
+
+		// From the click on, the card holds two above what it showed. The next
+		// publish carries one above, so the card and the newest frame disagree
+		// and the submission must not count, although the readout is above the
+		// baseline. The click is placed a minute on, so the card's count is an
+		// earlier window's and the baseline is 0, not what the card shows.
+		await pinReadout(page, 'pv-raw-n', current + 2, { onNextSubmit: true })
+		try {
+			const failure = await submitMood(page, 3, { now: Date.now() + 60_000 }).then(() => null, (error) => error)
+			// The stage first, so a pin that never took hold is not read as the
+			// helper passing a card it should have refused.
+			expect(Number(await page.getByTestId('pv-raw-n').textContent()), 'the staged count must hold from the click on').toBe(current + 2)
+			expect(failure, 'a card no frame matches must fail the poll').not.toBeNull()
+			// Staged as intended: the pin took hold at the click, not before it.
+			expect(failure.message).toContain(`card before the click: ${current}\n`)
+			expect(failure.message).toContain(`card after the poll: ${current + 2}\n`)
+			expect(failure.message).toContain(`newest frame since the mark: n ${current + 1}\n`)
+			expect(failure.message, 'the baseline comes from the window, not the card')
+				.toContain('the baseline was 0 (the card\'s n arrived before this minute was 2s old')
+		} finally {
+			await unpinReadouts(page)
+		}
+	})
+
 	test('a submission waits out a countdown at 0 before taking its starting round', async ({ page }) => {
 		// A round that has ended, as a page shows it until its next refresh,
 		// staged: the previous round's id with its countdown at 0. Released
@@ -711,10 +799,6 @@ test.describe('/demos/privacy', () => {
 		test.setTimeout(120_000)
 		await openPrivacy(page)
 		await waitForFreshRound(page, { requireRoom: false })
-		// Reopened inside the fresh round: a page that lived through the
-		// tumble still shows the closing window's raw count, which the first
-		// submission of the new window can equal.
-		await openPrivacy(page)
 		const fresh = await roundState(page)
 		await pinRoundId(page, fresh.roundId - 1)
 		await pinReadout(page, 'pv-round-reset', 0)
