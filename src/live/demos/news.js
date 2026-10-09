@@ -200,8 +200,10 @@ function pickStoryId(stories) {
 /**
  * Page-load probe for the fixed length limits the publish form enforces,
  * the only fields the page reads from here. It also reports the current
- * speed, the story cap and the stored story count; the page takes the
- * speed from newsControls and the counts it shows from newsStats.
+ * speed, the story cap and the stored story count, which the page does not
+ * read from here: the speed comes from newsControls, the count in the stats
+ * strip from newsStats and the one beside the stories heading from
+ * newsStories, and the cap is not shown.
  */
 export const myNewsState = live(async () => {
 	const [speed, len] = await Promise.all([

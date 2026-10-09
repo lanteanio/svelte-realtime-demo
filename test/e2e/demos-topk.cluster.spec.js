@@ -33,6 +33,9 @@ import {
 //      the panel interleaves both replicas' totals, so no pair of reads can
 //      tell a climb apart from a switch of replica. See the comment on the
 //      restart in test 2.
+//   3. A speed or bias change made on either replica reaches a page on the
+//      other without a reload, so the control publishes cross the cluster
+//      bus rather than staying on the replica they were set on.
 //
 // What this tier deliberately does NOT claim:
 //   - That the firehose is a cluster SINGLETON. Nothing here discriminates
@@ -321,6 +324,48 @@ test.describe('cluster: /demos/topk cross-replica', () => {
 			// else, and the single-instance sibling already gets it right with a
 			// caught close.
 			await Promise.allSettled([ctxA?.close(), ctxB?.close()])
+		}
+	})
+
+	test('speed and bias changes on either replica reach a page on the other without a reload', async ({ browser }) => {
+		// A control published only to the replica it was set on would pass every
+		// single-instance test, since a page there sees its own replica's
+		// publish.
+		test.setTimeout(90_000)
+		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
+		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		const speedShown = (page, n) => expect(page.getByText(`Firehose (${n} events/sec)`)).toBeVisible({ timeout: 10_000 })
+		const biasShown = (page, id) => expect(page.getByTestId(`bias-${id}`)).toHaveClass(/btn-primary/, { timeout: 10_000 })
+		try {
+			await openAt(a, INSTANCE_A)
+			await openAt(b, INSTANCE_B)
+			// A page's stream loaders read the stored values, so a value a page
+			// shows could have come from a loader rather than a publish. Each
+			// control is moved once first and waited for on the other page, which
+			// makes sure that page's stream for it has loaded; the change after
+			// that can reach it only as a publish.
+			await setSpeed(a, 3)
+			await speedShown(b, 3)
+			await setSpeed(a, 7)
+			await speedShown(b, 7)
+			await setBias(a, 'monopoly')
+			await biasShown(b, 'monopoly')
+			await setBias(a, 'hot')
+			await biasShown(b, 'hot')
+
+			await setSpeed(b, 2)
+			await speedShown(a, 2)
+			await setSpeed(b, 9)
+			await speedShown(a, 9)
+			await setBias(b, 'uniform')
+			await biasShown(a, 'uniform')
+			await setBias(b, 'monopoly')
+			await biasShown(a, 'monopoly')
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
 		}
 	})
 })

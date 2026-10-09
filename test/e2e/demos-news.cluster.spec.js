@@ -14,6 +14,9 @@ import { waitForWS } from './helpers.js'
 //      leaderboard, so a story published on A can climb on B without B
 //      touching it. This suite deliberately makes no cross-replica count-
 //      equality claim.
+//   3. A firehose rate change made on either replica reaches a page on the
+//      other without a reload, so the control publish crosses the cluster bus
+//      rather than staying on the replica it was set on.
 //
 // Runs in the cluster tier (playwright project 'cluster', started with two
 // instances + INSTANCE_B). Skipped elsewhere.
@@ -103,6 +106,43 @@ test.describe('cluster: /demos/news cross-replica', () => {
 				// aggregate then puts the headline in B's sliding-30s leaderboard.
 				await expect(b.getByTestId('lb-news-last30s-name').filter({ hasText: headline }))
 					.toBeVisible({ timeout: 25_000 })
+			} finally {
+				await setSpeed(a, 5)
+			}
+		} finally {
+			await ctxA.close()
+			await ctxB.close()
+		}
+	})
+
+	test('a rate change on either replica reaches a page on the other without a reload', async ({ browser }) => {
+		// A rate published only to the replica it was set on would pass every
+		// single-instance test, since a page there sees its own replica's
+		// publish.
+		test.setTimeout(60_000)
+		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
+		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		const label = (page) => page.getByTestId('news-speed-label')
+		try {
+			await openAt(a, INSTANCE_A)
+			await openAt(b, INSTANCE_B)
+			try {
+				// A page's stream loader reads the stored rate, so a rate a page
+				// shows could have come from its loader rather than a publish.
+				// Moving the rate first and waiting for the other page to show it
+				// makes sure that page's stream has loaded; the next rate can reach
+				// it only as a publish.
+				await setSpeed(a, 3)
+				await expect(label(b)).toHaveText('3 view events/sec', { timeout: 10_000 })
+				await setSpeed(a, 7)
+				await expect(label(b)).toHaveText('7 view events/sec', { timeout: 10_000 })
+
+				await setSpeed(b, 2)
+				await expect(label(a)).toHaveText('2 view events/sec', { timeout: 10_000 })
+				await setSpeed(b, 0)
+				await expect(label(a)).toHaveText('paused', { timeout: 10_000 })
 			} finally {
 				await setSpeed(a, 5)
 			}

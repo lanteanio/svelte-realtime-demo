@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
 import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
 import {
 	RESTORE, NAV, setSpeed, setRawSpeed, setBias, expectHydrated, rows, total,
@@ -225,6 +226,28 @@ test.describe('/demos/topk', () => {
 		} finally {
 			await restoreDefaults(page)
 			await watcherContext.close().catch(() => {})
+		}
+	})
+
+	test('the server stores the clamped speed, not the value it was sent', async ({ page }) => {
+		// Every readout above shows what the stream serves, and a loader that
+		// clamped on read would serve 50 while Redis held 77 and the cron fired
+		// 77 events a second. Of the readouts, only the stored value tells those apart. Read-only,
+		// from the harness Redis the app under test uses.
+		test.skip(process.env.LOCAL_E2E !== '1', 'reads the harness Redis, which only the local e2e harness provides')
+		const raw = process.env.REDIS_URL
+		if (!raw) throw new Error('REDIS_URL is not set; the local e2e harness provides it')
+		if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(raw).hostname)) throw new Error(`refusing a non-loopback Redis: ${new URL(raw).host}`)
+		test.setTimeout(60_000)
+		const redis = createRedisClient({ url: raw, autoShutdown: false })
+		try {
+			await open(page)
+			await setRawSpeed(page, 77)
+			await expect(page.getByText('Firehose (50 events/sec)')).toBeVisible({ timeout: 10_000 })
+			expect(await redis.redis.get('demos:topk:speed')).toBe('50')
+		} finally {
+			await restoreDefaults(page)
+			await redis.quit().catch(() => {})
 		}
 	})
 
