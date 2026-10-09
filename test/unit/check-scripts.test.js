@@ -1,0 +1,55 @@
+import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+import { fileURLToPath } from 'node:url'
+
+// Each check script walks the tree above its own directory, so a copy of it
+// placed at <fixture>/scripts/ checks <fixture> and nothing else. The fixture's
+// directory name holds a space, a non-ASCII letter and a percent sign, which a
+// file URL's pathname spells percent-encoded.
+function runCopyOf(name, files) {
+	const dir = mkdtempSync(join(tmpdir(), `srd check ${String.fromCharCode(0xfc)}%41-`))
+	try {
+		mkdirSync(join(dir, 'scripts'))
+		copyFileSync(fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url)), join(dir, 'scripts', name))
+		for (const [path, text] of Object.entries(files)) {
+			mkdirSync(join(dir, path, '..'), { recursive: true })
+			writeFileSync(join(dir, path), text)
+		}
+		const run = spawnSync(process.execPath, [join(dir, 'scripts', name)], { encoding: 'utf8', timeout: 30_000 })
+		return { status: run.status, output: `${run.stdout}\n${run.stderr}` }
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+}
+
+const BROKEN = 'const = ;\n'
+
+test('the syntax check does not read the harness\'s per-run build directories', { timeout: 60_000 }, () => {
+	// What is checked: a file that fails node --check at
+	// build-runs/srd-build-1/server/chunk.js leaves the check passing, with 2
+	// files checked (src/ok.js and the script's own copy); the same file at
+	// src/srd-build-1/server/chunk.js, a path that shares every directory name
+	// but build-runs, fails the check, naming the file.
+	const skipped = runCopyOf('check-js.mjs', { 'src/ok.js': 'export const ok = 1\n', 'build-runs/srd-build-1/server/chunk.js': BROKEN })
+	assert.equal(skipped.status, 0, `a file under build-runs/ must not be checked: ${skipped.output}`)
+	assert.match(skipped.output, /JavaScript syntax: 2 files checked/)
+	const checked = runCopyOf('check-js.mjs', { 'src/ok.js': 'export const ok = 1\n', 'src/srd-build-1/server/chunk.js': BROKEN })
+	assert.notEqual(checked.status, 0, `the same file outside build-runs/ must fail the check: ${checked.output}`)
+	assert.match(checked.output, /JavaScript syntax check failed: src[\\/]srd-build-1[\\/]server[\\/]chunk\.js/)
+})
+
+test('the cron registration check reads a checkout whose path needs percent-encoding in a URL', { timeout: 60_000 }, () => {
+	// What is checked: in such a checkout, a live.cron() under src/live/ is
+	// counted and passes, and one under src/lib/ fails the check, naming it.
+	const cron = 'export const tick = live.cron(\'* * * * *\', () => {})\n'
+	const passing = runCopyOf('check-cron-registration.mjs', { 'src/live/jobs.js': cron })
+	assert.equal(passing.status, 0, passing.output)
+	assert.match(passing.output, /cron registration: 1 file\(s\) with live\.cron\(\), all under src\/live\//)
+	const failing = runCopyOf('check-cron-registration.mjs', { 'src/live/jobs.js': cron, 'src/lib/server/jobs.js': cron })
+	assert.notEqual(failing.status, 0, failing.output)
+	assert.match(failing.output, /src[\\/]lib[\\/]server[\\/]jobs\.js/)
+})

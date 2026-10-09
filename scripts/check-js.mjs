@@ -1,9 +1,12 @@
 import { readdir } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1')
-const SKIP = new Set(['.git', '.svelte-kit', 'build', 'node_modules', 'playwright-report', 'test-results'])
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
+// build-runs holds the e2e harness's per-run builds: built output, not source,
+// and a running tier may be writing one while this reads it.
+const SKIP = new Set(['.git', '.svelte-kit', 'build', 'build-runs', 'node_modules', 'playwright-report', 'test-results'])
 const files = []
 
 await collect(ROOT)

@@ -12,8 +12,9 @@
  */
 import { readdir, readFile } from 'node:fs/promises'
 import { join, relative, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/(?:([A-Za-z]:))/, '$1')
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SRC = join(ROOT, 'src')
 // Trailing separator so the prefix test matches only files INSIDE the live
 // dir, never a sibling like src/live.js or src/live-foo/ that shares the
