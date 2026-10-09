@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, utimesSync } from 'node:fs'
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -8,6 +8,22 @@ import { UNREADABLE_GRACE_MS, lockState, withBuildLock } from '../../scripts/bui
 const dead = () => false
 const alive = () => true
 const NOW = 1_785_482_486_622
+
+// Fixture directories carry this process's pid, so the last test can tell
+// this run's directories from those of another unit run sharing the temp
+// directory. Any already there when the file loads (a pid reused from a run
+// that was killed) are not counted.
+const FIXTURE_PREFIX = `srd-lock-${process.pid}-`
+const fixtureDirs = () => readdirSync(tmpdir()).filter((name) => name.startsWith(FIXTURE_PREFIX))
+const preexisting = new Set(fixtureDirs())
+
+// A lock path in a fresh directory that is removed when the test ends,
+// whether it passed or failed.
+function lockPath(t) {
+	const dir = mkdtempSync(join(tmpdir(), FIXTURE_PREFIX))
+	t.after(() => rmSync(dir, { recursive: true, force: true }))
+	return join(dir, 'srd-build.lock')
+}
 
 test('a lock held by a living process is respected', () => {
 	assert.equal(lockState('4242\n2026-08-15T00:00:00.000Z\n', NOW, NOW, alive), 'held')
@@ -42,8 +58,8 @@ test('a pid that is not a positive integer is not treated as a holder', () => {
 	}
 })
 
-test('the lock is released even when the build throws', async () => {
-	const path = join(mkdtempSync(join(tmpdir(), 'srd-lock-')), 'srd-build.lock')
+test('the lock is released even when the build throws', async (t) => {
+	const path = lockPath(t)
 	await assert.rejects(
 		withBuildLock(path, async () => { throw new Error('vite exploded') }),
 		/vite exploded/
@@ -51,8 +67,8 @@ test('the lock is released even when the build throws', async () => {
 	assert.equal(existsSync(path), false, 'a failed build must not leave the next one waiting')
 })
 
-test('the lock records this process, and the next build reclaims a dead holder', async () => {
-	const path = join(mkdtempSync(join(tmpdir(), 'srd-lock-')), 'srd-build.lock')
+test('the lock records this process, and the next build reclaims a dead holder', async (t) => {
+	const path = lockPath(t)
 	let observed = ''
 	const result = await withBuildLock(path, async () => {
 		observed = readFileSync(path, 'utf8')
@@ -69,8 +85,8 @@ test('the lock records this process, and the next build reclaims a dead holder',
 	assert.equal(await withBuildLock(path, async () => 'reclaimed', { timeoutMs: 3000, log: () => {} }), 'reclaimed')
 })
 
-test('a build waiting on a live holder gives up with the holder named', async () => {
-	const path = join(mkdtempSync(join(tmpdir(), 'srd-lock-')), 'srd-build.lock')
+test('a build waiting on a live holder gives up with the holder named', async (t) => {
+	const path = lockPath(t)
 	// This process is unambiguously alive, so the lock can never be reclaimed
 	// and the wait must end in an error rather than in a second build.
 	writeFileSync(path, `${process.pid}\n2026-08-15T00:00:00.000Z\n`)
@@ -82,10 +98,21 @@ test('a build waiting on a live holder gives up with the holder named', async ()
 	assert.equal(ran, false, 'the body must not run while another build holds the lock')
 })
 
-test('an empty lock past the grace period is reclaimed rather than waited on forever', async () => {
-	const path = join(mkdtempSync(join(tmpdir(), 'srd-lock-')), 'srd-build.lock')
+test('an empty lock past the grace period is reclaimed rather than waited on forever', async (t) => {
+	const path = lockPath(t)
 	writeFileSync(path, '')
 	const old = new Date(Date.now() - UNREADABLE_GRACE_MS - 60_000)
 	utimesSync(path, old, old)
 	assert.equal(await withBuildLock(path, async () => 'reclaimed', { timeoutMs: 3000, log: () => {} }), 'reclaimed')
+})
+
+test('no lock fixture outlives the test that made it', () => {
+	// Declared last, and the tests in this file run one at a time in order, so
+	// every test above has ended and run its after hooks. Looks only at
+	// directories in tmpdir() whose names start with FIXTURE_PREFIX, at the
+	// moment this test runs. Not looked at: a fixture made under another name
+	// or in another directory, and one made again after this test, such as by
+	// a timed-out test whose body is still running.
+	const left = fixtureDirs().filter((name) => !preexisting.has(name))
+	assert.deepEqual(left, [], `lock fixtures left in ${tmpdir()}`)
 })
