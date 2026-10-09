@@ -70,8 +70,9 @@ function memoryRedis() {
 		}
 	}
 	// A command named in `failing` rejects the way a dropped connection does,
-	// having changed nothing. Every command sent, reads included, is recorded
-	// by name in `sent`.
+	// having changed nothing. Every command that goes to the server, reads
+	// included, is recorded by name in `sent`; a MULTI transaction goes once,
+	// as exec.
 	const reply = async (name) => {
 		redis.sent.push(name)
 		await roundTrip()
@@ -256,7 +257,8 @@ test('a fire the script refuses announces nothing, and re-arms the intent still 
 })
 
 test('a refused fire with no usable intent left arms nothing', async () => {
-	for (const intent of [null, '{not json', '{"at":"soon"}']) {
+	// The numeric string is a fire time only to code that coerces it.
+	for (const intent of [null, '{not json', '{"at":"soon"}', `{"at":"${NOW}"}`]) {
 		const redis = memoryRedis()
 		redis.evalReply = [0, intent]
 		const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
@@ -303,7 +305,8 @@ test('the stream loader arms an intent whose fire time has passed, unchanged', a
 
 test('the stream loader refuses to run without its topic, before it touches the alarm or Redis', async () => {
 	// The topic is only used when a record ages out, so without this check a
-	// call site that dropped it would load normally until the first one did.
+	// call site that dropped it would load normally until a loader run first
+	// pruned an aged record.
 	const redis = memoryRedis()
 	const stale = fired('stale', 2 * RETENTION_MS, Date.now())
 	redis.lists.set(LOG_KEY, [stale])
@@ -343,10 +346,10 @@ test('a Redis failure while reading the log fails the load rather than returning
 })
 
 test('a log that cannot be read still leaves the recorded alarm armed', async () => {
-	// Schedule and cancel reach the framework alarm only through a loader run,
-	// so the loader reconciles the alarm before it reads the log: a failed read
-	// must not leave unarmed a schedule whose fire time the visitor has already
-	// been given.
+	// The schedule and cancel RPCs cannot arm the alarm themselves; the loader
+	// run their nudge triggers does, so it reconciles the alarm before it reads
+	// the log: a failed read must not leave unarmed a schedule whose fire time
+	// the visitor has already been given.
 	const redis = memoryRedis()
 	const at = Date.now() + 30_000
 	redis.strings.set(PENDING_KEY, JSON.stringify({ at, setAt: Date.now() }))

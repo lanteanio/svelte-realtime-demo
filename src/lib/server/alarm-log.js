@@ -93,10 +93,11 @@ function parseIntent(raw) {
  * flight when a new schedule replaced its intent or a cancel removed it;
  * another replica's timer, still armed for an older `at`; and a recovered
  * fire whose stored alarm had no `at`, which carries the time it ran as its
- * `at`. An intent still pending at such a fire is one a visitor has already
- * been told is set, so deleting it would drop that alarm; after a cancel
- * there is none, and the fire is only left unlogged. A write that fails
- * changes nothing, so the intent survives for the next loader run to re-arm.
+ * `at`. An intent still pending at such a fire is one a visitor has been, or
+ * is about to be, told is set, so deleting it would drop that alarm; after
+ * a cancel there is none, and the fire is only left unlogged. A write that
+ * fails changes nothing, so the intent survives for the next loader run to
+ * re-arm.
  *
  * The match is numeric equality, so an intent with no `at`, or one spelled
  * as a string, never matches; parseIntent reads no fire time from either.

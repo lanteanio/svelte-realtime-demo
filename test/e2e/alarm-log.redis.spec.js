@@ -79,8 +79,12 @@ function alarmCtx(at) {
 const logged = async () => (await client.lrange(LOG_KEY, 0, -1)).map((raw) => JSON.parse(raw))
 
 // The log's remaining TTL right after a fire set it: at most RETENTION_MS, and
-// within a minute of it. A TTL set in seconds, or set longer, is above the
-// ceiling; one never set (-1), or left at a shorter value, is below the floor.
+// within a minute of it. RETENTION_MS handed to EXPIRE, as seconds, lands far
+// above the ceiling, and a TTL longer than RETENTION_MS by more than the
+// moments between the fire and this read lands above it; a TTL a millisecond
+// longer can pass. One never set (-1), or left at the minute the first test
+// seeds, is below the floor; one set less than a minute short of
+// RETENTION_MS passes.
 function expectRetentionTTL(pttl) {
 	expect(pttl).toBeLessThanOrEqual(RETENTION_MS)
 	expect(pttl).toBeGreaterThan(RETENTION_MS - 60_000)
@@ -215,11 +219,11 @@ test.describe('alarm log against a real Redis', () => {
 
 	test('an intent the script cannot read as a fire time refuses the fire and is left as it is', async () => {
 		// Not JSON and JSON that is not an object are refused rather than
-		// failing inside the script. An object with no `at`, or with a string
-		// one - even the fire's own time as a string - is refused too: the
-		// loader reads no fire time from it either.
+		// failing inside the script. An object with no `at`, a null one, or a
+		// string one - even the fire's own time as a string - is refused too:
+		// the loader reads no fire time from it either.
 		const at = Date.now()
-		for (const raw of ['{not json', '42', 'null', 'true', '"soon"', '{}', '{"at":"soon"}', `{"at":"${at}"}`]) {
+		for (const raw of ['{not json', '42', 'null', 'true', '"soon"', '{}', '{"at":null}', '{"at":"soon"}', `{"at":"${at}"}`]) {
 			await client.set(PENDING_KEY, raw, 'PX', 60_000)
 			const ctx = alarmCtx(at)
 			await recordFire(client, ctx)
