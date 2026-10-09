@@ -187,6 +187,10 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 			result = await run(round, attempt)
 		} catch (err) {
 			if (err instanceof RoundRolled) {
+				// Recorded before anything else, so a crossing that ends the
+				// guard on the re-read below is on the report as well.
+				rolled = err
+				noteRoll(`attempt ${attempt} of ${attempts}: ${err.message}`)
 				// The next attempt starts by waiting on this page for a fresh
 				// round, unbounded: on a page that navigated away it never
 				// returns, and on a closed one it fails with a Playwright error
@@ -202,8 +206,6 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 					}
 					reached = Math.max(err.to, current.roundId)
 				}
-				rolled = err
-				noteRoll(`attempt ${attempt} of ${attempts}: ${err.message}`)
 				continue
 			}
 			// A failure that is not a detected crossing may still be the
@@ -580,13 +582,18 @@ export async function unpinRawCount(page) {
  * cannot land between the page's value and the pinned one. The observer's own
  * writes are taken off its queue as they are made, so what it records is only
  * what the page wrote. Calling it again for the same readout moves the pin.
+ *
+ * @returns the text the pin holds as the page's own when it is placed: the
+ * text showing for a first pin, the last text it recorded for a moved one. It
+ * is taken in the same step as the pin, so no page write can fall between.
  */
 export async function pinReadout(page, testId, value) {
-	await page.evaluate(([id, pinned]) => {
+	return page.evaluate(([id, pinned]) => {
 		const text = document.querySelector(`[data-testid="${id}"]`)?.firstChild
 		if (!(text instanceof Text)) throw new Error(`${id} holds no text node to pin`)
 		const pins = (window.__pvPins ??= {})
 		const pin = (pins[id] ??= { text, real: text.nodeValue })
+		const found = pin.real
 		pin.observer?.disconnect()
 		const observer = new MutationObserver(() => {
 			pin.real = text.nodeValue
@@ -599,6 +606,7 @@ export async function pinReadout(page, testId, value) {
 		observer.observe(text, { characterData: true })
 		apply()
 		pin.observer = observer
+		return found
 	}, [testId, String(value)])
 }
 

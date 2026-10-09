@@ -110,9 +110,9 @@ test.describe('cluster: /demos/privacy', () => {
 		// sequence before any retry could run. Staged deterministically here:
 		// the round id is pinned to a foreign value so the guard's re-read sees
 		// a moved round, while the failing step is an ordinary poll timeout.
-		// Asking for no room, the retry does not wait for a later round, but its
-		// second window may still sit out most of a minute for the 30 s of
-		// headroom it asks for.
+		// Asking for no room, the retry does not wait for a later round. Its
+		// second window waits for the 30 s of headroom it asks for, which a
+		// reading shows from about 2 to 32 s into a round: up to about 35 s.
 		test.setTimeout(150_000)
 		const ctx = await browser.newContext({ baseURL: INSTANCE_A })
 		const page = await ctx.newPage()

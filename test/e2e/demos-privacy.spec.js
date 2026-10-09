@@ -254,7 +254,7 @@ test.describe('/demos/privacy', () => {
 
 	test('a fresh round is one that has run a few seconds, not one that has just turned over', async ({ page }) => {
 		// Two passes, each of which can spend its helper's 20 s poll, then a
-		// restore check that can wait 15 s for a countdown clear of 0 and
+		// restore check that can wait 15 s for a countdown of 5 or more and
 		// holds its pin for 3 s.
 		test.setTimeout(75_000)
 		await openPrivacy(page)
@@ -279,20 +279,49 @@ test.describe('/demos/privacy', () => {
 			// them before it reads anything.
 			await expect(waitForFreshRound(page, { minSecondsLeft: 58 })).rejects.toThrow(/exceeds the 60 s round/)
 			// Released, a readout shows the text the page last wrote to it. The
-			// countdown moves on every tick and a refresh can put back at most
-			// one second, so over three seconds pinned it moves at least two from
-			// where it was first pinned, provided it starts clear of 0. It cannot
-			// read 99 or 98, the two pinned texts; the second pin moves the first.
+			// test watches the readout with an observer of its own, each record
+			// holding the text a change replaced, so a change's new text is the
+			// next record's old one. The page's writes while pinned are the
+			// changes from a pinned text to another, and the release is the last
+			// such change: it must put back the text of the one before it. The
+			// countdown moves on every tick, so in three seconds pinned the page
+			// writes at least twice, and a refresh can put back at most one
+			// second, so the last write is at least two away from the text the
+			// pin found, as long as that is 5 or more. The pinned texts, 99 and
+			// 98, are ones a countdown cannot show; the second pin moves the first.
 			await unpinReadouts(page)
 			await expect.poll(async () => (await roundState(page)).resetInSeconds, { timeout: 15_000 }).toBeGreaterThanOrEqual(5)
-			const beforePin = await page.getByTestId('pv-round-reset').textContent()
-			await pinReadout(page, 'pv-round-reset', 99)
+			const pinned = ['99', '98']
+			const found = await pinReadout(page, 'pv-round-reset', pinned[0])
+			await page.evaluate(() => {
+				const text = document.querySelector('[data-testid="pv-round-reset"]')?.firstChild
+				const replaced = (window.__pvResetReplaced = [])
+				const watch = (window.__pvResetWatch = new MutationObserver((records) => {
+					for (const record of records) replaced.push(record.oldValue)
+				}))
+				watch.observe(text, { characterData: true, characterDataOldValue: true })
+			})
 			await page.waitForTimeout(3_000)
-			await pinReadout(page, 'pv-round-reset', 98)
+			await pinReadout(page, 'pv-round-reset', pinned[1])
 			await unpinReadouts(page)
-			const restored = await page.getByTestId('pv-round-reset').textContent()
-			expect(['99', '98', beforePin], 'unpinning must put back the page\'s latest text, not a pinned one or the one it showed when first pinned')
-				.not.toContain(restored)
+			const { replaced, current } = await page.evaluate(() => {
+				const replaced = window.__pvResetReplaced
+				for (const record of window.__pvResetWatch.takeRecords()) replaced.push(record.oldValue)
+				window.__pvResetWatch.disconnect()
+				delete window.__pvResetWatch
+				delete window.__pvResetReplaced
+				return { replaced, current: document.querySelector('[data-testid="pv-round-reset"]')?.textContent }
+			})
+			expect(pinned, 'unpinning must not leave a pinned text showing').not.toContain(current)
+			const fromPinned = replaced
+				.map((old, i) => [old, replaced[i + 1] ?? current])
+				.filter(([old, text]) => pinned.includes(old) && !pinned.includes(text))
+				.map(([, text]) => text)
+			const putBack = fromPinned.at(-1)
+			const pageWrites = fromPinned.slice(0, -1)
+			expect(pageWrites.length, 'the page must have written to the pinned readout at least twice').toBeGreaterThanOrEqual(2)
+			expect(putBack, 'unpinning must put back the text the page last wrote while pinned').toBe(pageWrites.at(-1))
+			expect(putBack, 'and not the text the pin found when it was placed').not.toBe(found)
 		} finally {
 			await unpinReadouts(page)
 		}
@@ -308,36 +337,48 @@ test.describe('/demos/privacy', () => {
 		// crossing the step throws, once naming a round ahead of the one the
 		// page shows and once a round behind it, an ordinary failure, and a
 		// pass. While the retry waits, the page's id moves to the latest of
-		// those rounds, still not past it, and only then one further, so a
-		// retry that took an earlier id as the one reached starts early. Four
-		// cases of about five seconds each.
+		// those rounds, still not past it (at `latestAt`), and only then one
+		// further (at `pastAt`), so a retry that took an earlier id as the one
+		// reached starts early. The retry must also start within 2 s of the
+		// move past, and the moves come 0.5, 3.5, 7 and 12 s after the attempt
+		// ends: no fixed delay falls within 2 s after all four, so a retry that
+		// slept instead of waiting for the round fails at least one case. About
+		// 30 s in all.
 		test.setTimeout(60_000)
 		await openPrivacy(page)
 		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 		const cases = [
-			{ ends: 'a crossing thrown naming a round ahead of the page', shows: 0, names: 2 },
-			{ ends: 'a crossing thrown naming a round behind the page', shows: 2, names: 0 },
-			{ ends: 'an ordinary failure', shows: 0, fails: true },
-			{ ends: 'a pass', shows: 0 }
+			{ ends: 'a crossing thrown naming a round ahead of the page', shows: 0, names: 2, latestAt: 500, pastAt: 3_500 },
+			{ ends: 'a crossing thrown naming a round behind the page', shows: 2, names: 0, latestAt: 0, pastAt: 7_000 },
+			{ ends: 'an ordinary failure', shows: 0, fails: true, latestAt: 0, pastAt: 500 },
+			{ ends: 'a pass', shows: 0, latestAt: 0, pastAt: 12_000 }
 		]
 		await pinReadout(page, 'pv-round-distinct', 0)
 		await pinReadout(page, 'pv-round-reset', 55)
 		let moving = Promise.resolve()
 		try {
-			for (const { ends, shows, names, fails } of cases) {
+			for (const { ends, shows, names, fails, latestAt, pastAt } of cases) {
 				const starts = []
 				let staged = []
+				let movedPastAt = 0
+				let retriedAt = 0
 				const outcome = await inStableRound(page, async (round, attempt) => {
 					starts.push(round.roundId)
-					if (attempt > 1) return 'ran'
+					if (attempt > 1) {
+						retriedAt = Date.now()
+						return 'ran'
+					}
 					const base = round.roundId + STAGED_ROUND_STEP
 					const latest = base + Math.max(shows, names ?? shows)
 					staged = [base + shows, latest, latest + 1]
 					await pinRoundId(page, base + shows)
 					moving = (async () => {
-						await sleep(2_000)
+						await sleep(latestAt)
 						await pinRoundId(page, latest)
-						await sleep(2_000)
+						await sleep(pastAt - latestAt)
+						// Taken before the pin is applied, so no read of the id it
+						// pins can come earlier.
+						movedPastAt = Date.now()
 						await pinRoundId(page, latest + 1)
 					})()
 					if (names !== undefined) throw new RoundRolled(round.roundId, base + names, 'a staged crossing')
@@ -347,6 +388,8 @@ test.describe('/demos/privacy', () => {
 				await moving
 				expect(outcome, ends).toBe('ran')
 				expect(starts.slice(1), `after ${ends}, the retry must start past the latest round reached`).toEqual([staged.at(-1)])
+				expect(retriedAt - movedPastAt, `after ${ends}, the retry must start within 2 s of the round moving past the latest one reached`)
+					.toBeLessThanOrEqual(2_000)
 				// Each move of the pin must replace the one before. A pin left
 				// running would keep writing its id after the release.
 				await unpinRoundId(page)
@@ -461,7 +504,7 @@ test.describe('/demos/privacy', () => {
 		const exhausted = await inStableRound(page, async (round) => {
 			await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
 			throw new Error(
-				'\x1b[2mexpect(\x1b[22mreceived\x1b[2m).\x1b[22mtoBeGreaterThanOrEqual\x1b[2m(\x1b[22mexpected\x1b[2m)\x1b[22m\n\n' +
+				'\x1b[2mexpect(\x1b[22m\x1b[31mreceived\x1b[39m\x1b[2m).\x1b[22mtoBeGreaterThanOrEqual\x1b[2m(\x1b[22m\x1b[32mexpected\x1b[39m\x1b[2m)\x1b[22m\n\n' +
 				'Expected: >= \x1b[32m2\x1b[39m\nReceived:    \x1b[31m1\x1b[39m\n\nCall Log:\n- Timeout 10000ms exceeded while waiting on the predicate'
 			)
 		}, { attempts: 1, freshRound: anyRound }).then(() => null, (error) => error)
@@ -563,21 +606,28 @@ test.describe('/demos/privacy', () => {
 		// Otherwise the next attempt's fresh-round wait would take over: on a
 		// page that navigated away it never returns, and on a closed page it
 		// fails at once with a Playwright error in place of the crossing.
+		// Each crossing is also on the report, as the note the guard writes for
+		// attempt 1 of 2, although no attempt follows it.
+		const rollNotes = () => test.info().annotations.filter((a) => a.type === 'round-rolled').map((a) => a.description)
 		const closingAgain = await context.newPage()
 		await openPrivacy(closingAgain)
 		let closedCrossing
 		expect(await outcomeOf(inStableRound(closingAgain, async (round) => {
-			closedCrossing = new RoundRolled(round.roundId, round.roundId + 1, 'a crossing the step detected')
+			closedCrossing = new RoundRolled(round.roundId, round.roundId + 1, 'a crossing the step detected on a page it closed')
 			await closingAgain.close()
 			throw closedCrossing
 		}, { freshRound: anyRound }))).toBe(closedCrossing)
+		expect(rollNotes(), 'a crossing on a page that closed must be recorded on the report')
+			.toContain(`attempt 1 of 2: ${closedCrossing.message}`)
 		await openPrivacy(leaving)
 		let leftCrossing
 		expect(await outcomeOf(inStableRound(leaving, async (round) => {
-			leftCrossing = new RoundRolled(round.roundId, round.roundId + 1, 'a crossing the step detected')
+			leftCrossing = new RoundRolled(round.roundId, round.roundId + 1, 'a crossing the step detected on a page it left')
 			await leaving.goto('about:blank')
 			throw leftCrossing
 		}, { freshRound: anyRound }))).toBe(leftCrossing)
+		expect(rollNotes(), 'a crossing on a page that navigated away must be recorded on the report')
+			.toContain(`attempt 1 of 2: ${leftCrossing.message}`)
 
 		// A pass the guard cannot place in one window is not returned.
 		await openPrivacy(leaving)
