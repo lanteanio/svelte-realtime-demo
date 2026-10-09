@@ -62,17 +62,18 @@ function hashesUnder(dir, pattern) {
  * another, and every page renders and then hydrates nothing; vite's output
  * gives no sign of it.
  *
- * Other processes in this checkout make such a write, each with a version of
- * its own and without the build lock. `svelte-kit sync` loads the config
- * through vite as a build and writes the file every time it runs; `npm run
- * check` runs it, and so do npm test, npm run test:all and npm's prepare step.
- * A vite build started directly rather than through scripts/build.mjs writes
- * it as it starts and again from its analyse and prerender steps, which load
- * the config anew; unpinned, each of those writes carries a version of its
- * own. A vite dev server writes it when it
- * starts and when it restarts (as it does on an edit
- * to svelte.config.js, the vite config or .env), each time under a fresh
- * version. While it runs, its syncs write the file only when the text differs
+ * Other processes in this checkout can make such a write, each with a version
+ * of its own. `svelte-kit sync` loads the config through vite as a build and
+ * writes the file every time it runs; `npm run check` and npm's prepare step
+ * run it through scripts/sync.mjs, under the build lock, so only a sync started
+ * some other way (by hand, through npx) can land inside a build. A vite build
+ * started directly rather than through scripts/build.mjs takes no lock and
+ * writes the file as it starts and again from its analyse and prerender steps,
+ * which load the config anew; unpinned, each of those writes carries a version
+ * of its own. A vite dev server takes no lock either and writes it when it
+ * starts and when it restarts (as it does on an edit to svelte.config.js, the
+ * vite config or .env), each time under a fresh version. While it runs, its
+ * syncs write the file only when the text differs
  * from what that process last wrote, which is once app.html has changed, the
  * server or universal hooks file has been created, deleted or renamed, or the
  * service worker has come or gone. Edits to the contents of the hooks, the
@@ -103,9 +104,8 @@ export function versionHashMismatch(out) {
 		`the server defines its hydration payload as __sveltekit_${hash}, but the client reads ` +
 		`${client.map((h) => `__sveltekit_${h}`).join(' and ')}, so every page would render and then hydrate nothing. ` +
 		'Kit\'s generated server file (.svelte-kit/generated/server/internal.js) was rewritten while this build ran, ' +
-		'most likely by svelte-kit sync (npm run check runs it, and so do npm test and npm run test:all), by a vite ' +
-		'build started outside scripts/build.mjs, or by a vite dev server in this checkout. Build again while no other ' +
-		'kit process runs here: no npm run check, npm test, npm run test:all, npm install or npm ci, svelte-kit sync, ' +
-		'vite build or vite dev.'
+		'most likely by a svelte-kit sync started outside npm run check (by hand or through npx), by a vite build ' +
+		'started outside scripts/build.mjs, or by a vite dev server in this checkout. Build again while none of those ' +
+		'runs here.'
 	)
 }
