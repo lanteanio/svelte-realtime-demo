@@ -7,6 +7,7 @@ import {
 	pinRoundId,
 	protectedSnapshot,
 	rawState,
+	RETRIED_SEQUENCE_TIMEOUT,
 	roundState,
 	STAGED_ROUND_STEP,
 	submitMood,
@@ -22,9 +23,10 @@ test.skip(!process.env.INSTANCE_B, 'privacy cluster coverage requires two explic
 
 test.describe('cluster: /demos/privacy', () => {
 	test('one cloned identity counts once across replicas, then two fresh identities cross k consistently', async ({ browser }) => {
-		// Waiting out a round boundary can cost a minute; the below-k assertions
-		// after it are the point of the test and must not be skipped to save it.
-		test.setTimeout(150_000)
+		// Sized for the retry: a crossing costs about two rounds before the
+		// second attempt starts. The below-k assertions after it are the point
+		// of the test and must not be skipped to save the time.
+		test.setTimeout(RETRIED_SEQUENCE_TIMEOUT)
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const a = await ctxA.newPage()
 		await openPrivacy(a, `${INSTANCE_A}/demos/privacy`)
@@ -58,9 +60,10 @@ test.describe('cluster: /demos/privacy', () => {
 			// threw on the boundary before reaching it.
 			//
 			// The page setup stays OUTSIDE the retry deliberately: a second attempt
-			// must re-submit from the SAME identities, which is what makes retrying
-			// safe - they add to the new window and cannot add a distinct
-			// contributor. Recreating the contexts would introduce new ones.
+			// re-submits from the SAME identities, and inStableRound starts it in a
+			// round later than any the first attempt reached, so none of them is
+			// counted there yet. Recreating the contexts would bring new identities
+			// into the sequence's counts.
 			await inStableRound(a, async (initialRound) => {
 				expect(initialRound.distinct).toBeLessThan(initialRound.k - 1)
 				const initialRaw = await rawState(a)
@@ -107,8 +110,9 @@ test.describe('cluster: /demos/privacy', () => {
 		// sequence before any retry could run. Staged deterministically here:
 		// the round id is pinned to a foreign value so the guard's re-read sees
 		// a moved round, while the failing step is an ordinary poll timeout.
-		// The retry's second window may sit out most of a minute waiting for
-		// the headroom it asks for, same as the sequence test above.
+		// Asking for no room, the retry does not wait for a later round, but its
+		// second window may still sit out most of a minute for the 30 s of
+		// headroom it asks for.
 		test.setTimeout(150_000)
 		const ctx = await browser.newContext({ baseURL: INSTANCE_A })
 		const page = await ctx.newPage()

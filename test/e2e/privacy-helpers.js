@@ -123,10 +123,17 @@ export async function assertSameRound(page, startRoundId, during) {
  * unlikely - only moves the odds. A minute is a hard ceiling on how much
  * work fits in one window, and a sequence that waits for an aggregate
  * publish per step has no guaranteed cost, so the boundary case has to be
- * handled rather than out-run. Retrying is safe because the submissions the
- * abandoned attempt already made carry the same identity: they add to the
- * new window's event count, which the caller re-baselines, and they cannot
- * add a second distinct contributor.
+ * handled rather than out-run. A retry must not run in a window the
+ * abandoned attempt already contributed to: its identities would already be
+ * counted there, and a sequence asserting that a submission adds a distinct
+ * contributor would wait for a count that cannot rise. So for a caller that
+ * asks for room (`requireRoom`, the default), the next attempt waits for a
+ * round later than the latest one this guard saw the crossing reach. That
+ * wait is the rest of the reached round and the start of the next one, up to
+ * about 72 s after the crossing is seen, so with the abandoned attempt a
+ * crossing costs such a caller about two rounds (RETRIED_SEQUENCE_TIMEOUT). A
+ * caller that asks for no room counts no contributors and retries in the next
+ * usable round, whichever it is.
  *
  * The guard covers the WHOLE body, not only the steps that detect a crossing
  * themselves. Only the helpers that read the round id throw RoundRolled; a
@@ -158,15 +165,23 @@ export async function assertSameRound(page, startRoundId, during) {
  *
  * A caller staging a crossing with pinRoundId keeps the pin in place until
  * the guard returns. A real round id never goes back, and releasing the pin
- * inside a retry would read as the round moving a second time.
+ * inside a retry would read as the round moving a second time. For a caller
+ * that asks for room, the retry then waits for a round later than the staged
+ * one, which a pinned page never shows: such a caller moves the pin past it
+ * while the retry waits, as a real round would move, or the wait runs to its
+ * timeout.
  *
  * @param {import('@playwright/test').Page} page
  * @param {(round: { roundId: number, distinct: number, k: number, resetInSeconds: number }, attempt: number) => Promise<any>} run
  */
 export async function inStableRound(page, run, { attempts = 2, freshRound } = {}) {
 	let rolled
+	// The latest round id seen once a crossing was detected; with room asked
+	// for, the next attempt waits for a round past it.
+	let reached = null
+	const countsContributors = freshRound?.requireRoom !== false
 	for (let attempt = 1; attempt <= attempts; attempt++) {
-		const round = await waitForFreshRound(page, freshRound)
+		const round = await waitForFreshRound(page, reached !== null && countsContributors ? { ...freshRound, after: reached } : freshRound)
 		let result
 		try {
 			result = await run(round, attempt)
@@ -179,11 +194,13 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 				// read ends here with the crossing instead. On the last attempt
 				// nothing follows, and the crossing is thrown below either way.
 				if (attempt < attempts) {
+					let current
 					try {
-						await roundState(page, REREAD)
+						current = await roundState(page, REREAD)
 					} catch {
 						throw err
 					}
+					reached = Math.max(err.to, current.roundId)
 				}
 				rolled = err
 				noteRoll(`attempt ${attempt} of ${attempts}: ${err.message}`)
@@ -205,6 +222,7 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 				throw err
 			}
 			if (current.roundId === round.roundId) throw err
+			reached = current.roundId
 			rolled = new RoundRolled(
 				round.roundId,
 				current.roundId,
@@ -223,11 +241,35 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 			)
 		}
 		if (settled.roundId === round.roundId) return result
+		reached = settled.roundId
 		rolled = new RoundRolled(round.roundId, settled.roundId, 'a round-scoped sequence ran to a pass, so its readings may mix both windows')
 		noteRoll(`attempt ${attempt} of ${attempts}: ${rolled.message}`)
 	}
 	throw rolled
 }
+
+/**
+ * The test timeout for a sequence run in inStableRound with room asked for,
+ * sized for its retry.
+ *
+ * The page's countdown reads anywhere from just under a second below the time
+ * actually left to just under two above it: the server rounds the time left
+ * up, and the page ticks it down on a phase of its own. So the default
+ * fresh-round wait accepts a reading taken between about 2 and 12 s into a
+ * round. Each leg can then take most of a round:
+ *
+ * - the first wait for a fresh round: up to about 56 s, from just after one
+ *   round's last qualifying reading to the next round's first, which the page
+ *   shows at its next 5 s refresh;
+ * - an attempt slow enough to cross its boundary, and the wait for a round
+ *   later than the one it crossed into: up to about 130 s together, from about
+ *   2 s into the attempt's round to about 12 s into the round after the next;
+ * - the second attempt: about a minute. One that crosses as well fails the
+ *   test either way.
+ *
+ * That is about 246 s. The rest covers the test's own setup on a slow host.
+ */
+export const RETRIED_SEQUENCE_TIMEOUT = 300_000
 
 /**
  * Wait for a round that has room for this test's contributor, has enough
@@ -270,8 +312,12 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
  * there is: a reading of 57 means more than two seconds of the round have
  * passed. `minSecondsLeft` and `minSecondsIn` together may not exceed 60, or
  * no reading would qualify.
+ *
+ * `after`, when given, also asks for a round id later than it: inStableRound
+ * passes the latest round a crossing reached, so a retry does not run in a
+ * window its abandoned attempt contributed to.
  */
-export async function waitForFreshRound(page, { timeout = 90_000, minSecondsLeft = 50, minSecondsIn = 3, requireRoom = true } = {}) {
+export async function waitForFreshRound(page, { timeout = 90_000, minSecondsLeft = 50, minSecondsIn = 3, requireRoom = true, after } = {}) {
 	if (minSecondsLeft + minSecondsIn > 60) {
 		throw new Error(`waitForFreshRound: minSecondsLeft (${minSecondsLeft}) + minSecondsIn (${minSecondsIn}) exceeds the 60 s round`)
 	}
@@ -282,12 +328,14 @@ export async function waitForFreshRound(page, { timeout = 90_000, minSecondsLeft
 	const usable = (s) =>
 		(!requireRoom || s.distinct < s.k - 1) &&
 		s.resetInSeconds >= minSecondsLeft &&
-		60 - s.resetInSeconds >= minSecondsIn
+		60 - s.resetInSeconds >= minSecondsIn &&
+		(after === undefined || s.roundId > after)
 	const state = await roundState(page)
 	if (usable(state)) return state
 	await expect.poll(async () => usable(await roundState(page)), {
 		timeout,
-		intervals: [1_000]
+		intervals: [1_000],
+		message: `no round${after === undefined ? '' : ` later than ${after}`} with ${requireRoom ? 'room for a contributor, ' : ''}at least ${minSecondsLeft}s left and ${minSecondsIn}s in`
 	}).toBe(true)
 	return roundState(page)
 }
@@ -323,11 +371,22 @@ export async function protectedSnapshot(page) {
  * total; they lose nothing across a tumble, and the crossing is recorded as
  * a test annotation so a run that took the weaker path still says so.
  *
+ * The starting round is read only once the countdown is above 0. The server
+ * never reports 0, so a 0 is the page's own tick running past the last
+ * reading: the round has ended or is in its last second, and the page shows
+ * it until its next 5 s refresh. Starting from that round's id would report
+ * the refresh as a crossing although the whole submission ran in the next
+ * round.
+ *
  * @param {import('@playwright/test').Page} page
  * @param {number} score
  * @param {{ onRoll?: 'throw' | 'skip' }} [options]
  */
 export async function submitMood(page, score, { onRoll = 'throw' } = {}) {
+	await expect.poll(async () => (await roundState(page)).resetInSeconds, {
+		timeout: 10_000,
+		message: 'the round countdown stayed at 0, so the page never showed the round this submission lands in'
+	}).toBeGreaterThan(0)
 	const startRoundId = (await roundState(page)).roundId
 	const before = (await rawState(page)).n
 	// Marked BEFORE the click. The publish this waits for is the one the click
@@ -413,6 +472,8 @@ export async function pinRoundId(page, roundId) {
 			const el = hint()
 			if (el) el.setAttribute('data-round-id', String(id))
 		}
+		// Calling it again moves the pin rather than adding a second one.
+		clearInterval(window.__pvPinnedRound)
 		apply()
 		window.__pvPinnedRound = setInterval(apply, 50)
 	}, roundId)

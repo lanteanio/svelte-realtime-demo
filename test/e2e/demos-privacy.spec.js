@@ -9,6 +9,7 @@ import {
 	pinRoundId,
 	protectedSnapshot,
 	rawState,
+	RETRIED_SEQUENCE_TIMEOUT,
 	roundState,
 	RoundRolled,
 	stageRollOnNextSubmit,
@@ -62,11 +63,11 @@ test.describe('/demos/privacy', () => {
 	})
 
 	test('one identity can drive all five moods while counting as only one contributor', async ({ page }) => {
-		// Waiting out a round boundary can cost a minute; the assertions after it
-		// are the point of the test and must not be skipped to save that time.
-		// A tumble landing mid-sequence buys a second attempt, and that attempt
-		// waits out its own boundary first, so the ceiling covers two of them.
-		test.setTimeout(240_000)
+		// Sized for the retry: a tumble landing mid-sequence buys a second
+		// attempt, which starts about two rounds later. The assertions after the
+		// waits are the point of the test and must not be skipped to save the
+		// time.
+		test.setTimeout(RETRIED_SEQUENCE_TIMEOUT)
 		await openPrivacy(page)
 		// The contributor set is round-scoped and these specs are serial against
 		// one shared cluster, so an inherited round can already sit at or above
@@ -252,6 +253,10 @@ test.describe('/demos/privacy', () => {
 	})
 
 	test('a fresh round is one that has run a few seconds, not one that has just turned over', async ({ page }) => {
+		// Two passes, each of which can spend its helper's 20 s poll, then a
+		// restore check that can wait 15 s for a countdown clear of 0 and
+		// holds its pin for 3 s.
+		test.setTimeout(75_000)
 		await openPrivacy(page)
 		// The countdown is the only reading the minSecondsIn condition takes,
 		// so it is staged there: 58 is one reading short of what the default
@@ -270,7 +275,88 @@ test.describe('/demos/privacy', () => {
 				await pinReadout(page, 'pv-round-reset', 57)
 				expect((await waited).resetInSeconds, `requireRoom: ${requireRoom}`).toBe(57)
 			}
+			// No reading satisfies both bounds at once, so the helper refuses
+			// them before it reads anything.
+			await expect(waitForFreshRound(page, { minSecondsLeft: 58 })).rejects.toThrow(/exceeds the 60 s round/)
+			// Released, a readout shows the text the page last wrote to it. The
+			// countdown moves on every tick and a refresh can put back at most
+			// one second, so over three seconds pinned it moves at least two from
+			// where it was first pinned, provided it starts clear of 0. It cannot
+			// read 99 or 98, the two pinned texts; the second pin moves the first.
+			await unpinReadouts(page)
+			await expect.poll(async () => (await roundState(page)).resetInSeconds, { timeout: 15_000 }).toBeGreaterThanOrEqual(5)
+			const beforePin = await page.getByTestId('pv-round-reset').textContent()
+			await pinReadout(page, 'pv-round-reset', 99)
+			await page.waitForTimeout(3_000)
+			await pinReadout(page, 'pv-round-reset', 98)
+			await unpinReadouts(page)
+			const restored = await page.getByTestId('pv-round-reset').textContent()
+			expect(['99', '98', beforePin], 'unpinning must put back the page\'s latest text, not a pinned one or the one it showed when first pinned')
+				.not.toContain(restored)
 		} finally {
+			await unpinReadouts(page)
+		}
+	})
+
+	test('a retry after a crossing waits for a round later than the latest one the crossing reached', async ({ page }) => {
+		// The guard's own wait for that later round is what is under test, so
+		// the rounds are staged on the readout's id. Room and a fresh countdown
+		// are staged too, so the real round's state decides nothing. Nothing is
+		// submitted.
+		//
+		// One case per way an attempt can end once the round has moved: a
+		// crossing the step throws, once naming a round ahead of the one the
+		// page shows and once a round behind it, an ordinary failure, and a
+		// pass. While the retry waits, the page's id moves to the latest of
+		// those rounds, still not past it, and only then one further, so a
+		// retry that took an earlier id as the one reached starts early. Four
+		// cases of about five seconds each.
+		test.setTimeout(60_000)
+		await openPrivacy(page)
+		const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+		const cases = [
+			{ ends: 'a crossing thrown naming a round ahead of the page', shows: 0, names: 2 },
+			{ ends: 'a crossing thrown naming a round behind the page', shows: 2, names: 0 },
+			{ ends: 'an ordinary failure', shows: 0, fails: true },
+			{ ends: 'a pass', shows: 0 }
+		]
+		await pinReadout(page, 'pv-round-distinct', 0)
+		await pinReadout(page, 'pv-round-reset', 55)
+		let moving = Promise.resolve()
+		try {
+			for (const { ends, shows, names, fails } of cases) {
+				const starts = []
+				let staged = []
+				const outcome = await inStableRound(page, async (round, attempt) => {
+					starts.push(round.roundId)
+					if (attempt > 1) return 'ran'
+					const base = round.roundId + STAGED_ROUND_STEP
+					const latest = base + Math.max(shows, names ?? shows)
+					staged = [base + shows, latest, latest + 1]
+					await pinRoundId(page, base + shows)
+					moving = (async () => {
+						await sleep(2_000)
+						await pinRoundId(page, latest)
+						await sleep(2_000)
+						await pinRoundId(page, latest + 1)
+					})()
+					if (names !== undefined) throw new RoundRolled(round.roundId, base + names, 'a staged crossing')
+					if (fails) throw new Error('a staged ordinary failure')
+					return 'passed across the boundary'
+				})
+				await moving
+				expect(outcome, ends).toBe('ran')
+				expect(starts.slice(1), `after ${ends}, the retry must start past the latest round reached`).toEqual([staged.at(-1)])
+				// Each move of the pin must replace the one before. A pin left
+				// running would keep writing its id after the release.
+				await unpinRoundId(page)
+				await page.waitForTimeout(200)
+				expect(staged, `after ${ends}, no pin may outlive the release`)
+					.not.toContain(Number(await page.getByTestId('pv-round-hint').getAttribute('data-round-id')))
+			}
+		} finally {
+			await moving.catch(() => {})
+			await unpinRoundId(page)
 			await unpinReadouts(page)
 		}
 	})
@@ -550,4 +636,31 @@ test.describe('/demos/privacy', () => {
 		}
 	})
 
+	test('a submission waits out a countdown at 0 before taking its starting round', async ({ page }) => {
+		// A round that has ended, as a page shows it until its next refresh,
+		// staged: the previous round's id with its countdown at 0. Released
+		// after 2 s, as a refresh would. Started from the stale id, the
+		// submission would report the release as a crossing; it must start from
+		// the round the page then names. One submission, no cohort assertion.
+		// The wait for a fresh round can take most of a minute.
+		test.setTimeout(120_000)
+		await openPrivacy(page)
+		await waitForFreshRound(page, { requireRoom: false })
+		// Reopened inside the fresh round: a page that lived through the
+		// tumble still shows the closing window's raw count, which the first
+		// submission of the new window can equal.
+		await openPrivacy(page)
+		const fresh = await roundState(page)
+		await pinRoundId(page, fresh.roundId - 1)
+		await pinReadout(page, 'pv-round-reset', 0)
+		try {
+			setTimeout(() => {
+				unpinRoundId(page).then(() => unpinReadouts(page)).catch(() => {})
+			}, 2_000)
+			expect(await submitMood(page, 3)).toEqual({ roundId: fresh.roundId, rolled: false })
+		} finally {
+			await unpinRoundId(page)
+			await unpinReadouts(page)
+		}
+	})
 })
