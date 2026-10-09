@@ -95,6 +95,26 @@
 		focusNote(boardId, noteId, maxZ + 1)
 	}
 
+	// --- Arrangement feedback ---
+	// The FAB actions rewrite every note in one call. A failure is shown
+	// rather than left as an unhandled rejection only the console sees. A
+	// fresh object per failure restarts the timer when the message repeats.
+	let arrangeError = $state(/** @type {{ message: string } | null} */ (null))
+
+	async function arrange(action) {
+		try {
+			await action(boardId)
+		} catch (err) {
+			arrangeError = { message: err?.message ?? String(err) }
+		}
+	}
+
+	$effect(() => {
+		if (!arrangeError) return
+		const timer = setTimeout(() => { arrangeError = null }, 6000)
+		return () => clearTimeout(timer)
+	})
+
 	// --- Rate limit feedback ---
 	// If the user sends too many requests, the server returns a
 	// RATE_LIMITED error with a countdown. We show a toast with the
@@ -171,22 +191,22 @@
 			</button>
 		</div>
 		<div class="tooltip tooltip-left" data-tip="Tidy z-order">
-			<button class="btn btn-lg btn-circle btn-secondary" onclick={() => tidyNotes(boardId)}>
+			<button class="btn btn-lg btn-circle btn-secondary" onclick={() => arrange(tidyNotes)}>
 				<Layers size={20} />
 			</button>
 		</div>
 		<div class="tooltip tooltip-left" data-tip="Re-arrange by color">
-			<button class="btn btn-lg btn-circle btn-accent" onclick={() => rearrangeNotes(boardId)}>
+			<button class="btn btn-lg btn-circle btn-accent" onclick={() => arrange(rearrangeNotes)}>
 				<LayoutGrid size={20} />
 			</button>
 		</div>
 		<div class="tooltip" data-tip="Shuffle notes">
-			<button class="btn btn-lg btn-circle btn-neutral" onclick={() => shuffleNotes(boardId)}>
+			<button class="btn btn-lg btn-circle btn-neutral" onclick={() => arrange(shuffleNotes)}>
 				<Shuffle size={20} />
 			</button>
 		</div>
 		<div class="tooltip tooltip-top" data-tip="Group by author">
-			<button class="btn btn-lg btn-circle btn-info" onclick={() => groupByAuthor(boardId)}>
+			<button class="btn btn-lg btn-circle btn-info" onclick={() => arrange(groupByAuthor)}>
 				<Users size={20} />
 			</button>
 		</div>
@@ -216,6 +236,15 @@
 		scale: 1;
 	}
 </style>
+
+<!-- Arrangement failure toast -->
+{#if arrangeError}
+	<div class="toast toast-top toast-center z-50" data-testid="arrange-error">
+		<div class="alert alert-error shadow-lg" role="alert">
+			<span>Could not arrange the board: {arrangeError.message}</span>
+		</div>
+	</div>
+{/if}
 
 <!-- Rate limit toast -->
 {#if rateLimitCountdown > 0}

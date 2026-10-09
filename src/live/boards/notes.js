@@ -30,6 +30,7 @@ import {
 import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
 import { TOPICS } from '$lib/server/topics'
 import { acknowledgeNoteFlush, mergeNoteMutation, reconcileBatchPosition } from '$lib/server/note-buffer'
+import { cascadeColumns } from '$lib/server/board-layout'
 import { activityEvent } from './activity'
 
 /**
@@ -344,32 +345,7 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 		groups.get(note.color).push(note)
 	}
 
-	// Layout constants (px)
-	const NOTE_WIDTH = 230  // w-52 = 208px + gap
-	const CASCADE_X = 4     // slight offset per card in a stack
-	const CASCADE_Y = 35    // vertical gap between stacked cards
-	const START_X = 40
-	const START_Y = 40
-	const COLUMN_GAP = 30
-
-	let zCounter = 0
-	const updates = []
-	let colIndex = 0
-
-	for (const [, colorNotes] of groups) {
-		const colX = START_X + colIndex * (NOTE_WIDTH + COLUMN_GAP)
-		for (let i = 0; i < colorNotes.length; i++) {
-			updates.push({
-				note_id: colorNotes[i].note_id,
-				x: colX + i * CASCADE_X,
-				y: START_Y + i * CASCADE_Y,
-				z_index: zCounter++
-			})
-		}
-		colIndex++
-	}
-
-	const persisted = await dbBatchUpdateNotes(updates)
+	const persisted = await dbBatchUpdateNotes(cascadeColumns(groups.values()))
 	const updated = _reconcileBatchCache(persisted, versions)
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
@@ -424,31 +400,7 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 		groups.get(author).push(note)
 	}
 
-	const NOTE_WIDTH = 230
-	const CASCADE_X = 4
-	const CASCADE_Y = 35
-	const START_X = 40
-	const START_Y = 40
-	const COLUMN_GAP = 30
-
-	let zCounter = 0
-	const updates = []
-	let colIndex = 0
-
-	for (const [, authorNotes] of groups) {
-		const colX = START_X + colIndex * (NOTE_WIDTH + COLUMN_GAP)
-		for (let i = 0; i < authorNotes.length; i++) {
-			updates.push({
-				note_id: authorNotes[i].note_id,
-				x: colX + i * CASCADE_X,
-				y: START_Y + i * CASCADE_Y,
-				z_index: zCounter++
-			})
-		}
-		colIndex++
-	}
-
-	const persisted = await dbBatchUpdateNotes(updates)
+	const persisted = await dbBatchUpdateNotes(cascadeColumns(groups.values()))
 	const updated = _reconcileBatchCache(persisted, versions)
 	ctx.platform.publishBatched([
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),

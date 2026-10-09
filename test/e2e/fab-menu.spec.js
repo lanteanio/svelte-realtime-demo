@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import pg from 'pg';
 import { createBoard, createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
 import { clickFabAction } from './board-helpers.js';
 
@@ -152,5 +153,104 @@ test.describe.serial('FAB Menu Actions', () => {
 			(el) => getComputedStyle(el).opacity
 		);
 		expect(parseFloat(closeOpacity)).toBeLessThan(1);
+	});
+});
+
+// The group arrangements on a board too big for one column per group: 290
+// notes of one color by one author cascade past the bottom of the board in a
+// single column (y 10155 against the note table's 10000), and 41 single-note
+// authors run one column each past its right edge. Seeded straight into the
+// harness Postgres, where those bounds are enforced: hundreds of notes through
+// the UI would meet the RPC rate limit long before they met the bounds.
+test.describe('FAB arrangements on a large board', () => {
+	test.skip(process.env.LOCAL_E2E !== '1', 'seeds the harness Postgres, which only the local e2e harness provides');
+
+	const BULK = 290;
+	const AUTHORS = 41;
+
+	async function query(text, params) {
+		const raw = process.env.DATABASE_URL;
+		if (!raw) throw new Error('DATABASE_URL is not set; the local e2e harness provides it');
+		if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(raw).hostname)) {
+			throw new Error(`refusing a non-loopback Postgres: ${new URL(raw).host}`);
+		}
+		const client = new pg.Client({ connectionString: raw, connectionTimeoutMillis: 5000 });
+		await client.connect();
+		try {
+			return (await client.query(text, params)).rows;
+		} finally {
+			await client.end();
+		}
+	}
+
+	/** A new board holding the seeded notes, all at 200,200, open in `page`. */
+	async function seededBoard(page) {
+		const path = await createBoard(page, `FAB Large ${Date.now()}`);
+		const slug = path.split('/').pop();
+		await query(`
+			INSERT INTO note (board_id, content, x, y, color, creator_name, z_index)
+			SELECT b.board_id, '', 200, 200,
+			       CASE WHEN g <= $2 THEN '#fef08a' ELSE '#bfdbfe' END,
+			       CASE WHEN g <= $2 THEN 'Bulk Author' ELSE 'Author ' || g END,
+			       0
+			  FROM board AS b, generate_series(1, $2::int + $3::int) AS g
+			 WHERE b.slug = $1
+		`, [slug, BULK, AUTHORS]);
+		await page.goto(path);
+		await waitForBoardReady(page);
+		await expect(getNotes(page)).toHaveCount(BULK + AUTHORS);
+		return slug;
+	}
+
+	const storedPositions = async (slug) => new Set((await query(`
+		SELECT n.x, n.y FROM note AS n JOIN board AS b ON b.board_id = n.board_id WHERE b.slug = $1
+	`, [slug])).map((note) => `${note.x},${note.y}`)).size;
+
+	const shownPositions = (page) => getNotes(page).evaluateAll((notes) =>
+		new Set(notes.map((note) => `${note.style.left},${note.style.top}`)).size
+	);
+
+	for (const label of ['Re-arrange by color', 'Group by author']) {
+		test(`${label} gives every note a place of its own`, async ({ page }) => {
+			test.setTimeout(90_000);
+			const slug = await seededBoard(page);
+			const pageErrors = [];
+			page.on('pageerror', (error) => pageErrors.push(error));
+
+			await clickFabAction(page, label);
+			// Seeded on one spot, so a distinct position per note is the layout
+			// having been written: an arrangement that fails writes nothing.
+			await expect.poll(() => storedPositions(slug), { timeout: 15_000, message: 'stored positions' }).toBe(BULK + AUTHORS);
+			await expect.poll(() => shownPositions(page), { timeout: 15_000, message: 'positions on the page' }).toBe(BULK + AUTHORS);
+			await expect(page.getByTestId('arrange-error')).toHaveCount(0);
+			expect(pageErrors).toEqual([]);
+		});
+	}
+
+	test('a failed arrangement is shown, not left to the console', async ({ page }) => {
+		const path = await createBoard(page, `FAB Error ${Date.now()}`);
+		// Every frame passes through except the rearrange call, which is answered
+		// with a refusal in the shape the server sends one.
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer();
+			ws.onMessage((message) => {
+				let request = null;
+				try { request = JSON.parse(String(message)); } catch {}
+				if (request?.rpc === 'boards/notes/rearrangeNotes') {
+					ws.send(JSON.stringify({ topic: '__rpc', event: request.id, data: { id: request.id, ok: false, code: 'INTERNAL_ERROR', error: 'staged failure' } }));
+					return;
+				}
+				server.send(message);
+			});
+			server.onMessage((message) => ws.send(message));
+		});
+		await page.goto(path);
+		await waitForBoardReady(page);
+		const pageErrors = [];
+		page.on('pageerror', (error) => pageErrors.push(error));
+
+		await clickFabAction(page, 'Re-arrange by color');
+		await expect(page.getByTestId('arrange-error')).toContainText('Could not arrange the board: staged failure');
+		expect(pageErrors).toEqual([]);
 	});
 });

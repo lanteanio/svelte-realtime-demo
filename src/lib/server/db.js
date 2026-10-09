@@ -18,6 +18,7 @@ import pg from 'pg'
 import { env } from '$env/dynamic/private'
 import { runWithAdvisoryLock } from '$lib/server/advisory-lock'
 import { boundedIntEnv } from '$lib/server/env-int'
+import { assertNoteCoords } from '$lib/server/note-bounds'
 
 const DEFAULT_POOL_MAX = 10
 const DEFAULT_CONNECT_TIMEOUT_MS = 2000
@@ -386,6 +387,7 @@ function memListNotes(boardId) {
 }
 
 function memCreateNote({ boardId, content, x, y, color, creatorName }) {
+	assertNoteCoords([{ x: x ?? 200, y: y ?? 200 }])
 	const note = {
 		note_id: crypto.randomUUID(),
 		board_id: boardId,
@@ -405,6 +407,7 @@ function memCreateNote({ boardId, content, x, y, color, creatorName }) {
 function memUpdateNote(noteId, fields) {
 	const note = notesMap.get(noteId)
 	if (!note) return null
+	assertNoteCoords([fields])
 	for (const key of ['content', 'x', 'y', 'color', 'z_index']) {
 		if (fields[key] !== undefined) note[key] = fields[key]
 	}
@@ -412,6 +415,8 @@ function memUpdateNote(noteId, fields) {
 }
 
 function memBatchUpdateNotes(updates) {
+	// Checked whole before the first write, as the one Postgres statement is.
+	assertNoteCoords(updates)
 	const results = []
 	for (const u of updates) {
 		const note = notesMap.get(u.note_id)

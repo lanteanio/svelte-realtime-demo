@@ -15,7 +15,7 @@ import { LiveError } from 'svelte-realtime/server'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/
 
-const LIMITS = {
+export const LIMITS = {
 	TITLE_MAX: 100,
 	CONTENT_MAX: 2000,
 	COORD_MIN: -10000,
