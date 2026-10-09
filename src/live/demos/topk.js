@@ -162,9 +162,10 @@ export const topkControls = live.stream(
 )
 
 /**
- * Page-load state probe. Returns the current speed/bias so the page
- * renders the right slider position + active bias button without a
- * round-trip flicker.
+ * Page-load probe for the item catalog, which is fixed server config, so
+ * one read on mount is enough. It also reports the current speed and bias;
+ * the page takes those from topkControls instead, where a change made in
+ * another browser reaches it.
  */
 export const myTopkState = live(async () => {
 	const [speed, bias] = await Promise.all([getSpeed(), getBias()])

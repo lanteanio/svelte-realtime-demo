@@ -166,7 +166,9 @@ test.describe('/demos/topk', () => {
 			await page.reload()
 			await waitForWS(page)
 
-			// These can only read back this way if myTopkState() hydrated them.
+			// These can only read back this way if the control stream's initial
+			// load delivered them: the page initializes 5 and uniform, and
+			// neither target is either.
 			await expect(page.getByTestId('speed-input')).toHaveValue(String(targetSpeed), { timeout: 10_000 })
 			await expect(page.getByTestId(`bias-${targetBias}`)).toHaveClass(/btn-primary/, { timeout: 10_000 })
 			for (const id of biasIds.filter((id) => id !== targetBias)) {
@@ -206,15 +208,20 @@ test.describe('/demos/topk', () => {
 			await setRawSpeed(page, 77)
 			// The control is server-owned: the page shows 77 only until the
 			// clamped value comes back, so what both browsers settle on without
-			// a reload is setSpeed's upper clamp.
+			// a reload is setSpeed's upper clamp. The watcher's slider still has
+			// max="50" and would read 50 for any larger value, so on that page
+			// only the label, which renders the value unclamped, discriminates.
 			for (const view of [page, watcher]) {
 				await expect(view.getByTestId('speed-input')).toHaveValue('50', { timeout: 10_000 })
 				await expect(view.getByText('Firehose (50 events/sec)')).toBeVisible()
 			}
-			// And the server retained it: a fresh hydration reads the same value.
+			// And the server retained the clamped value. The reload restores
+			// max="50", so the slider reads 50 whether the server holds 50, 77
+			// or 500; the label is the assertion that tells them apart.
 			await page.reload()
 			await waitForWS(page)
 			await expect(page.getByTestId('speed-input')).toHaveValue('50', { timeout: 10_000 })
+			await expect(page.getByText('Firehose (50 events/sec)')).toBeVisible()
 		} finally {
 			await restoreDefaults(page)
 			await watcherContext.close().catch(() => {})
@@ -717,9 +724,15 @@ test.describe('/demos/topk', () => {
 			await setBias(a, 'monopoly')
 			await expect(b.getByTestId('bias-monopoly')).toHaveClass(/btn-primary/, { timeout: 10_000 })
 			await expect(b.getByTestId('bias-uniform')).not.toHaveClass(/btn-primary/)
-
 			// Changing one must not reset the other, which a single shared
-			// payload makes possible to get wrong.
+			// payload makes possible to get wrong. Read on the browser that
+			// did not act, once the bias has moved there: the frame that moved
+			// it carried the speed too, so a wrong speed in it is showing now.
+			// The acting browser's own bias moves before any frame arrives, so
+			// a speed read there could pass on the value it already had before
+			// the frame lands.
+			await expect(b.getByTestId('speed-input')).toHaveValue('9')
+
 			await setSpeed(a, 2)
 			await expect(b.getByTestId('speed-input')).toHaveValue('2', { timeout: 10_000 })
 			await expect(b.getByTestId('bias-monopoly')).toHaveClass(/btn-primary/)
@@ -727,6 +740,7 @@ test.describe('/demos/topk', () => {
 			// And it travels both ways, not only from whoever loaded first.
 			await setBias(b, 'hot')
 			await expect(a.getByTestId('bias-hot')).toHaveClass(/btn-primary/, { timeout: 10_000 })
+			await expect(a.getByTestId('speed-input')).toHaveValue('2')
 		} finally {
 			const restore = await ctxA.newPage()
 			await open(restore, NAV).catch(() => {})

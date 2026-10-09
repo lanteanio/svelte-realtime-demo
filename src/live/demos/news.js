@@ -198,9 +198,10 @@ function pickStoryId(stories) {
 }
 
 /**
- * Page-load probe. Returns the current speed plus the seed/runtime
- * stories so the page renders without a flash of empty state on first
- * mount. The stories stream is the source of truth thereafter.
+ * Page-load probe for the fixed length limits the publish form enforces,
+ * the only fields the page reads from here. It also reports the current
+ * speed, the story cap and the stored story count; the page takes the
+ * speed from newsControls and the counts it shows from newsStats.
  */
 export const myNewsState = live(async () => {
 	const [speed, len] = await Promise.all([

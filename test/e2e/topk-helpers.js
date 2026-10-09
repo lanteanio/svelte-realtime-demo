@@ -36,10 +36,11 @@ export async function setSpeed(page, n, opts) {
 }
 
 // Drive the same onchange/RPC path with a value that a human cannot select.
-// The browser enforces max=50 before dispatching input events, so lift that
-// DOM constraint for this one write. A reload restores the authored markup
-// and lets the caller distinguish the optimistic local value from the value
-// that setSpeed() validated and retained on the server.
+// A range input clamps any value assigned to it to its max, so lift max=50
+// for this one write. A reload restores the authored max and clamps the
+// hydrated value the same way: a retained value above 50 reads as 50 on the
+// slider, and only the speed label, which renders the hydrated value
+// unclamped, shows it.
 export async function setRawSpeed(page, n) {
 	await page.getByTestId('speed-input').evaluate((el, value) => {
 		el.removeAttribute('max')
