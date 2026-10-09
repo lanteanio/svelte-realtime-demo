@@ -54,15 +54,48 @@ export async function openPrivacy(page, url = '/demos/privacy') {
  * the demo-only `roundInfo()` endpoint. It is what makes every other number
  * here comparable: two readings mean something together only when they
  * carry the same id.
+ *
+ * Unbounded by default. `timeout` bounds each of the four reads for a caller
+ * that must not wait on a page that has stopped showing the round.
+ * @param {import('@playwright/test').Page} page
+ * @param {{ timeout?: number }} [options]
  */
-export async function roundState(page) {
+export async function roundState(page, { timeout } = {}) {
+	const read = timeout === undefined ? undefined : { timeout }
 	const hint = page.getByTestId('pv-round-hint')
 	return {
-		roundId: Number(await hint.getAttribute('data-round-id')),
-		distinct: Number(await page.getByTestId('pv-round-distinct').textContent()),
-		k: Number(await page.getByTestId('pv-round-k').textContent()),
-		resetInSeconds: Number(await page.getByTestId('pv-round-reset').textContent())
+		roundId: Number(await hint.getAttribute('data-round-id', read)),
+		distinct: Number(await page.getByTestId('pv-round-distinct').textContent(read)),
+		k: Number(await page.getByTestId('pv-round-k').textContent(read)),
+		resetInSeconds: Number(await page.getByTestId('pv-round-reset').textContent(read))
 	}
+}
+
+/**
+ * The bound on inStableRound's own re-reads of the round. On a live privacy
+ * page the readout is always rendered and each read returns at once; the bound
+ * only decides how long a page that can no longer show it is waited on.
+ * Unbounded, that is the whole test timeout, and the test ends on a bare
+ * timeout instead of on the step's own failure or on the guard's verdict
+ * about the pass.
+ */
+const REREAD = { timeout: 10_000 }
+
+/**
+ * An error's message as the guard quotes it inside its own: without terminal
+ * colour codes, and cut at the call log Playwright appends ("Call log:" on a
+ * locator failure, "Call Log:" on a poll). Everything from there on is
+ * dropped, including anything a caller appended after the call log, such as
+ * submitMood's aggregate probe. What stays is the text above it: an expect
+ * failure's matcher line with its Expected and Received values, or a locator
+ * failure's own lines.
+ * @param {unknown} err
+ */
+function failureText(err) {
+	return String(/** @type {any} */ (err)?.message ?? err)
+		.replace(/\x1b\[[0-9;]*m/g, '')
+		.split(/\n\s*Call [Ll]og:/)[0]
+		.trim()
 }
 
 /**
@@ -104,10 +137,24 @@ export async function assertSameRound(page, startRoundId, during) {
  * as-is. A genuine bug that coincides with a tumble costs one retry and then
  * fails again in a stable round, still loud.
  *
- * Success is checked the same way. Every count resets at the tumble, so a
- * sequence's assertions can come out right on readings taken either side of
- * it; a pass that ends in a different round than it started in is treated as
- * a crossing and retried, never returned.
+ * Success is checked too, by the same re-read: a pass that ends with the
+ * page's round id different from the one it started with is treated as a
+ * crossing and retried, never returned, because every count resets at the
+ * tumble and the sequence's assertions may have come out right on readings
+ * from both windows. Only the id is known to have moved, not that any
+ * reading actually spanned it; a retry costs less than telling the two
+ * apart. Every re-read, after a failure or a pass, reads `page` alone. A
+ * sequence that also reads other pages gets no check on theirs, and a round
+ * readout there can lag this page's by one refresh.
+ *
+ * `run` must leave `page` open and on /demos/privacy, because every re-read
+ * reads the round from it, and so does the next attempt's wait for a fresh
+ * round. The re-reads are bounded (REREAD), so a page that can no longer show
+ * the round - closed, navigated away - is not waited on for the rest of the
+ * test. After a failure, including a crossing the step detected itself, the
+ * step's own error is rethrown unconverted; after a pass, the guard fails
+ * saying the round could not be confirmed, since a pass it cannot place in
+ * one window is not one it can return.
  *
  * A caller staging a crossing with pinRoundId keeps the pin in place until
  * the guard returns. A real round id never goes back, and releasing the pin
@@ -125,6 +172,19 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 			result = await run(round, attempt)
 		} catch (err) {
 			if (err instanceof RoundRolled) {
+				// The next attempt starts by waiting on this page for a fresh
+				// round, unbounded: on a page that navigated away it never
+				// returns, and on a closed one it fails with a Playwright error
+				// in place of the crossing. A page that cannot answer a bounded
+				// read ends here with the crossing instead. On the last attempt
+				// nothing follows, and the crossing is thrown below either way.
+				if (attempt < attempts) {
+					try {
+						await roundState(page, REREAD)
+					} catch {
+						throw err
+					}
+				}
 				rolled = err
 				noteRoll(`attempt ${attempt} of ${attempts}: ${err.message}`)
 				continue
@@ -135,27 +195,35 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 			// out or a count that read wrong WHILE the round moved is
 			// explained by the boundary, and only the steps that read the
 			// round id ever throw RoundRolled themselves. If the round is
-			// unchanged the failure is real and stays loud. The read is
-			// guarded so a page that cannot answer rethrows the original
-			// failure rather than a reporter error about the check.
-			let current = null
+			// unchanged the failure is real and stays loud. A page that cannot
+			// answer the bounded read rethrows the original failure rather
+			// than an error about the check.
+			let current
 			try {
-				current = await roundState(page)
+				current = await roundState(page, REREAD)
 			} catch {
 				throw err
 			}
-			if (current === null || current.roundId === round.roundId) throw err
+			if (current.roundId === round.roundId) throw err
 			rolled = new RoundRolled(
 				round.roundId,
 				current.roundId,
-				`running a round-scoped step whose failure the boundary explains: ${String(err?.message ?? err).split('\n')[0]}`
+				`running a round-scoped step whose failure the boundary explains: ${failureText(err)}`
 			)
 			noteRoll(`attempt ${attempt} of ${attempts}: ${rolled.message}`)
 			continue
 		}
-		const settled = await roundState(page)
+		let settled
+		try {
+			settled = await roundState(page, REREAD)
+		} catch (readError) {
+			throw new Error(
+				'a round-scoped sequence passed, but the round could not be re-read to confirm it ran in one window: ' +
+				failureText(readError)
+			)
+		}
 		if (settled.roundId === round.roundId) return result
-		rolled = new RoundRolled(round.roundId, settled.roundId, 'a round-scoped sequence passed on readings from two windows')
+		rolled = new RoundRolled(round.roundId, settled.roundId, 'a round-scoped sequence ran to a pass, so its readings may mix both windows')
 		noteRoll(`attempt ${attempt} of ${attempts}: ${rolled.message}`)
 	}
 	throw rolled

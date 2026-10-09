@@ -255,17 +255,21 @@ test.describe('/demos/privacy', () => {
 	// with nothing naming a round. It is staged here instead, at the attribute
 	// the helpers read, so the handling runs on every single run.
 	//
-	// Placed LAST, and asking for no cohort room, so it cannot influence the
-	// tests above. It is the only test here that submits without asserting
-	// anything about the cohort, and its two submissions would otherwise land
-	// in the round the next test inherits - changing where that test starts
-	// and what its baseline count means. A test that stages faults has to be
-	// the one that absorbs their cost.
+	// Placed after every test that asserts anything about the cohort, and
+	// asking for no cohort room, so it cannot influence them. Its two
+	// submissions assert nothing about the cohort, and would otherwise land in
+	// the round a cohort test inherits - changing where that test starts and
+	// what its baseline count means. The tests after it submit nothing, or
+	// wait for a fresh round and assert no cohort. A test that stages faults
+	// has to be the one that absorbs their cost.
 	test('a round boundary is named as a boundary and retried, not reported as lost submissions', async ({ page }) => {
-		// Owns several fresh-round waits and four real submissions; the default
+		// Owns several fresh-round waits and two real submissions; the default
 		// 30s budget leaves no room for an unlucky wall-clock phase.
 		test.setTimeout(120_000)
 		const anyRound = { minSecondsLeft: 1, requireRoom: false }
+		// The guard records every crossing it absorbs; each path is checked for
+		// its own note, since a count of all of them passes with any one missing.
+		const rollNotes = () => test.info().annotations.filter((a) => a.type === 'round-rolled').map((a) => a.description)
 		await openPrivacy(page)
 
 		// The id has to BE the aggregate's window index, not merely a number
@@ -295,6 +299,8 @@ test.describe('/demos/privacy', () => {
 		}, { freshRound: anyRound })
 		expect(attemptsSeen).toEqual([1, 2])
 		expect(outcome).toBe('ran in the second window')
+		expect(rollNotes().filter((d) => /^attempt 1 of 2: the privacy round rolled from \d+ to \d+ while a staged first attempt\./.test(d)),
+			'a detected crossing must be recorded on the report as itself').toHaveLength(1)
 
 		// Exhaustion still fails - the retry must not turn a genuinely
 		// unrunnable sequence into a silent pass - and it fails naming the
@@ -327,16 +333,42 @@ test.describe('/demos/privacy', () => {
 		await unpinRoundId(page)
 		expect(conversions, 'an explained failure must cost the attempt, not the test').toEqual([1, 2])
 		expect(converted).toBe('ran after the conversion')
+		expect(rollNotes().filter((d) => /^attempt 1 of 2: .*whose failure the boundary explains: a poll timed out/.test(d)),
+			'the conversion must be recorded on the report').toHaveLength(1)
+
+		// The conversion ends the attempt there. With no retry left, the
+		// converted failure is what surfaces, still naming the step that
+		// failed; one that fell through to the success check would read the
+		// pinned id as a pass that moved and report that instead. The staged
+		// failure is shaped like the expect.poll failures the helpers throw: a
+		// coloured matcher line, its Expected and Received values, and the
+		// "Call Log:" block Playwright appends to a poll. It must be quoted
+		// without the colours and without that block, which would bury the
+		// boundary's own sentence. (A locator failure's lower-case "Call log:"
+		// is cut in the test of a page that cannot show the round.)
+		const exhausted = await inStableRound(page, async (round) => {
+			await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
+			throw new Error(
+				'\x1b[2mexpect(\x1b[22mreceived\x1b[2m).\x1b[22mtoBeGreaterThanOrEqual\x1b[2m(\x1b[22mexpected\x1b[2m)\x1b[22m\n\n' +
+				'Expected: >= \x1b[32m2\x1b[39m\nReceived:    \x1b[31m1\x1b[39m\n\nCall Log:\n- Timeout 10000ms exceeded while waiting on the predicate'
+			)
+		}, { attempts: 1, freshRound: anyRound }).then(() => null, (error) => error)
+		await unpinRoundId(page)
+		expect(exhausted?.message).toMatch(/whose failure the boundary explains: expect\(received\)\.toBeGreaterThanOrEqual\(expected\)\s+Expected: >= 2\s+Received: +1\. Every count/)
+		expect(exhausted?.message).not.toContain('\x1b[')
+		expect(exhausted?.to - exhausted?.from, 'the crossing names the window it moved to').toBe(STAGED_ROUND_STEP)
 
 		// A sequence that PASSES across a boundary is no pass either: the
 		// counts reset at the tumble, so its assertions can come out right on
 		// readings from two windows. With no retry left it fails as a
 		// crossing...
-		await expect(inStableRound(page, async (round) => {
+		const refused = await inStableRound(page, async (round) => {
 			await pinRoundId(page, round.roundId + STAGED_ROUND_STEP)
 			return 'passed across the boundary'
-		}, { attempts: 1, freshRound: anyRound })).rejects.toThrow(/rolled from \d+ to \d+ while a round-scoped sequence passed/)
+		}, { attempts: 1, freshRound: anyRound }).then(() => null, (error) => error)
 		await unpinRoundId(page)
+		expect(refused?.message).toMatch(/rolled from \d+ to \d+ while a round-scoped sequence ran to a pass/)
+		expect(refused?.to - refused?.from, 'the refusal names the window the pass ended in').toBe(STAGED_ROUND_STEP)
 
 		// ...and by default it costs the attempt. The second attempt starts in
 		// the staged round and stays in it, so it is the one returned.
@@ -349,6 +381,8 @@ test.describe('/demos/privacy', () => {
 		await unpinRoundId(page)
 		expect(passes, 'a pass spanning two windows must cost the attempt').toEqual([1, 2])
 		expect(repeated).toBe('attempt 2')
+		expect(rollNotes().filter((d) => /^attempt 1 of 2: .*while a round-scoped sequence ran to a pass/.test(d)),
+			'a pass the guard refuses must be recorded on the report').toHaveLength(1)
 
 		// And the conversion is evidence-gated: the same ordinary failure in a
 		// round that did NOT move stays loud and unretried, because a retry on
@@ -356,11 +390,15 @@ test.describe('/demos/privacy', () => {
 		// to pass. Headroom is asked for so a real tumble cannot land inside
 		// this block and explain the failure by accident.
 		let plainRuns = 0
-		await expect(inStableRound(page, async () => {
+		const realFailure = new Error('a real failure in a stable round')
+		const plain = await inStableRound(page, async () => {
 			plainRuns++
-			throw new Error('a real failure in a stable round')
-		}, { freshRound: { minSecondsLeft: 5, requireRoom: false } })).rejects.toThrow('a real failure in a stable round')
+			throw realFailure
+		}, { freshRound: { minSecondsLeft: 5, requireRoom: false } }).then(() => null, (error) => error)
 		expect(plainRuns, 'an unexplained failure must not be retried').toBe(1)
+		// Surfaced as itself, the very error thrown: a converted one or a copy
+		// would carry the same text.
+		expect(plain).toBe(realFailure)
 
 		// The submission helper is where this actually presented in the gate,
 		// so its crossing path is exercised rather than reasoned about. The
@@ -377,7 +415,65 @@ test.describe('/demos/privacy', () => {
 		const tolerated = await submitMood(page, 3, { onRoll: 'skip' })
 		expect(tolerated.rolled).toBe(true)
 		await unpinRoundId(page)
-		expect(test.info().annotations.filter((a) => a.type === 'round-rolled').length).toBeGreaterThan(0)
+		expect(rollNotes().filter((d) => /^the privacy round rolled from \d+ to \d+ while waiting for the raw aggregate to count a 3\/5 submission/.test(d)),
+			'a tolerated crossing must be recorded on the report').toHaveLength(1)
+	})
+
+	test('a sequence that leaves its page unable to show the round is reported by its own outcome, not by a stalled guard', async ({ page }) => {
+		// Three bounded re-reads run out here, all on `leaving` after it has
+		// navigated away; a closed page's reads reject at once.
+		test.setTimeout(90_000)
+		const anyRound = { minSecondsLeft: 1, requireRoom: false }
+		const context = page.context()
+		const outcomeOf = (sequence) => sequence.then(() => null, (error) => error)
+
+		// Closed: every read of it rejects at once.
+		const closing = await context.newPage()
+		await openPrivacy(closing)
+		const closedFailure = new Error('the step that failed')
+		expect(await outcomeOf(inStableRound(closing, async () => {
+			await closing.close()
+			throw closedFailure
+		}, { attempts: 1, freshRound: anyRound }))).toBe(closedFailure)
+
+		// Navigated away: the page still answers, the readout is just gone, so
+		// an unbounded read would wait for it until the test timed out.
+		const leaving = await context.newPage()
+		await openPrivacy(leaving)
+		const leftFailure = new Error('the step that failed')
+		expect(await outcomeOf(inStableRound(leaving, async () => {
+			await leaving.goto('about:blank')
+			throw leftFailure
+		}, { attempts: 1, freshRound: anyRound }))).toBe(leftFailure)
+
+		// A crossing the step detected itself, with an attempt still left, is
+		// what the guard ends with when its page can no longer show the round.
+		// Otherwise the next attempt's fresh-round wait would take over: on a
+		// page that navigated away it never returns, and on a closed page it
+		// fails at once with a Playwright error in place of the crossing.
+		const closingAgain = await context.newPage()
+		await openPrivacy(closingAgain)
+		let closedCrossing
+		expect(await outcomeOf(inStableRound(closingAgain, async (round) => {
+			closedCrossing = new RoundRolled(round.roundId, round.roundId + 1, 'a crossing the step detected')
+			await closingAgain.close()
+			throw closedCrossing
+		}, { freshRound: anyRound }))).toBe(closedCrossing)
+		await openPrivacy(leaving)
+		let leftCrossing
+		expect(await outcomeOf(inStableRound(leaving, async (round) => {
+			leftCrossing = new RoundRolled(round.roundId, round.roundId + 1, 'a crossing the step detected')
+			await leaving.goto('about:blank')
+			throw leftCrossing
+		}, { freshRound: anyRound }))).toBe(leftCrossing)
+
+		// A pass the guard cannot place in one window is not returned.
+		await openPrivacy(leaving)
+		await expect(inStableRound(leaving, async () => {
+			await leaving.goto('about:blank')
+			return 'passed somewhere else'
+		}, { attempts: 1, freshRound: anyRound })).rejects.toThrow(/passed, but the round could not be re-read to confirm it ran in one window: locator\.getAttribute: Timeout \d+ms exceeded\.$/)
+		await leaving.close()
 	})
 
 	test('a submission the page never applies is reported as published, not as missing', async ({ page }) => {
