@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, posix } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseAst } from 'vite'
-import { viteBuild } from '../../scripts/vite-build.mjs'
+import { buildOutDir, versionHashMismatch } from '../../scripts/build-output.mjs'
+import { buildEnvironment, viteBuild } from '../../scripts/vite-build.mjs'
 
 // The failure this exists for: kit compiles the client's hydration-payload
 // access to globalThis.__sveltekit_<hash(version.name)>, and version.name
@@ -213,6 +214,20 @@ function buildLock() {
 // of the first, and it notes whether the lock is held at that moment; the
 // fake vite notes it again as it exits, since a lock released early is still
 // held at spawn. The fake vite exits with SRD_TEST_VITE_EXIT, 0 when unset.
+// Exiting 0, it first writes the two halves of a build for the build's own
+// check to read, taking every setting from the environment handed to it, as
+// the adapter takes its directory from the config vite evaluates: in
+// SRD_TEST_OUTPUT_DIR, else BUILD_OUT_DIR, else build, a server/index.js
+// holding version_hash: "<SRD_TEST_SERVER_HASH>" beside the two other
+// __sveltekit_ spellings a real server carries (the service worker global and
+// the template that builds the payload's name), and a
+// client/_app/immutable/chunks/start.js reading
+// globalThis.__sveltekit_<SRD_TEST_CLIENT_HASH>. The server hash is pinned1
+// when unset and the client hash the server's; SRD_TEST_NO_OUTPUT=1 writes
+// neither half. Every fs.readdirSync and fs.readFileSync call in the build's
+// process is recorded with the path it read, relative to the build's working
+// directory whether the call gave it relative or absolute, and whether the
+// lock is held at that moment.
 // Every other launcher child_process exports is replaced by name, and so is
 // ChildProcess.prototype.spawn, which exec, execFile and fork end in and a
 // hand-made ChildProcess calls directly. Each of those records a launch and
@@ -225,17 +240,44 @@ function buildLock() {
 const recorderSource = (lock) => `
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { EventEmitter } from 'node:events'
-import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 const RECORDED_ENV = ${JSON.stringify(RECORDED_ENV)}
 const LOCK = ${JSON.stringify(lock ?? null)}
+const fs = createRequire(import.meta.url)('node:fs')
+// Taken before fs.readFileSync is wrapped below, so reading the lock is not
+// itself recorded as a read.
+const readFileUnrecorded = fs.readFileSync
 const locked = () => {
 	try {
-		return LOCK !== null && readFileSync(LOCK, 'utf8').split('\\n')[0].trim() === String(process.pid)
+		return LOCK !== null && readFileUnrecorded(LOCK, 'utf8').split('\\n')[0].trim() === String(process.pid)
 	} catch {
 		return false
 	}
 }
 const record = (line) => appendFileSync(process.env.SRD_TEST_SPAWN_RECORD, JSON.stringify(line) + '\\n')
+const writeOutput = (env) => {
+	if (env.SRD_TEST_NO_OUTPUT === '1') return
+	const out = env.SRD_TEST_OUTPUT_DIR || env.BUILD_OUT_DIR || 'build'
+	const server = env.SRD_TEST_SERVER_HASH || 'pinned1'
+	const client = env.SRD_TEST_CLIENT_HASH || server
+	mkdirSync(join(out, 'server'), { recursive: true })
+	mkdirSync(join(out, 'client', '_app', 'immutable', 'chunks'), { recursive: true })
+	writeFileSync(join(out, 'server', 'index.js'), 'const options = {\\n  version_hash: "' + server + '"\\n}\\n'
+		+ 'const sw = globalThis.__sveltekit_sw\\nconst prefix = "__sveltekit_$"\\n')
+	writeFileSync(join(out, 'client', '_app', 'immutable', 'chunks', 'start.js'), 'const base = globalThis.__sveltekit_' + client + '?.base ?? ""\\n')
+}
+const readdir = fs.readdirSync
+const spelled = (path) => relative(process.cwd(), resolve(path instanceof URL ? fileURLToPath(path) : String(path)))
+fs.readdirSync = function (path, ...rest) {
+	record({ readdir: spelled(path), locked: locked() })
+	return readdir.call(this, path, ...rest)
+}
+fs.readFileSync = function (path, ...rest) {
+	record({ readFile: spelled(path), locked: locked() })
+	return readFileUnrecorded.call(this, path, ...rest)
+}
 record({ lockedBeforeBuild: LOCK !== null && existsSync(LOCK) })
 const childProcess = createRequire(import.meta.url)('node:child_process')
 childProcess.spawn = (command, args, { env = {}, ...options } = {}) => {
@@ -244,6 +286,7 @@ childProcess.spawn = (command, args, { env = {}, ...options } = {}) => {
 	const child = new EventEmitter()
 	const code = Number(process.env.SRD_TEST_VITE_EXIT ?? 0)
 	queueMicrotask(() => {
+		if (code === 0) writeOutput(env)
 		record({ exited: code, locked: locked() })
 		child.emit('exit', code, null)
 		child.emit('close', code, null)
@@ -287,6 +330,7 @@ function runBuildScript(env) {
 		delete parentEnv.SRD_BUILD_VERSION
 		delete parentEnv.DEMO_NEWS_WEBHOOK_SECRET
 		delete parentEnv.SRD_TEST_VITE_EXIT
+		for (const key of ['BUILD_OUT_DIR', 'SRD_TEST_OUTPUT_DIR', 'SRD_TEST_SERVER_HASH', 'SRD_TEST_CLIENT_HASH', 'SRD_TEST_NO_OUTPUT']) delete parentEnv[key]
 		const result = spawnSync(process.execPath, ['--import', pathToFileURL(recorder).href, buildScript], {
 			cwd: dir,
 			env: { ...parentEnv, ...env, SRD_TEST_SPAWN_RECORD: record },
@@ -298,15 +342,25 @@ function runBuildScript(env) {
 			? readFileSync(record, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line))
 			: []
 		return {
+			dir,
 			status: result.status,
 			stderr: result.stderr,
 			lockedBeforeBuild: lines.find((line) => 'lockedBeforeBuild' in line)?.lockedBeforeBuild,
 			spawns: lines.filter((line) => 'via' in line),
-			exits: lines.filter((line) => 'exited' in line)
+			exits: lines.filter((line) => 'exited' in line),
+			reads: lines.filter((line) => 'readdir' in line || 'readFile' in line)
 		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true })
 	}
+}
+
+// "under <dir>:" for a directory of a run's build output, as the check's
+// message names it: relative to the run's working directory, or absolute
+// within it.
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+function namedUnder(run, ...parts) {
+	return new RegExp(`under (?:${escapeRegExp(join(...parts))}|${escapeRegExp(join(run.dir, ...parts))}):`)
 }
 
 // The one child process a successful build starts, which the tests below
@@ -711,7 +765,8 @@ test('the image is built by npm run build, and takes only that build from the bu
 	// destination ending in /, read as a directory.
 	// Not looked at: a file a RUN writes without naming it (from a script the
 	// RUN runs, say), and a program a mount or a COPY puts in place outside
-	// the WORKDIR npm run build runs in.
+	// the WORKDIR npm run build runs in. Paths are compared as written, so a
+	// symlink a RUN makes is not followed.
 	const stagesUpFrom = (stage) => {
 		const stages = []
 		for (let current = stage; current; current = current.parent) stages.push(current)
@@ -888,6 +943,175 @@ test('a failed vite build fails scripts/build.mjs with vite\'s exit code', QUICK
 	const run = runBuildScript({ SRD_TEST_VITE_EXIT: '3' })
 	assert.equal(run.spawns.length, 1, 'one build invocation must start exactly one process or worker, the vite build')
 	assert.equal(run.status, 3, 'scripts/build.mjs must exit with the exit code vite exited with')
+})
+
+test('a build whose two halves carry different version hashes fails, naming both', QUICK, () => {
+	// What a writer outside the lock leaves: vite exits 0, and the server
+	// defines a hydration global the client never reads.
+	const run = runBuildScript({ SRD_TEST_SERVER_HASH: 'devside1', SRD_TEST_CLIENT_HASH: 'pinned1' })
+	assert.equal(run.spawns.length, 1, 'one build invocation must start exactly one process or worker, the vite build')
+	assert.deepEqual(run.exits, [{ exited: 0, locked: true }])
+	assert.equal(run.status, 1, 'scripts/build.mjs must fail a build whose halves disagree')
+	assert.match(run.stderr, /^build check failed: the server defines its hydration payload as __sveltekit_devside1, but the client reads __sveltekit_pinned1,/m)
+})
+
+test('a build under a version the operator supplied is checked as well', QUICK, () => {
+	// The operator's version replaces only the pin; the halves can still
+	// disagree, and the check must still run.
+	const run = runBuildScript({ SRD_BUILD_VERSION: 'release-7', SRD_TEST_SERVER_HASH: 'devside1', SRD_TEST_CLIENT_HASH: 'pinned1' })
+	assert.equal(run.status, 1, 'scripts/build.mjs must fail a build whose halves disagree, whatever version it ran under')
+	assert.match(run.stderr, /^build check failed: the server defines its hydration payload as __sveltekit_devside1, but the client reads __sveltekit_pinned1,/m)
+})
+
+test('a build in which the check finds no version hash fails', QUICK, () => {
+	const run = runBuildScript({ SRD_TEST_NO_OUTPUT: '1' })
+	assert.equal(run.status, 1, 'scripts/build.mjs must fail a build the check found nothing in')
+	assert.match(run.stderr, /^build check failed: no version_hash: "<hash>" found in the \.js files under /m)
+	assert.match(run.stderr, namedUnder(run, 'build', 'server'))
+})
+
+test('the build check reads the directory BUILD_OUT_DIR names', QUICK, () => {
+	const named = join('build-runs', 'one')
+	assert.equal(runBuildScript({ BUILD_OUT_DIR: named }).status, 0, 'halves that agree, written where BUILD_OUT_DIR says, must pass')
+	const elsewhere = runBuildScript({ BUILD_OUT_DIR: named, SRD_TEST_OUTPUT_DIR: 'build' })
+	assert.equal(elsewhere.status, 1, 'halves written outside BUILD_OUT_DIR must not count')
+	assert.match(elsewhere.stderr, namedUnder(elsewhere, 'build-runs', 'one', 'server'))
+})
+
+test('the build check reads the build output while the build lock is held', QUICK, () => {
+	// A build waiting on the lock clears and rewrites the same output directory
+	// once it holds it, so a check made after the release can read that build's
+	// files. What is checked: the check listed both halves and read a file in
+	// each, and every directory listing and file read under build/ in the run
+	// happened while the lock file held the build's pid. Not looked at: reads
+	// made through anything but fs.readdirSync and fs.readFileSync on a path
+	// (a file descriptor, another fs function), and a path spelled in other
+	// letter case on a file system that ignores case.
+	const run = runBuildScript({})
+	assert.equal(run.status, 0, `build script failed: ${run.stderr}`)
+	const pathOf = (read) => read.readdir ?? read.readFile
+	const reads = run.reads.filter((read) => /^build(?:[\\/]|$)/.test(pathOf(read)))
+	for (const half of ['server', 'client']) {
+		assert.ok(reads.some((read) => read.readdir === join('build', half)), `the check must list build/${half}`)
+		assert.ok(reads.some((read) => read.readFile?.startsWith(join('build', half, 'x').slice(0, -1))),
+			`the check must read a file under build/${half}`)
+	}
+	assert.deepEqual(reads.filter((read) => !read.locked).map(pathOf), [],
+		'every read of the build output must happen while the build lock is held')
+})
+
+test('the build check reads every .js file under each half and nothing else', QUICK, () => {
+	// Kit puts the version hash in the server's index.js and in whichever
+	// client chunk reads the payload. Written here: agreeing hashes in nested
+	// .js files, and a different hash in a source map and in a non-.js file,
+	// which the check must not read; the server half also carries the
+	// __sveltekit_ spellings a real server does, which are not client hashes.
+	// Each step after the first changes one thing from a passing tree.
+	const dir = mkdtempSync(join(tmpdir(), 'srd-build-output-'))
+	try {
+		const write = (path, text) => {
+			mkdirSync(join(dir, path, '..'), { recursive: true })
+			writeFileSync(join(dir, path), text)
+		}
+		write('server/chunks/internal.js', 'export const options = {\n  version_hash: "abc123"\n}\n'
+			+ 'const sw = globalThis.__sveltekit_sw\nconst prefix = "__sveltekit_$"\n')
+		write('server/chunks/internal.js.map', '{"sourcesContent":["version_hash: \\"zzz999\\""]}')
+		write('client/_app/immutable/chunks/a.js', 'globalThis.__sveltekit_abc123?.base')
+		write('client/_app/immutable/chunks/a.js.map', '{"sourcesContent":["globalThis.__sveltekit_zzz999"]}')
+		write('client/_app/version.json', '{"__sveltekit_zzz999":1}')
+		assert.equal(versionHashMismatch(dir), null)
+		write('client/_app/immutable/nodes/b.js', 'globalThis.__sveltekit_def456.data')
+		assert.match(versionHashMismatch(dir) ?? '', /but the client reads __sveltekit_abc123 and __sveltekit_def456,/,
+			'a second client hash in a nested chunk must be found')
+		rmSync(join(dir, 'client/_app/immutable/nodes/b.js'))
+		// The service worker global kit writes into a client with explicit
+		// environment variables, and its dev flag, are not hashes.
+		write('client/service-worker.js', 'const env = globalThis.__sveltekit_sw.env\nif (globalThis.__sveltekit_dev) {}\n')
+		assert.equal(versionHashMismatch(dir), null, '__sveltekit_sw and __sveltekit_dev in the client must not count as hashes')
+		write('server/index.js', 'const options = { version_hash: "def456" }')
+		assert.match(versionHashMismatch(dir) ?? '', /carries more than one version_hash \(abc123, def456\)/)
+		rmSync(join(dir, 'server/index.js'))
+		rmSync(join(dir, 'client'), { recursive: true })
+		assert.match(versionHashMismatch(dir) ?? '', /^no __sveltekit_<hash> found in the \.js files under .*client:/)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+})
+
+test('a version hash spelled like one of kit\'s other names still counts as a hash', QUICK, () => {
+	// Kit's hash is base 36, so it can be all letters, begin with the names
+	// the check skips, or both. What is checked, for one hash of each shape:
+	// halves that carry it agree, and a client reading a second hash beside it
+	// is reported with both.
+	for (const hash of ['kqzxwv', 'swk2a9', 'dev3kq', 'swahkg', 'devqzx']) {
+		const dir = mkdtempSync(join(tmpdir(), 'srd-build-hash-'))
+		try {
+			mkdirSync(join(dir, 'server'), { recursive: true })
+			mkdirSync(join(dir, 'client'), { recursive: true })
+			writeFileSync(join(dir, 'server', 'index.js'), `const options = { version_hash: "${hash}" }`)
+			writeFileSync(join(dir, 'client', 'start.js'), `globalThis.__sveltekit_${hash}?.base`)
+			assert.equal(versionHashMismatch(dir), null, `halves agreeing on ${hash} must pass`)
+			writeFileSync(join(dir, 'client', 'other.js'), 'globalThis.__sveltekit_zz9')
+			assert.match(versionHashMismatch(dir) ?? '', new RegExp(`but the client reads __sveltekit_${hash} and __sveltekit_zz9,`),
+				`${hash} must be counted among the client's hashes`)
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	}
+})
+
+// The `out` the adapter kit will use takes from svelte.config.js, evaluated in
+// a child process under the environment a build gives vite for `env`
+// (buildEnvironment over the parent's environment with BUILD_OUT_DIR removed,
+// NODE_ENV=production, 'build' as the second argument), with
+// svelte-adapter-uws resolved to a stub that reads `out` when it is called and
+// defaults it as the real adapter does. The real adapter keeps it to itself.
+function adapterOutUnder(env) {
+	const dir = mkdtempSync(join(tmpdir(), 'srd-adapter-out-'))
+	try {
+		const stub = join(dir, 'stub-adapter.mjs')
+		const hooks = join(dir, 'hooks.mjs')
+		const register = join(dir, 'register.mjs')
+		writeFileSync(stub, 'export default (opts = {}) => {\n\tconst { out = \'build\' } = opts\n\treturn { name: \'stub-adapter\', out }\n}\n')
+		writeFileSync(hooks, 'export async function resolve(specifier, context, next) {\n'
+			+ `\tif (specifier === 'svelte-adapter-uws') return { url: ${JSON.stringify(pathToFileURL(stub).href)}, shortCircuit: true }\n`
+			+ '\treturn next(specifier, context)\n}\n')
+		writeFileSync(register, `import { register } from 'node:module'\nregister(${JSON.stringify(pathToFileURL(hooks).href)})\n`)
+		const parentEnv = { ...process.env }
+		delete parentEnv.BUILD_OUT_DIR
+		const probe = 'const config = (await import(process.argv[1])).default\n'
+			+ 'console.log(JSON.stringify({ stub: config.kit.adapter?.name === \'stub-adapter\', out: config.kit.adapter?.out ?? null }))'
+		const result = spawnSync(process.execPath, ['--import', pathToFileURL(register).href, '--input-type=module', '-e', probe, configHref, 'build'], {
+			env: { ...buildEnvironment({ ...parentEnv, ...env }), NODE_ENV: 'production' },
+			encoding: 'utf8',
+			timeout: 20_000
+		})
+		assert.equal(result.status, 0, `evaluating svelte.config.js failed: ${result.stderr}`)
+		const seen = JSON.parse(result.stdout.trim().split('\n').at(-1))
+		assert.ok(seen.stub, 'svelte-adapter-uws must resolve to the stub, or the adapter\'s options cannot be read')
+		return seen.out
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+}
+
+test('svelte.config.js hands the adapter the directory buildOutDir names', QUICK, () => {
+	// The check is only worth anything on the directory the adapter wrote.
+	// What is checked: with BUILD_OUT_DIR unset, empty and set, the config,
+	// evaluated as adapterOutUnder describes, calls the adapter kit then uses
+	// with an `out` equal to what buildOutDir names for the same environment.
+	// A config that computes the same directory without buildOutDir passes.
+	// Not looked at: options given to sveltekit() in vite.config.js, which
+	// replace svelte.config.js; anything else a real build sets that the
+	// config could read (the vite config, its mode); and a config importing a
+	// named export of svelte-adapter-uws, which the stub does not have (the
+	// test then fails on the import).
+	for (const env of [{}, { BUILD_OUT_DIR: '' }, { BUILD_OUT_DIR: join('build-runs', 'x') }]) {
+		assert.equal(adapterOutUnder(env), buildOutDir(env), `under ${JSON.stringify(env)} the adapter must write where the check reads`)
+	}
+	assert.equal(buildOutDir({}), 'build')
+	assert.equal(buildOutDir({ BUILD_OUT_DIR: '' }), 'build')
+	assert.equal(buildOutDir({ BUILD_OUT_DIR: 'build-runs/x' }), 'build-runs/x')
 })
 
 test('an empty version is replaced, not passed through', QUICK, async () => {

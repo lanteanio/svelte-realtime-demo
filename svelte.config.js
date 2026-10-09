@@ -17,6 +17,7 @@
  * stress test pass through and trips the shed only past that.
  */
 import adapter from 'svelte-adapter-uws'
+import { buildOutDir } from './scripts/build-output.mjs'
 
 // Optional multi-hostname allowlist, for a deployment reachable under more
 // than one name (an apex plus www, a staging alias). Comma-separated, each
@@ -39,7 +40,8 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 // filenames the running server's manifest already points at, and the next cold
 // route dies with ERR_MODULE_NOT_FOUND while warm routes keep passing out of
 // the module cache. Nothing in the tier's output says a rebuild happened.
-const out = process.env.BUILD_OUT_DIR || 'build'
+// scripts/build.mjs checks what the build wrote to the same directory.
+const out = buildOutDir()
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
