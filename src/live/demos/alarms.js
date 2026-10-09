@@ -68,9 +68,14 @@ const MAX_SECONDS = 600
  * reconcile happens within one round-trip of the click.
  *
  * onAlarm runs with a fresh ws-less server ctx even if every tab is
- * closed. It appends the fired record to the Redis log, clears the
- * intent key, and publishes 'created' into this room so open tabs see
- * the record land live.
+ * closed. When the fire is the one the Redis intent asked for, it
+ * appends the fired record to the log and clears the intent in one
+ * atomic step, then publishes 'created' into this room so open tabs see
+ * the record land live. Any other fire - the same schedule re-armed by a
+ * loader that read the intent mid-fire, or an alarm replaced or cancelled
+ * while it was firing - records nothing and re-arms whatever intent is
+ * still pending, so every schedule is logged at most once and a newer one
+ * is never dropped.
  */
 export const timers = live.stream(TOPICS.demoAlarmsLog, (ctx) => loadRoom(redis.redis, ctx, TOPICS.demoAlarmsLog), {
 	merge: 'crud',

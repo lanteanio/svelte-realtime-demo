@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-	appendFired, clearPending, loadRoom, LOG_CAP, LOG_KEY, PENDING_KEY, readLog, readPending, recordFire, schedulePending
+	clearPending, loadRoom, LOG_CAP, LOG_KEY, PENDING_KEY, readLog, readPending, recordFire, schedulePending
 } from '../../src/lib/server/alarm-log.js'
 import { RETENTION_MS } from '../../src/lib/server/alarm-retention.js'
 
@@ -10,6 +10,11 @@ import { RETENTION_MS } from '../../src/lib/server/alarm-retention.js'
 // boundary, stopped removing what it finds stale, or stopped setting a TTL
 // would leave the boundary tests green while the fired log went back to
 // keeping records forever.
+//
+// The fire itself is one Lua script, which this stand-in cannot run. What the
+// script does to Redis is pinned against a real server in
+// test/e2e/alarm-log.redis.spec.js; here `eval` answers with whatever reply a
+// test scripts, which pins what the handler does with each answer.
 
 const NOW = 1_700_000_000_000
 
@@ -20,10 +25,12 @@ const roundTrip = () => new Promise((resolve) => setImmediate(resolve))
 
 // Enough of a Redis client for this module, and no more forgiving than Redis
 // where a difference could hide a bug: writes land a round trip later, PEXPIRE
-// on a missing key does nothing, a list emptied by LREM or LTRIM stops existing
-// (taking its TTL with it), LREM honours zero and negative counts, indexes may
+// on a missing key does nothing, a list emptied by LREM stops existing (taking
+// its TTL with it), LREM honours zero and negative counts, LRANGE indexes may
 // be negative, and a TTL must be a positive integer. Inside MULTI a rejected
-// command fails alone and the rest still apply, as EXEC does.
+// command fails alone and the rest still apply, as EXEC does. MULTI takes only
+// the two commands the loader's prune queues, LREM and PEXPIRE, so a fire that
+// went back to pushing its record through MULTI would throw here.
 function memoryRedis() {
 	const lists = new Map()
 	const strings = new Map()
@@ -38,11 +45,6 @@ function memoryRedis() {
 		if (!Number.isInteger(ms)) throw new Error('ERR value is not an integer or out of range')
 	}
 	const commands = {
-		lpush(key, value) { lists.set(key, [value, ...list(key)]) },
-		ltrim(key, start, stop) {
-			const l = list(key)
-			store(key, l.slice(index(l.length, start), index(l.length, stop) + 1))
-		},
 		lrem(key, count, value) {
 			const l = count < 0 ? [...list(key)].reverse() : list(key)
 			const limit = count === 0 ? Infinity : Math.abs(count)
@@ -83,6 +85,16 @@ function memoryRedis() {
 		async get(key) { await reply('get'); return strings.get(key) ?? null },
 		async set(key, value, mode, ms) { await reply('set'); commands.set(key, value, mode, ms) },
 		async del(key) { await reply('del'); commands.del(key) },
+		// Records every script call and answers with evalReply, changing
+		// nothing in the stand-in's state.
+		evals: [],
+		/** @type {Array<number | string | null>} */
+		evalReply: [1],
+		async eval(script, numKeys, ...args) {
+			await reply('eval')
+			redis.evals.push({ keys: args.slice(0, numKeys), argv: args.slice(numKeys) })
+			return redis.evalReply
+		},
 		multi() {
 			redis.multis++
 			const queued = []
@@ -94,7 +106,7 @@ function memoryRedis() {
 					}
 				}
 			}
-			for (const name of ['lpush', 'ltrim', 'lrem', 'pexpire', 'del']) {
+			for (const name of ['lrem', 'pexpire']) {
 				chain[name] = (...args) => { queued.push([name, args]); return chain }
 			}
 			return chain
@@ -119,11 +131,12 @@ function streamCtx() {
 }
 
 function alarmCtx(alarm) {
-	const calls = { published: [] }
+	const calls = { published: [], setAlarm: [] }
 	return {
 		calls,
 		alarm,
-		publish(event, data) { calls.published.push([event, data]) }
+		publish(event, data) { calls.published.push([event, data]) },
+		setAlarm(at) { calls.setAlarm.push(at) }
 	}
 }
 
@@ -205,40 +218,50 @@ test('the loader returns at most LOG_CAP records', async () => {
 	assert.equal(rows[0].id, 'r0')
 })
 
-test('a fire lands at the head, keeps the log at LOG_CAP, refreshes its TTL and clears the intent', async () => {
-	const redis = memoryRedis()
-	redis.lists.set(LOG_KEY, Array.from({ length: LOG_CAP }, (_, i) => fired(`r${i}`, (i + 1) * 1_000)))
-	redis.strings.set(PENDING_KEY, JSON.stringify({ at: NOW, setAt: NOW - 60_000 }))
-	const record = { id: 'new', at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false }
-
-	await appendFired(client(redis), record)
-
-	const log = redis.lists.get(LOG_KEY)
-	assert.equal(log.length, LOG_CAP)
-	assert.deepEqual(JSON.parse(log[0]), record)
-	assert.equal(redis.ttl.get(LOG_KEY), RETENTION_MS, 'every fire must refresh the TTL that drains an abandoned log')
-	assert.equal(redis.strings.has(PENDING_KEY), false)
-})
-
-test('the first fire on an empty log leaves it with a TTL', async () => {
-	// PEXPIRE on a key that does not exist yet does nothing, so the order
-	// inside the fire's MULTI decides whether a new log can ever drain.
-	const redis = memoryRedis()
-	await appendFired(client(redis), { id: 'first', at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
-	assert.equal(redis.lists.get(LOG_KEY)?.length, 1)
-	assert.equal(redis.ttl.get(LOG_KEY), RETENTION_MS)
-})
-
-test('the alarm handler logs how the alarm fired and publishes the same record', async () => {
+test('the alarm handler hands the script how the alarm fired, and publishes the record it recorded', async () => {
 	const redis = memoryRedis()
 	const alarm = { at: NOW - 40, firedAt: NOW, lateMs: 40, recovered: true }
 	const ctx = alarmCtx(alarm)
 	await recordFire(client(redis), ctx)
-	const logged = JSON.parse(redis.lists.get(LOG_KEY)[0])
+	assert.equal(redis.evals.length, 1)
+	const [{ keys, argv }] = redis.evals
+	assert.deepEqual(keys, [LOG_KEY, PENDING_KEY])
+	const logged = JSON.parse(argv[0])
 	assert.deepEqual({ ...logged, id: undefined }, { ...alarm, id: undefined })
 	assert.equal(typeof logged.id, 'string')
+	// The script matches the intent on the fire time and keeps LOG_CAP
+	// entries under a RETENTION_MS TTL; each travels as its own argument.
+	assert.deepEqual(argv.slice(1), [String(alarm.at), String(LOG_CAP - 1), String(RETENTION_MS)])
 	assert.deepEqual(ctx.calls.published, [['created', logged]])
-	assert.equal(redis.ttl.get(LOG_KEY), RETENTION_MS)
+	assert.deepEqual(ctx.calls.setAlarm, [])
+})
+
+test('a fire the script refuses announces nothing, and re-arms the intent still pending', async () => {
+	// Refused means this fire is not the pending intent: a newer schedule
+	// replaced it mid-fire, or it is the second fire of one schedule. The
+	// room's alarm was consumed by this fire either way, so a pending intent
+	// is armed again here rather than left for the next visitor to arm.
+	// Due after the refused fire, and before it: the pending one is armed
+	// either way.
+	for (const pendingAt of [NOW + 60_000, NOW - 60_000]) {
+		const redis = memoryRedis()
+		redis.evalReply = [0, JSON.stringify({ at: pendingAt, setAt: NOW - 90_000 })]
+		const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
+		await recordFire(client(redis), ctx)
+		assert.deepEqual(ctx.calls.published, [], String(pendingAt))
+		assert.deepEqual(ctx.calls.setAlarm, [pendingAt], String(pendingAt))
+	}
+})
+
+test('a refused fire with no usable intent left arms nothing', async () => {
+	for (const intent of [null, '{not json', '{"at":"soon"}']) {
+		const redis = memoryRedis()
+		redis.evalReply = [0, intent]
+		const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
+		await recordFire(client(redis), ctx)
+		assert.deepEqual(ctx.calls.published, [], String(intent))
+		assert.deepEqual(ctx.calls.setAlarm, [], String(intent))
+	}
 })
 
 test('the stream loader arms the recorded alarm and draws the 24-hour line on the real clock', async () => {
@@ -301,13 +324,15 @@ test('a read with nothing to prune writes nothing', async () => {
 
 test('a fire that fails to persist is not announced and keeps its intent', async () => {
 	// The intent is how a lost fire gets another chance: the next loader run
-	// re-arms a past fire time to fire as soon as possible.
+	// re-arms a past fire time to fire as soon as possible. The script clears
+	// it only in the step that records the fire, so nothing else may.
 	const redis = memoryRedis()
 	redis.strings.set(PENDING_KEY, JSON.stringify({ at: NOW, setAt: NOW - 60_000 }))
-	redis.failing.add('exec')
+	redis.failing.add('eval')
 	const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
 	await assert.rejects(recordFire(client(redis), ctx), /connection lost/)
 	assert.deepEqual(ctx.calls.published, [])
+	assert.deepEqual(ctx.calls.setAlarm, [])
 	assert.equal(redis.strings.has(PENDING_KEY), true)
 })
 
@@ -318,7 +343,7 @@ test('every fire gets its own id', async () => {
 	const alarm = { at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false }
 	await recordFire(client(redis), alarmCtx(alarm))
 	await recordFire(client(redis), alarmCtx(alarm))
-	const ids = redis.lists.get(LOG_KEY).map((raw) => JSON.parse(raw).id)
+	const ids = redis.evals.map(({ argv }) => JSON.parse(argv[0]).id)
 	assert.equal(new Set(ids).size, 2)
 })
 

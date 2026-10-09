@@ -17,6 +17,7 @@ export const LOG_CAP = 20
  *   get(key: string): Promise<string | null>,
  *   set(key: string, value: string, mode: 'PX', ms: number): Promise<unknown>,
  *   del(key: string): Promise<unknown>,
+ *   eval(script: string, numKeys: number, ...args: string[]): Promise<any>,
  *   multi(): any
  * }} AlarmRedis
  */
@@ -63,7 +64,15 @@ export async function readLog(client, now, publish) {
  * @param {AlarmRedis} client
  */
 export async function readPending(client) {
-	const raw = await client.get(PENDING_KEY)
+	return parseIntent(await client.get(PENDING_KEY))
+}
+
+/**
+ * The intent a raw PENDING_KEY value holds, or null when it holds none
+ * with a usable fire time.
+ * @param {string | null | undefined} raw
+ */
+function parseIntent(raw) {
 	if (!raw) return null
 	try {
 		const parsed = JSON.parse(raw)
@@ -74,22 +83,45 @@ export async function readPending(client) {
 }
 
 /**
- * Put a fired record at the head of the log and clear the intent it
- * fulfilled.
- * @param {AlarmRedis} client
- * @param {{ id: string, at: number, firedAt: number, lateMs: number, recovered: boolean }} record
+ * Record a fire only when it fulfils the intent that is pending now, and
+ * clear that intent in the same step.
+ *
+ * One script, so no other client runs between the check and the writes. Any
+ * fire whose `at` is not the pending intent's leaves Redis untouched. That
+ * covers the same schedule firing a second time, because a loader read the
+ * intent before the first fire consumed it and armed it again; a fire in
+ * flight when a new schedule replaced its intent or a cancel removed it;
+ * another replica's timer, still armed for an older `at`; and a recovered
+ * fire whose stored alarm had no `at`, which carries the time it ran as its
+ * `at`. An intent still pending at such a fire is one a visitor has already
+ * been told is set, so deleting it would drop that alarm; after a cancel
+ * there is none, and the fire is only left unlogged. A write that fails
+ * changes nothing, so the intent survives for the next loader run to re-arm.
+ *
+ * The match is numeric equality, so an intent with no `at`, or one spelled
+ * as a string, never matches; parseIntent reads no fire time from either.
+ *
+ * The log's TTL is refreshed on every recorded fire. PEXPIRE on a key that
+ * does not exist does nothing, so it follows the LPUSH.
+ *
+ * KEYS: the log, the intent. ARGV: the record, its `at`, the last index the
+ * log keeps, the log's TTL in ms. Returns {1} when recorded, otherwise {0}
+ * and the intent's raw value (false when there is none).
  */
-export async function appendFired(client, record) {
-	await client.multi()
-		.lpush(LOG_KEY, JSON.stringify(record))
-		.ltrim(LOG_KEY, 0, LOG_CAP - 1)
-		// The whole-key TTL, refreshed per fire: age-pruning happens on
-		// read, and this is what drains the key to nothing when nobody
-		// fires or reads for a day - the abandoned-demo half of retention.
-		.pexpire(LOG_KEY, RETENTION_MS)
-		.del(PENDING_KEY)
-		.exec()
-}
+const RECORD_FIRE = `
+local raw = redis.call('GET', KEYS[2])
+if raw then
+	local ok, intent = pcall(cjson.decode, raw)
+	if ok and type(intent) == 'table' and intent.at == tonumber(ARGV[2]) then
+		redis.call('LPUSH', KEYS[1], ARGV[1])
+		redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[3]))
+		redis.call('PEXPIRE', KEYS[1], tonumber(ARGV[4]))
+		redis.call('DEL', KEYS[2])
+		return {1}
+	end
+end
+return {0, raw}
+`
 
 /**
  * Drop the pending intent.
@@ -144,9 +176,15 @@ export async function loadRoom(client, ctx, topic) {
 }
 
 /**
- * The alarm handler: log how the alarm fired and tell the open tabs.
+ * The alarm handler: log how the alarm fired and tell the open tabs, when
+ * this fire is the one the pending intent asked for.
+ *
+ * Any other fire records nothing and announces nothing. If an intent is
+ * still pending, it is re-armed from here: the fire just consumed the room's
+ * alarm, so a replacement scheduled while it was in flight would otherwise
+ * wait for the next visitor's loader run to be armed again.
  * @param {AlarmRedis} client
- * @param {{ alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void }} ctx
+ * @param {{ alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void, setAlarm(at: number): void }} ctx
  */
 export async function recordFire(client, ctx) {
 	const record = {
@@ -156,6 +194,14 @@ export async function recordFire(client, ctx) {
 		lateMs: ctx.alarm.lateMs,
 		recovered: ctx.alarm.recovered
 	}
-	await appendFired(client, record)
-	ctx.publish('created', record)
+	const [recorded, intent] = await client.eval(
+		RECORD_FIRE, 2, LOG_KEY, PENDING_KEY,
+		JSON.stringify(record), String(record.at), String(LOG_CAP - 1), String(RETENTION_MS)
+	)
+	if (recorded === 1) {
+		ctx.publish('created', record)
+		return
+	}
+	const pending = parseIntent(intent)
+	if (pending) ctx.setAlarm(pending.at)
 }
