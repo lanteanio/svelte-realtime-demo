@@ -230,10 +230,11 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
 }
 
 /**
- * Wait for a round that both has room for this test's contributor AND has
- * enough time left for the test to finish inside it.
+ * Wait for a round that has room for this test's contributor, has enough
+ * time left for the test to finish inside it, and has already been running
+ * for a few seconds.
  *
- * Two separate requirements, and only the first used to be enforced.
+ * Room and time are separate requirements.
  *
  * Room: the contributor set is round-scoped and these specs run serially
  * against one shared cluster, so a test can inherit a round already at or above
@@ -246,24 +247,42 @@ export async function inStableRound(page, run, { attempts = 2, freshRound } = {}
  * tumbles - including the raw `n` that `submitMood` asserts must increase. A
  * caller handed a round with three seconds left straddles the boundary
  * mid-sequence and sees n go 4 -> 1, which reads as a lost submission and is
- * really just a new window. This helper read `resetInSeconds` and never used
- * it; now it waits for a round with real headroom, so callers can assume one
- * window for their whole sequence and keep asserting monotonic counts.
+ * really just a new window. So this waits for a round with real headroom, and
+ * callers can assume one window for their whole sequence and keep asserting
+ * monotonic counts.
  *
  * The default demands a round that has only JUST tumbled rather than merely
  * one with some time left. A five-submission sequence costs around 25 seconds
  * because each submission waits for an aggregate publish, so "20 seconds
  * remaining" still straddles; the only reliable window is a fresh one. Both
  * conditions come true together at every tumble - distinct resets to 0 as the
- * clock resets to 60 - so this waits at most one round. `resetInSeconds` is
- * refreshed on the page every 5s, hence 50 rather than 60.
+ * clock resets to 60 - and the page shows a new round at its next 5 s refresh,
+ * so the wait is bounded by about one round plus that refresh. The refresh is
+ * also why the default is 50 rather than 60.
+ *
+ * Fresh does not mean the first moments of a round, though (`minSecondsIn`).
+ * roundInfo() names the round from the wall clock as soon as the minute
+ * turns, while the aggregates close their windows on a server timer that can
+ * fire after that instant, and can fire twice. A submission made in those
+ * moments can be counted in a window other than the one the page names. The
+ * countdown is sampled on the server and then ticked down on the page on a
+ * phase of its own, so a reading can show up to a second less time left than
+ * there is: a reading of 57 means more than two seconds of the round have
+ * passed. `minSecondsLeft` and `minSecondsIn` together may not exceed 60, or
+ * no reading would qualify.
  */
-export async function waitForFreshRound(page, { timeout = 90_000, minSecondsLeft = 50, requireRoom = true } = {}) {
+export async function waitForFreshRound(page, { timeout = 90_000, minSecondsLeft = 50, minSecondsIn = 3, requireRoom = true } = {}) {
+	if (minSecondsLeft + minSecondsIn > 60) {
+		throw new Error(`waitForFreshRound: minSecondsLeft (${minSecondsLeft}) + minSecondsIn (${minSecondsIn}) exceeds the 60 s round`)
+	}
 	// `requireRoom` is for callers that do not add a contributor and do not
 	// assert anything about the cohort. Making them wait out a tumble for room
 	// they never use costs a minute and, worse, forces them to run at the one
 	// moment the round is about to turn over.
-	const usable = (s) => (!requireRoom || s.distinct < s.k - 1) && s.resetInSeconds >= minSecondsLeft
+	const usable = (s) =>
+		(!requireRoom || s.distinct < s.k - 1) &&
+		s.resetInSeconds >= minSecondsLeft &&
+		60 - s.resetInSeconds >= minSecondsIn
 	const state = await roundState(page)
 	if (usable(state)) return state
 	await expect.poll(async () => usable(await roundState(page)), {
@@ -487,6 +506,52 @@ export async function unpinRawCount(page) {
 	await page.evaluate(() => {
 		clearInterval(window.__pvPinnedRaw)
 		delete window.__pvPinnedRaw
+	})
+}
+
+/**
+ * Hold a round readout (pv-round-reset, pv-round-distinct, ...) at a chosen
+ * text.
+ *
+ * Each readout is one text node the page rewrites when its value changes.
+ * Every rewrite is recorded and put back by a MutationObserver, whose callback
+ * runs before the page yields to any other task, so a read from the test
+ * cannot land between the page's value and the pinned one. The observer's own
+ * writes are taken off its queue as they are made, so what it records is only
+ * what the page wrote. Calling it again for the same readout moves the pin.
+ */
+export async function pinReadout(page, testId, value) {
+	await page.evaluate(([id, pinned]) => {
+		const text = document.querySelector(`[data-testid="${id}"]`)?.firstChild
+		if (!(text instanceof Text)) throw new Error(`${id} holds no text node to pin`)
+		const pins = (window.__pvPins ??= {})
+		const pin = (pins[id] ??= { text, real: text.nodeValue })
+		pin.observer?.disconnect()
+		const observer = new MutationObserver(() => {
+			pin.real = text.nodeValue
+			apply()
+		})
+		const apply = () => {
+			text.nodeValue = pinned
+			observer.takeRecords()
+		}
+		observer.observe(text, { characterData: true })
+		apply()
+		pin.observer = observer
+	}, [testId, String(value)])
+}
+
+/**
+ * Release every pinned readout and put back the text the page last wrote to
+ * it, which is what the page's own renderer expects to find there.
+ */
+export async function unpinReadouts(page) {
+	await page.evaluate(() => {
+		for (const pin of Object.values(window.__pvPins ?? {})) {
+			pin.observer.disconnect()
+			pin.text.nodeValue = pin.real
+		}
+		delete window.__pvPins
 	})
 }
 

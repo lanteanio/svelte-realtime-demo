@@ -5,6 +5,7 @@ import {
 	inStableRound,
 	openPrivacy,
 	pinRawCount,
+	pinReadout,
 	pinRoundId,
 	protectedSnapshot,
 	rawState,
@@ -14,6 +15,7 @@ import {
 	STAGED_ROUND_STEP,
 	submitMood,
 	unpinRawCount,
+	unpinReadouts,
 	unpinRoundId,
 	waitForDistinct,
 	waitForFreshRound,
@@ -246,6 +248,30 @@ test.describe('/demos/privacy', () => {
 			} finally {
 				await context.close()
 			}
+		}
+	})
+
+	test('a fresh round is one that has run a few seconds, not one that has just turned over', async ({ page }) => {
+		await openPrivacy(page)
+		// The countdown is the only reading the minSecondsIn condition takes,
+		// so it is staged there: 58 is one reading short of what the default
+		// accepts, and 57 the first it does. Run without room required and
+		// with it; with it, the contributor count is staged at 0 so the room
+		// condition holds whatever the real round holds. Nothing is submitted.
+		try {
+			for (const requireRoom of [false, true]) {
+				if (requireRoom) await pinReadout(page, 'pv-round-distinct', 0)
+				await pinReadout(page, 'pv-round-reset', 58)
+				const waited = waitForFreshRound(page, { requireRoom, timeout: 20_000 })
+				// The helper re-reads once a second, so it has read 58 at least
+				// twice before the pin moves, as long as the pin held.
+				await page.waitForTimeout(3_000)
+				expect(await page.getByTestId('pv-round-reset').textContent(), 'the staged 58 must still be showing').toBe('58')
+				await pinReadout(page, 'pv-round-reset', 57)
+				expect((await waited).resetInSeconds, `requireRoom: ${requireRoom}`).toBe(57)
+			}
+		} finally {
+			await unpinReadouts(page)
 		}
 	})
 
