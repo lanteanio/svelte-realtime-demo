@@ -70,13 +70,15 @@ function memoryRedis() {
 		}
 	}
 	// A command named in `failing` rejects the way a dropped connection does,
-	// having changed nothing.
+	// having changed nothing. Every command sent, reads included, is recorded
+	// by name in `sent`.
 	const reply = async (name) => {
+		redis.sent.push(name)
 		await roundTrip()
 		if (redis.failing.has(name)) throw new Error(`connection lost during ${name}`)
 	}
 	const redis = {
-		lists, strings, ttl, multis: 0, failing: new Set(),
+		lists, strings, ttl, multis: 0, failing: new Set(), sent: [],
 		async lrange(key, start, stop) {
 			await reply('lrange')
 			const l = list(key)
@@ -284,6 +286,41 @@ test('the stream loader arms the recorded alarm and draws the 24-hour line on th
 	assert.deepEqual(ctx.calls.published, [[TOPIC, 'deleted', { id: 'past' }]], 'the removal must go to the stream the open tabs subscribe to')
 })
 
+test('the stream loader arms an intent whose fire time has passed, unchanged', async () => {
+	// An intent outlives a fire that failed to persist, and the framework
+	// fires a past time on its next tick, so handing it over as it is gives
+	// that fire another chance at once.
+	const redis = memoryRedis()
+	const past = Date.now() - 90_000
+	redis.strings.set(PENDING_KEY, JSON.stringify({ at: past, setAt: past - 60_000 }))
+	const ctx = streamCtx()
+
+	await loadRoom(client(redis), ctx, TOPIC)
+
+	assert.deepEqual(ctx.calls.setAlarm, [past])
+	assert.equal(ctx.calls.deleteAlarm, 0)
+})
+
+test('the stream loader refuses to run without its topic, before it touches the alarm or Redis', async () => {
+	// The topic is only used when a record ages out, so without this check a
+	// call site that dropped it would load normally until the first one did.
+	const redis = memoryRedis()
+	const stale = fired('stale', 2 * RETENTION_MS, Date.now())
+	redis.lists.set(LOG_KEY, [stale])
+	redis.strings.set(PENDING_KEY, JSON.stringify({ at: Date.now() + 30_000, setAt: Date.now() }))
+	const ctx = streamCtx()
+
+	for (const topic of [undefined, '', 42]) {
+		await assert.rejects(loadRoom(client(redis), ctx, /** @type {any} */ (topic)), { name: 'TypeError', message: /topic/ })
+	}
+
+	assert.deepEqual(redis.sent, [], 'no Redis command may be sent, a read included')
+	assert.deepEqual(ctx.calls.setAlarm, [])
+	assert.equal(ctx.calls.deleteAlarm, 0)
+	assert.deepEqual(redis.lists.get(LOG_KEY), [stale])
+	assert.deepEqual(ctx.calls.published, [])
+})
+
 test('a Redis failure while reading the intent leaves the armed alarm alone', async () => {
 	// Cancelling on a failed read would delete the durable alarm row, turning a
 	// blip into a lost alarm.
@@ -303,6 +340,23 @@ test('a Redis failure while reading the log fails the load rather than returning
 	redis.lists.set(LOG_KEY, [fired('young', 1_000, Date.now())])
 	redis.failing.add('lrange')
 	await assert.rejects(loadRoom(client(redis), streamCtx(), TOPIC), /lrange/)
+})
+
+test('a log that cannot be read still leaves the recorded alarm armed', async () => {
+	// Schedule and cancel reach the framework alarm only through a loader run,
+	// so the loader reconciles the alarm before it reads the log: a failed read
+	// must not leave unarmed a schedule whose fire time the visitor has already
+	// been given.
+	const redis = memoryRedis()
+	const at = Date.now() + 30_000
+	redis.strings.set(PENDING_KEY, JSON.stringify({ at, setAt: Date.now() }))
+	redis.failing.add('lrange')
+	const ctx = streamCtx()
+
+	await assert.rejects(loadRoom(client(redis), ctx, TOPIC), /lrange/)
+
+	assert.deepEqual(ctx.calls.setAlarm, [at])
+	assert.equal(ctx.calls.deleteAlarm, 0)
 })
 
 test('a prune that fails to commit announces no deletions', async () => {

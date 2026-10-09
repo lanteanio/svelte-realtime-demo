@@ -158,12 +158,18 @@ export async function schedulePending(client, seconds) {
  * is scoped to the room - so the pruned records' 'deleted' frames name the
  * stream's topic explicitly. Without it they would go to a topic called
  * 'deleted' that nobody subscribes to, and open tabs would keep showing
- * records Redis no longer holds.
+ * records Redis no longer holds. The topic is checked before anything else
+ * runs: it is only used when a record ages out, so a call that left it out
+ * would otherwise load normally until a loader run first prunes an aged
+ * record, a day or more after a fire.
  * @param {AlarmRedis} client
  * @param {{ setAlarm(at: number): void, deleteAlarm(): void, publish(topic: string, event: string, data: any): void }} ctx
  * @param {string} topic the stream's own topic
  */
 export async function loadRoom(client, ctx, topic) {
+	if (typeof topic !== 'string' || topic === '') {
+		throw new TypeError('loadRoom needs the stream topic to announce pruned records on')
+	}
 	try {
 		const pending = await readPending(client)
 		if (pending) ctx.setAlarm(pending.at)

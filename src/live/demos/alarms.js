@@ -19,9 +19,10 @@
  * fire the same alarm.
  *
  * Arming pattern: `ctx.setAlarm` lives on the STREAM's ctx (it is
- * bound on the subscribe path), not on a bare `live()` RPC ctx - the
- * loader is this room's single alarm writer. The schedule / cancel
- * RPCs therefore record intent in Redis and publish a nudge on a
+ * bound on the subscribe path) and on onAlarm's, not on a bare
+ * `live()` RPC ctx, so the RPCs cannot arm the alarm themselves. The
+ * schedule / cancel RPCs therefore record intent in Redis and publish
+ * a nudge on a
  * control topic the stream watches via `invalidateOn`; the framework
  * re-runs the loader (with the room ctx), and the loader syncs the
  * framework alarm to the recorded intent. Redis is the source of
