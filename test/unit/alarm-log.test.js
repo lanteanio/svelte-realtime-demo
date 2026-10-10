@@ -263,14 +263,14 @@ test('a refused fire with no usable intent left arms nothing', async () => {
 	// value.
 	for (const intent of [
 		null, '{not json', '42', String(NOW), 'null', 'true', '"soon"', `"${NOW}"`,
-		'{"at":"soon"}', `{"at":"${NOW}"}`
+		'{"at":"soon"}', `{"at":"${NOW}"}`, '{"at":null}', '{"at":1e999}', '{}'
 	]) {
 		const redis = memoryRedis()
 		redis.evalReply = [0, intent]
 		const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
 		await recordFire(client(redis), ctx)
-		assert.deepEqual(ctx.calls.published, [], String(intent))
-		assert.deepEqual(ctx.calls.setAlarm, [], String(intent))
+		assert.deepEqual(ctx.calls.published, [], JSON.stringify(intent))
+		assert.deepEqual(ctx.calls.setAlarm, [], JSON.stringify(intent))
 	}
 })
 

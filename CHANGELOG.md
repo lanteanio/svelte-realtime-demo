@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Alarm tests reject missing, null and infinite fire times after a refused fire, with distinct labels for missing keys and stored null values.
+
 - Cron registration tests cover mixed whitespace at each call boundary and ignore identifiers that only end in live.
 
 - **Official ecosystem links at the demo front door.** The README now identifies
