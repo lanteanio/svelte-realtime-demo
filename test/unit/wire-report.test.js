@@ -347,6 +347,18 @@ test('a delivery after the mark is reported with what it carried', () => {
 	assert.ok(report.includes('"n":1'), report)
 })
 
+test('one frame names its payload without calling it a repeated value', () => {
+	const { report } = delivered([], [{ sum: 6, n: 2 }])
+	onlyDeliveryVerdict(report, 'PUBLISHED')
+	assert.ok(report.includes('1 frame(s) arrived'), report)
+	assert.ok(report.includes('{"sum":6,"n":2}'), report)
+	assert.ok(report.includes('One frame arrived carrying the value listed below'), report)
+	assert.ok(report.includes('whether it contained the change and whether the page applied it'), report)
+	assert.ok(!report.includes('SAME'), report)
+	assert.ok(!report.includes('republished'), report)
+	assert.ok(!report.includes('never given anything new'), report)
+})
+
 test('the frames since the mark are all named, so a replaced value is not read as a missing one', () => {
 	// The two shapes below present an IDENTICAL last frame - n back at 1 - and
 	// have different owners: one is a value that never moved, the other a later

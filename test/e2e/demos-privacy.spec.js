@@ -754,6 +754,7 @@ test.describe('/demos/privacy', () => {
 			const verdict = (failure.message.split('--- aggregate probe ---')[1] ?? '').trim()
 			expect(verdict.startsWith('PUBLISHED:'), `the verdict must be the published one, got: ${verdict.slice(0, 40)}`).toBe(true)
 			expect(verdict, 'the published verdict names how many frames arrived').toContain('frame(s) arrived on')
+			expect(verdict, 'the delivered count changed while the readout was frozen').not.toContain('never given anything new')
 			expect(Number(verdict.slice('PUBLISHED: '.length).split(' ')[0]), 'at least one frame must be counted').toBeGreaterThan(0)
 			expect(
 				failure.message,

@@ -159,6 +159,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A wire report with one received frame lists its value without claiming it repeated an unchanged payload.
+
 - Privacy test round pins restore the last id written by the page, including after a release and a new pin.
 
 - **Re-arrange by color and Group by author work on large boards.** Both cascaded each group down a single column, so a group of 286 or more notes put its last note past the bottom of the board (y 10000, which the note table enforces), and Group by author ran past the right edge once a board had 40 or more authors. The arrangement is written in one statement, so one note out of bounds failed all of it and nothing moved. A group now continues in the next column after 20 notes, a column that would cross the right edge starts a new row below, and every position is clamped to the board. The in-memory dev store refuses the coordinates Postgres refuses, so dev no longer hides this, and a failed arrangement now shows an error on the board instead of only an unhandled rejection in the console.

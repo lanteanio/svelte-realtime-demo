@@ -427,10 +427,12 @@ export function formatDeliverySince(record, mark) {
 	// Stated against what is actually held. "Never moved" is a claim about
 	// every frame since the mark, and a truncated list has not seen every
 	// frame since the mark - so it may only say the tail did not move.
-	const reading = frames.varied
-		? 'The payload CHANGED across them, so the page ends on the LAST value listed rather than on an update that never came: what needs explaining is why that value is the one that won, not why nothing arrived.'
-		: lost > 0
-			? `The ${frames.shown} still held all carry the SAME payload, and the older ones are gone, so this cannot say the value never moved - only that it did not move across this tail.`
-			: 'Every frame since the mark carried the SAME payload, so the topic republished a value that never moved and the page was never given anything new to apply.';
+	const reading = delta === 1
+		? 'One frame arrived carrying the value listed below; whether it contained the change and whether the page applied it still need to be checked.'
+		: frames.varied
+			? 'The payload CHANGED across them, so the page ends on the LAST value listed rather than on an update that never came: what needs explaining is why that value is the one that won, not why nothing arrived.'
+			: lost > 0
+				? `The ${frames.shown} still held all carry the SAME payload, and the older ones are gone, so this cannot say the value never moved - only that it did not move across this tail.`
+				: 'Every frame since the mark carried the SAME payload, so the topic republished a value that never moved and the page was never given anything new to apply.';
 	return `${arrived}.${truncated} ${reading}\n${frames.lines.join('\n')}`;
 }
