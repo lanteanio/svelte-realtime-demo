@@ -294,13 +294,73 @@ done
 Record the healthy running app count and image digest before proceeding; mixed
 images or an unhealthy baseline need investigation first. Confirm the containers'
 restart policies and Docker boot enablement will bring the existing stack back.
-Keep the current image locally available. A maintenance restart uses existing
+Keep the current image locally available. Save a private, persistent baseline on
+the host before the restart. Set `MAINT_RECORD_DIR` to a new absolute directory
+outside temporary storage, `MAINT_EXPECTED_REPLICAS` to the healthy app count and
+`MAINT_EXPECTED_KERNEL` to the installed kernel selected for the next boot:
+
+```bash
+(
+  set -euo pipefail
+  umask 077
+  : "${MAINT_RECORD_DIR:?set a new private persistent record directory}"
+  : "${MAINT_EXPECTED_REPLICAS:?set the healthy app replica count}"
+  : "${MAINT_EXPECTED_KERNEL:?set the planned next kernel}"
+  [[ "$MAINT_RECORD_DIR" == /* && ! -e "$MAINT_RECORD_DIR" ]]
+  [[ "$MAINT_EXPECTED_REPLICAS" =~ ^[1-9][0-9]*$ ]]
+  test -f "/boot/vmlinuz-$MAINT_EXPECTED_KERNEL"
+  test -f "/boot/initrd.img-$MAINT_EXPECTED_KERNEL"
+  systemctl is-enabled --quiet docker
+  systemctl is-active --quiet docker
+  maintenance_failed=$(systemctl --failed --no-legend --plain)
+  test -z "$maintenance_failed"
+  mkdir -m 700 "$MAINT_RECORD_DIR"
+  git rev-parse HEAD > "$MAINT_RECORD_DIR/source"
+  printf '%s\n' "$MAINT_EXPECTED_KERNEL" > "$MAINT_RECORD_DIR/kernel"
+  printf '%s\n' "$MAINT_EXPECTED_REPLICAS" > "$MAINT_RECORD_DIR/replicas"
+  maintenance_ids=$(docker compose ps -a -q app postgres redis)
+  mapfile -t maintenance_health_ids <<< "$maintenance_ids"
+  test "${#maintenance_health_ids[@]}" -eq "$((MAINT_EXPECTED_REPLICAS + 2))"
+  for id in "${maintenance_health_ids[@]}"; do
+    test "$(docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$id")" = 'true healthy'
+  done
+  test "$(docker compose ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
+  maintenance_app_ids=$(docker compose ps -a -q app)
+  maintenance_app_images=$(for id in $maintenance_app_ids; do docker inspect --format '{{.Image}}' "$id"; done | sort -u)
+  test "$(printf '%s\n' "$maintenance_app_images" | wc -l)" -eq 1
+  for service in postgres redis certbot; do
+    test "$(docker compose ps -a -q "$service" | wc -l)" -eq 1
+  done
+  test "$(docker inspect --format '{{.State.Running}}' "$(docker compose ps -a -q certbot)")" = true
+  maintenance_ids=$(docker compose ps -a -q app postgres redis certbot)
+  for id in $maintenance_ids; do
+    docker inspect --format '{{.Id}} {{.Image}}' "$id"
+  done | sort > "$MAINT_RECORD_DIR/images"
+)
+```
+
+Keep the successful baseline directory path in the private maintenance record;
+a failed capture is incomplete and must not be used. A maintenance restart uses existing
 containers; `scripts/deploy.sh` pulls source, builds, migrates and recreates app
 replicas, so it is a separate deployment procedure.
 
 The operator must explicitly approve the named host, outage window, recovery
 plan and restart after reviewing this inventory. Only inside that approved
-window, with console access ready and no deployment or data migration running:
+window, with console access ready and no deployment or data migration running,
+start the following monitor on a separate external machine with Node and this
+checkout. Set the confirmed public HTTPS origin and a new private output path:
+
+```bash
+node scripts/maintenance-monitor.mjs https://your-domain.example /private/path/readiness.json
+```
+
+Wait for the private capture to show successful `/readyz` samples before issuing
+the restart. Keep the monitor running through SSH reconnects and failed host
+postflight attempts; it is independent of those commands. It records every probe
+start/end time and failure, saves after each sample, and stops after 30 minutes
+with a non-success outcome if recovery is not completed. If the capture misses
+the restart, do not restart again just to measure it. Then, on the approved
+host:
 
 ```bash
 sudo systemctl reboot
@@ -309,53 +369,80 @@ sudo systemctl reboot
 After SSH returns, compare `uname -r` with the planned kernel, review boot
 errors, and require the restart marker to be absent. Keep raw journal output
 private and redact sensitive content before sharing it. If the marker is still
-there, find out why instead of deleting it. Re-run the container inventory above
-and compare app image digests with the preflight record. From the same checkout,
-set `MAINT_EXPECTED_REPLICAS` to the recorded count and `MAINT_BASE_URL` to the
-confirmed public HTTPS origin, then run:
+there, find out why instead of deleting it. From the same checkout, set
+`MAINT_RECORD_DIR` to the successful baseline directory and `MAINT_BASE_URL` to
+the confirmed public HTTPS origin. Docker can still be activating after SSH
+returns, so wait for it before checking the existing containers. The following
+checks fail on any failed unit, wrong kernel/source/image, missing container or
+unhealthy dependency:
 
 ```bash
 (
-  set -e
-  uname -r
-  systemctl --failed
-  journalctl -b -p err --no-pager
-  test ! -e /var/run/reboot-required
-  : "${MAINT_EXPECTED_REPLICAS:?set the recorded app replica count}"
+  set -euo pipefail
+  umask 077
+  : "${MAINT_RECORD_DIR:?set the successful baseline directory}"
   : "${MAINT_BASE_URL:?set the confirmed public HTTPS origin}"
+  test -d "$MAINT_RECORD_DIR"
+  test "$(uname -r)" = "$(cat "$MAINT_RECORD_DIR/kernel")"
+  test "$(git rev-parse HEAD)" = "$(cat "$MAINT_RECORD_DIR/source")"
+  MAINT_EXPECTED_REPLICAS=$(cat "$MAINT_RECORD_DIR/replicas")
   [[ "$MAINT_EXPECTED_REPLICAS" =~ ^[1-9][0-9]*$ ]]
   [[ "$MAINT_BASE_URL" == https://* ]]
+  maintenance_deadline=$((SECONDS + 120))
+  until systemctl is-active --quiet docker; do
+    test "$SECONDS" -lt "$maintenance_deadline"
+    sleep 2
+  done
+  systemctl is-enabled --quiet docker
+  maintenance_failed=$(systemctl --failed --no-legend --plain)
+  test -z "$maintenance_failed"
+  journalctl -b -p err --no-pager
+  test ! -e /var/run/reboot-required
   . scripts/compose-health.sh
   wait_for_app_health 180 "$MAINT_EXPECTED_REPLICAS"
-  mapfile -t maintenance_app_ids < <(docker compose ps -a -q app)
-  test "${#maintenance_app_ids[@]}" -eq "$MAINT_EXPECTED_REPLICAS"
+  test "$(docker compose ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
+  for service in postgres redis; do
+    maintenance_ids=$(docker compose ps -a -q "$service")
+    mapfile -t maintenance_service_ids <<< "$maintenance_ids"
+    test "${#maintenance_service_ids[@]}" -eq 1
+    maintenance_deadline=$((SECONDS + 120))
+    until test "$(docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$maintenance_ids")" = 'true healthy'; do
+      test "$SECONDS" -lt "$maintenance_deadline"
+      sleep 2
+    done
+  done
+  test "$(docker compose ps -a -q certbot | wc -l)" -eq 1
+  test "$(docker inspect --format '{{.State.Running}}' "$(docker compose ps -a -q certbot)")" = true
+  maintenance_ids=$(docker compose ps -a -q app postgres redis certbot)
+  for id in $maintenance_ids; do
+    docker inspect --format '{{.Id}} {{.Image}}' "$id"
+  done | sort > "$MAINT_RECORD_DIR/images-after"
+  cmp "$MAINT_RECORD_DIR/images" "$MAINT_RECORD_DIR/images-after"
+  maintenance_failed=$(systemctl --failed --no-legend --plain)
+  test -z "$maintenance_failed"
   curl --fail --silent --show-error --max-time 10 "$MAINT_BASE_URL/healthz"
   curl --fail --silent --show-error --max-time 10 "$MAINT_BASE_URL/readyz"
 )
 ```
 
-The subshell must exit successfully before continuing to the external smoke.
-Confirm Postgres and Redis are healthy in `docker compose ps -a`. From a separate
-external machine with Node and this checkout, set `MAINT_BASE_URL` again to the
-same confirmed public HTTPS origin; shell variables do not transfer between
-machines. Then run:
+The subshell must exit successfully, and the boot journal must be reviewed,
+before pressing Enter in the still-running external monitor. Enter runs
+`scripts/deployment-smoke.mjs`; a failed smoke keeps readiness sampling active
+and permits another Enter after investigation. A successful smoke and another
+successful `/readyz` probe are both required to finish the capture.
 
-```bash
-(
-  set -e
-  : "${MAINT_BASE_URL:?set the confirmed public HTTPS origin on this machine}"
-  [[ "$MAINT_BASE_URL" == https://* ]]
-  node scripts/deployment-smoke.mjs "$MAINT_BASE_URL"
-)
-```
-
-The smoke requires `/healthz` and the homepage to return 200, validates TLS using
-Node's normal certificate checks, then requires a valid `/ws` upgrade with the
-matching Origin and Sec-WebSocket-Accept. It closes that socket immediately;
+The smoke requires `/healthz` and the homepage to return 200, validates TLS
+using Node's normal certificate checks, then requires a valid `/ws` upgrade with
+the matching Origin and Sec-WebSocket-Accept. It closes that socket immediately;
 it does not verify application subscriptions or reach every replica. The local
 container health/count checks cover replicas separately. Record the observed
 kernel, cleared restart state, service health, image comparison and external
-smoke results before ending the maintenance window.
+smoke results before ending the maintenance window. Report the capture's last
+successful, first failed, last failed and first recovered probe timestamps.
+Outage windows come from sampled probe starts, so they bound the outage rather
+than time it exactly. A capture that was interrupted or hit its deadline does
+not show recovery; report the missing period as missing instead of estimating
+it.
 
 If the host misses the agreed recovery deadline or boots the wrong kernel, use
 the provider console and the recorded boot recovery procedure. Select the

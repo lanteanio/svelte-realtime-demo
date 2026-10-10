@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cluster tests cover every configured cron replica and wait for auction push delivery.
 
+- Maintenance readiness capture continues through postflight failures until the external smoke and readiness checks recover; the runbook checks dependency health, unchanged images and that no service has failed.
+
 - Update the WebSocket adapter to `0.6.0-next.95`, which skips subscription-total checks for incomplete connection snapshots and includes connection counts in mismatch diagnostics.
 
 - Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents.
