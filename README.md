@@ -460,22 +460,20 @@ this restart and must not be used as an unattended host-recovery action.
 
 ## Host sampling
 
-Use bounded, read-only observations on the named deployment host. Agree the
-host, operator, observation windows and private evidence location before running
-commands. Record UTC start/end times, kernel, CPU count, RAM, application image
-IDs and replica count with each window. Keep credentials, peer addresses, board
-names and user content out of the evidence; do not export environment files,
-full container inspection output or raw application logs.
+Use bounded, read-only observations for an on-demand review of the demo
+deployment. Identify the host, observation window and private evidence location
+before running commands. Record UTC start/end times, kernel, CPU count, RAM,
+application image IDs and replica count with each window. Keep credentials,
+peer addresses, board names and user content out of the evidence; do not export
+environment files, full container inspection output or raw application logs.
 
-Start with two five-minute windows per day for seven days, one during expected
-busy hours and one during expected quiet hours. Record aggregate traffic beside
-resource measurements. Only call a window high or low traffic after comparing it
-with the other; the time of day is not enough. If traffic is flat or absent, say
-so and extend the observation period; do not generate load to create a peak.
-Once a baseline exists, repeat the paired windows weekly and after a deployment
-or capacity change. Review patch, access and exposure state monthly and after a
-security or network change. Schedule each review as a dated task with an owner,
-and schedule the next one when a review is finished. A running collection timer
+Use available history first. When fresh measurements would answer a concrete
+question, take a five-minute window and, when useful, a comparable window under
+different traffic. Record aggregate traffic beside resource measurements. Only
+call a window high or low traffic after comparing it with the other; the time of
+day is not enough. If traffic is flat or absent, say so; do not generate load to
+create a peak. Repeat a check when investigating a problem or after a
+deployment, capacity, security or network change. A running collection timer
 only means samples exist, not that anyone has read them.
 
 When sysstat already collects periodic history, retain that history and use the
@@ -587,17 +585,17 @@ Use consistent per-worker collection with instance identity and reset handling
 when calculating application rates. The host commands above do not scrape
 application metrics or read credentials.
 
-For the monthly access and exposure review, record service states with
+For an on-demand access and exposure check, record service states with
 `systemctl --failed` and `systemctl is-active ssh docker unattended-upgrades`;
 record installed/running kernel versions and `/var/run/reboot-required.pkgs`
 when present. Inspect effective SSH authentication settings, privileged account
 and authorized-key inventory, listening service bindings, host firewall policy
-and the provider firewall policy through the operator's approved access. Keep
-only policy decisions, aggregate counts and service bindings in the report; do
-not export keys, login histories or raw logs. If a policy source cannot be
-reached, record it as unknown instead of guessing. Compare allowed ports and
-identities against the intended deployment, and make any changes as a separate
-step after the check.
+and the provider firewall policy through available authorized access. Keep only
+policy decisions, aggregate counts and service bindings in the report; do not
+export keys, login histories or raw logs. If a policy source cannot be reached,
+record it as unknown instead of guessing. Compare allowed ports and identities
+against the intended deployment, and make any changes as a separate step after
+the check.
 
 At each window's start and end, use an external workstation to run
 `node scripts/deployment-smoke.mjs https://svelte-realtime-demo.lantean.io`
@@ -609,9 +607,9 @@ and the public TLS path are separate observations.
 
 Keep the private report structured as: window metadata and traffic context;
 per-resource utilization, saturation and errors; service/patch/access/exposure
-state; external readiness; comparison with the paired window; missing data; and
-the date and owner of the next review. Store raw numeric samples alongside the
-summary so another operator can reproduce the comparisons.
+state; external readiness; comparison with any matched window; missing data; and
+what the review concluded. Store raw numeric samples alongside the summary so
+the comparisons can be reproduced.
 
 ---
 

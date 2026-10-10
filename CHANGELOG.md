@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Note deletion and undo acquire the board lock before child rows, preventing deadlocks with stale-board cleanup.
 
 - Board names wrap without clipping, with a keyboard-accessible rename control. The canvas fits below the header and above the activity bar, and section headings preserve whole words beside supporting text.
-- Host sampling explains how to extract sysstat history, compare intervals and schedule dated reviews.
+- Host sampling reviews run on demand, and the README explains how to extract sysstat history and compare intervals.
 
 - Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
 - Legacy identity cookies retain display-profile hints but receive a fresh server-generated visitor ID, preventing impersonation through a forged cookie.
@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - CI runs the functional cluster tier on four replicas for pushes and pull requests, with failed-test artifacts retained for 14 days. Diagnostic probes stay opt-in and receive separate replica targets from the local harness.
 
-- The README covers host sampling: bounded windows, traffic comparisons, recurring access checks and an external readiness check.
+- The README covers host sampling: bounded windows, traffic comparisons, on-demand access checks and an external readiness check.
 - The README has a runbook for a host maintenance restart, covering outage approval, what must be recoverable first, and kernel, container, TLS and WebSocket checks afterwards.
 
 - Touch-target coverage measures hydrated controls as well as server-rendered controls, waits for delayed stylesheets, and verifies the scripts-off context independently of the application CSP.
