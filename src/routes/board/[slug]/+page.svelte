@@ -26,7 +26,7 @@
 	import CursorOverlay from '$lib/components/CursorOverlay.svelte'
 	import ActivityTicker from '$lib/components/ActivityTicker.svelte'
 	import BoardHeader from '$lib/components/BoardHeader.svelte'
-	import { isBoardUndoShortcut } from '$lib/client/board-undo'
+	import { isBoardUndoShortcut, startUndoCountdown } from '$lib/client/board-undo'
 
 	let { data } = $props()
 	const boardId = $derived(data.boardId)
@@ -91,8 +91,15 @@
 		pendingNoteDeletions(currentBoard).then((items) => {
 			if (active) deletions = [...deletions, ...items.filter((item) => !usedReceipts.has(item.token) && !deletions.some((own) => own.token === item.token)).map((item) => localDeadline(item, requestedAt))]
 		}).catch((error) => { if (active) noteError = error?.message ?? 'Could not load recent deletions' })
-		const timer = setInterval(() => { clock = Date.now() }, 250)
-		return () => { active = false; clearInterval(timer) }
+		return () => { active = false }
+	})
+
+	$effect(() => startUndoCountdown(deletions.map((item) => item.expiresAt), (now) => { clock = now }))
+
+	$effect(() => {
+		if (!noteError) return
+		const timer = setTimeout(() => { noteError = '' }, 6000)
+		return () => clearTimeout(timer)
 	})
 
 	async function handleDelete(noteId) {
@@ -323,10 +330,10 @@
 
 {#if latestDeletion || noteError}
 	<div class="toast toast-bottom toast-center z-50" data-testid="board-undo-toast">
-		<div class="alert shadow-lg" role="status">
-			{#if noteError}<span>{noteError}</span>{/if}
+		<div class="alert shadow-lg">
+			<span role="status">{noteError || 'Note deleted.'}</span>
 			{#if latestDeletion}
-				<span>Note deleted. Undo available for {Math.max(0, Math.ceil((latestDeletion.expiresAt - clock) / 1000))}s.</span>
+				<span>Undo available for {Math.max(0, Math.ceil((latestDeletion.expiresAt - clock) / 1000))}s.</span>
 				<button class="btn btn-sm" data-testid="board-undo" disabled={undoBusy} onclick={undoDeletion}>Undo</button>
 			{/if}
 		</div>

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Board undo errors clear after six seconds; countdown updates stop at expiry and stay outside the live announcement region.
+
 - Note deletion and undo acquire the board lock before child rows, preventing deadlocks with stale-board cleanup.
 
 - Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.

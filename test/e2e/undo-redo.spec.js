@@ -78,6 +78,34 @@ test.describe('Collaborative deletion undo', () => {
 		await expect(page.getByTestId('board-redo')).toHaveCount(0)
 	})
 
+	test('undo countdown stays outside announcements and a stale-tab error clears', async ({ page }) => {
+		await twoNotes(page)
+		await deleteFirst(page)
+		const toast = page.getByTestId('board-undo-toast')
+		const announcement = toast.getByRole('status')
+		await expect(announcement).toHaveText('Note deleted.')
+		const countdown = toast.getByText(/^Undo available for /)
+		const initialCountdown = await countdown.textContent()
+		await expect(countdown).not.toHaveText(initialCountdown)
+		await expect(announcement).toHaveText('Note deleted.')
+		await expect(announcement.getByText(/^Undo available for /)).toHaveCount(0)
+
+		const sameVisitor = await page.context().newPage()
+		try {
+			await openBoard(sameVisitor, page.url())
+			await expect(sameVisitor.getByTestId('board-undo')).toBeEnabled()
+			await page.getByTestId('board-undo').click()
+			await expect(getNotes(sameVisitor)).toHaveCount(2)
+			await sameVisitor.getByTestId('board-undo').click()
+			const feedback = sameVisitor.getByTestId('board-undo-toast').getByRole('status')
+			await expect(feedback).not.toHaveText('Note deleted.')
+			await expect(feedback).toHaveText(/\S/)
+			await expect(sameVisitor.getByTestId('board-undo')).toHaveCount(0)
+			await expect(sameVisitor.getByTestId('board-undo-toast')).toHaveCount(0, { timeout: 8000 })
+			await expect(getNotes(sameVisitor)).toHaveCount(2)
+		} finally { await sameVisitor.close() }
+	})
+
 	test('Ctrl+Z inside a note keeps native text undo and does not restore a deletion', async ({ page }) => {
 		await twoNotes(page)
 		await deleteFirst(page)
