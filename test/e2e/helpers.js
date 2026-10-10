@@ -644,7 +644,7 @@ export function isAppWebSocket(ws) {
 	return isAppSocketUrl(ws.url());
 }
 
-/** Wire records belong to a page and outlive the wait that installed them. */
+/** Wire observation belongs to the current document, across all of its waits. */
 const wireRecords = new WeakMap();
 
 /** Frames are either JSON or a codec's binary payload; only JSON is readable here. */
@@ -689,7 +689,9 @@ function parseWireFrame(payload) {
  * The connection probe detects the routing and the verdict says so outright,
  * rather than vouching for a page that never received the frame.
  *
- * Attaching is idempotent per page. Attach BEFORE the navigation wherever the
+ * Attaching is idempotent per page; a document navigation starts a fresh record.
+ * Reconnects within that document keep unanswered requests in the same record.
+ * Attach BEFORE the navigation wherever the
  * caller owns it: Playwright reports frames only for sockets opened after the
  * listener exists, so a late attach sees nothing whatsoever rather than a
  * partial history. `sockets` and `sawHandshake` are what separate that case
@@ -704,17 +706,45 @@ export function watchWire(page) {
 	watchPageFaults(page);
 	const existing = wireRecords.get(page);
 	if (existing) return existing;
-	const record = createWireRecord();
+	const freshRecord = () => ({ ...createWireRecord(), armedAt: Date.now() });
+	let current = freshRecord();
+	let navigation = null;
+	// Callers retain this view across goto. Socket listeners below retain their
+	// own document's record, so late frames cannot alter the replacement page.
+	const record = new Proxy({}, {
+		get: (_, key) => current[key],
+		set: (_, key, value) => { current[key] = value; return true; },
+		ownKeys: () => Reflect.ownKeys(current),
+		getOwnPropertyDescriptor: (_, key) => Object.getOwnPropertyDescriptor(current, key)
+	});
 	wireRecords.set(page, record);
-	const t0 = Date.now();
-	record.armedAt = t0;
-	const since = () => Date.now() - t0;
-
+	page.on('request', (request) => {
+		if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) return;
+		navigation = request;
+	});
+	page.on('framenavigated', (frame) => {
+		// History/hash changes also emit this event. Only a pending document
+		// request can establish a new subject, and only at its main-frame commit.
+		// Until then a reconnect still belongs to the previous live document.
+		if (frame !== page.mainFrame() || !navigation || frame.url().split('#')[0] !== navigation.url().split('#')[0]) return;
+		current = freshRecord();
+		navigation = null;
+	});
+	const finishNavigation = (request) => {
+		if (navigation === request) navigation = null;
+	};
+	page.on('requestfailed', finishNavigation);
+	page.on('response', (response) => {
+		// These responses leave the existing document in place.
+		if ([204, 205].includes(response.status())) finishNavigation(response.request());
+	});
 	page.on('websocket', (ws) => {
 		if (!isAppWebSocket(ws)) return;
-		record.sockets++;
-		ws.on('framesent', (frame) => applyWireFrame(record, 'out', parseWireFrame(frame.payload), since()));
-		ws.on('framereceived', (frame) => applyWireFrame(record, 'in', parseWireFrame(frame.payload), since()));
+		const documentRecord = current;
+		const since = () => Date.now() - documentRecord.armedAt;
+		documentRecord.sockets++;
+		ws.on('framesent', (frame) => applyWireFrame(documentRecord, 'out', parseWireFrame(frame.payload), since()));
+		ws.on('framereceived', (frame) => applyWireFrame(documentRecord, 'in', parseWireFrame(frame.payload), since()));
 	});
 	return record;
 }

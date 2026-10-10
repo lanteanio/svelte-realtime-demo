@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents.
+
 - Docker build-context checks reject Dockerfile-specific ignore files for every repository-root build declared in the deployment and rollback Compose files.
 
 - The local cluster harness can run four replicas, with arena coverage that follows individual visitors through interest entry, removal and re-entry on every process.
