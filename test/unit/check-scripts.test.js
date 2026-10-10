@@ -68,9 +68,9 @@ test('the cron registration check flags a live.cron() in any file outside src/li
 	// stem); src/lib/live/schedule.mjs (a directory named live elsewhere, an
 	// .mjs file, and a call that is not an exported const); src/lib/jobs.ts (a
 	// .ts file); src/routes/api/jobs/+server.js (under src/routes/); and
-	// src/hooks.server.js (directly in src/, its call spelled with a tab before
-	// the dot, two spaces after it and a space before the paren). Not looked
-	// at: .d.ts files, which the check skips on purpose, and calls spelled
+	// src/hooks.server.js (directly in src/, its call spelled with mixed runs
+	// of spaces and tabs before the dot, after it and before the paren).
+	// Not looked at: .d.ts files, which the check skips on purpose, and calls spelled
 	// across lines.
 	const failing = runCopyOf('check-cron-registration.mjs', {
 		'src/live/jobs.js': CRON,
@@ -78,7 +78,7 @@ test('the cron registration check flags a live.cron() in any file outside src/li
 		'src/lib/live/schedule.mjs': 'const tick = enabled ? live.cron(\'* * * * *\', () => {}) : null\n',
 		'src/lib/jobs.ts': CRON,
 		'src/routes/api/jobs/+server.js': CRON,
-		'src/hooks.server.js': 'export const tick = live\t.  cron (\'* * * * *\', () => {})\n'
+		'src/hooks.server.js': 'export const tick = live \t .\t  cron  \t(\'* * * * *\', () => {})\n'
 	})
 	assert.notEqual(failing.status, 0, failing.output)
 	assert.match(failing.output, /src[\\/]live-extra[\\/]jobs\.js/)
@@ -87,4 +87,13 @@ test('the cron registration check flags a live.cron() in any file outside src/li
 	assert.match(failing.output, /src[\\/]routes[\\/]api[\\/]jobs[\\/]\+server\.js/)
 	assert.match(failing.output, /src[\\/]hooks\.server\.js/)
 	assert.doesNotMatch(failing.output, /src[\\/]live[\\/]jobs\.js/)
+})
+
+test('the cron registration check ignores identifiers that only end in live', () => {
+	const passing = runCopyOf('check-cron-registration.mjs', {
+		'src/live/jobs.js': CRON,
+		'src/lib/olive.js': CRON.replace('live.cron', 'olive.cron')
+	})
+	assert.equal(passing.status, 0, passing.output)
+	assert.match(passing.output, /cron registration: 1 file\(s\) with live\.cron\(\), all under src\/live\//)
 })

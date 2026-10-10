@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cron registration tests cover mixed whitespace at each call boundary and ignore identifiers that only end in live.
+
 - **Official ecosystem links at the demo front door.** The README now identifies
   the GitHub owner, canonical documentation, hosted demo, and the ecosystem-owned
   `svti.me` runtime-help redirect domain.
