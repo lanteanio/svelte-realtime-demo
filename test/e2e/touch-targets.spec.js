@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test'
 import { readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { openTouchPage } from './helpers.js'
+import { openTouchPage, waitForWS } from './helpers.js'
+import { openSale } from './flash-sales-helpers.js'
+import { openKanban, deleteCard } from './kanban-helpers.js'
 
 // The coarse-pointer control floor, enforced across the whole app rather than
 // asserted one control at a time.
@@ -68,11 +70,11 @@ const DESIGNED_SIZE = {
 	'toggle-xl': { w: 54, h: 32 }
 }
 // The selector controls each route's server-rendered markup draws, which is
-// all the sweep measures: its context runs no page script, so a control that
+// all the initial census measures: its context runs no page script, so a control that
 // appears only after hydration or after data lands never enters it, however
 // fast that data arrives. Of the app's checkboxes and toggles, only the todo
-// row checkbox on /demos/todos-rollback is of that kind, and its geometry is
-// pinned in that demo's own spec. A route not listed renders none at load,
+// row checkbox on /demos/todos-rollback is of that kind. The hydrated pass
+// below measures controls after data arrives, without asserting a row census. A route not listed renders none at load,
 // and a control appearing on an unlisted route fails the sweep until its
 // variant is stated here. This census is also the sweep's proof it measured
 // anything at all: if the selector drifts or these pages stop rendering, the
@@ -84,6 +86,56 @@ const RENDERED_AT_LOAD = {
 	'/demos/todos-rollback': ['toggle-md']
 }
 
+
+async function measureControls(page) {
+	return page.evaluate(({ selector, labelActivated, floor }) => {
+		const visible = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length > 0)
+		const measurements = visible.map((el) => {
+			const parent = el.parentElement
+			const target = el.matches(labelActivated) && parent?.tagName === 'LABEL' ? parent : el
+			const rect = target.getBoundingClientRect()
+			// getAttribute, not className: on an SVG element className is
+			// an SVGAnimatedString and would stringify to [object].
+			const cls = el.getAttribute('class') ?? ''
+			return { el, cls, text: (el.textContent ?? '').trim().slice(0, 24), w: rect.width, h: rect.height }
+		})
+		// Half a pixel of tolerance: a 44px control can measure 43.99
+		// after subpixel layout, and failing that would be noise
+		// rather than a control anyone can miss with a finger.
+		const low = measurements
+			.filter((m) => m.h < floor - 0.5 || (/(^|\s)btn(\s|$)/.test(m.cls) && m.w < floor - 0.5))
+			.map(({ el, ...m }) => m)
+		// The drawn box of a label-activated control, measured on the
+		// control ITSELF rather than on its target. The floor check above
+		// is satisfied just as well by a control grown to 44px as by a
+		// label carrying the floor around an unchanged one - and the grown
+		// control is the redesign the label rule exists to prevent, so the
+		// target check alone admits exactly the state the policy forbids.
+		// Each control reports which size variant its class declares; the
+		// comparison against the designed numbers happens outside, where
+		// the failure can name the route.
+		const drawn = []
+		for (const m of measurements) {
+			if (!m.el.matches(labelActivated)) continue
+			const own = m.el.getBoundingClientRect()
+			const type = m.el.matches('.checkbox') ? 'checkbox' : 'toggle'
+			const tokens = m.cls.split(/\s+/)
+			const isSize = (t) => new RegExp(`^${type}-(xs|sm|md|lg|xl)$`).test(t)
+			// On this coarse rung a pointer-coarse: size variant overrides
+			// the plain one, exactly as its media-scoped rule does in the
+			// stylesheet. Two size tokens in the same bucket have no single
+			// stylesheet winner worth modelling, so the joined name simply
+			// misses the designed-size table and gets reported as-is.
+			const coarse = tokens.filter((t) => t.startsWith('pointer-coarse:') && isSize(t.slice(15)))
+			const plain = tokens.filter(isSize)
+			const bucket = coarse.length ? coarse.map((t) => t.slice(15)) : plain
+			const variant = bucket.length === 0 ? `${type}-md` : bucket.length === 1 ? bucket[0] : bucket.join('+')
+			drawn.push({ cls: m.cls, variant, w: own.width, h: own.height })
+		}
+		return { low, drawn }
+	}, { selector: CONTROLS, labelActivated: LABEL_ACTIVATED, floor: FLOOR })
+}
+
 test.describe('coarse-pointer control floor', () => {
 	test('every server-rendered control meets the 44px floor on a touch device', async ({ browser }) => {
 		test.setTimeout(180_000)
@@ -92,6 +144,16 @@ test.describe('coarse-pointer control floor', () => {
 		// measurement draws controls the census does not state, such as a
 		// leftover todo's checkbox on /demos/todos-rollback.
 		const { context, page } = await openTouchPage(browser, { javaScriptEnabled: false })
+		// This test-owned document has no CSP, so it checks the context's
+		// script setting even if the application's policy later changes.
+		await page.goto('data:text/html,<script>window.__sweepScriptRan=true</script>')
+		expect(await page.evaluate(() => window.__sweepScriptRan === true), 'the census context must disable page scripts independently of CSP').toBe(false)
+		let delayedStylesheets = 0
+		await page.route('**/*.css', async (route) => {
+			delayedStylesheets++
+			if (delayedStylesheets === 1) await new Promise((resolve) => setTimeout(resolve, 1500))
+			await route.continue()
+		})
 		const offenders = []
 		const routeDrawn = {}
 		let measured = 0
@@ -102,61 +164,12 @@ test.describe('coarse-pointer control floor', () => {
 				// domcontentloaded back until they apply; with scripts off nothing
 				// does, so domcontentloaded can fire before they have.
 				await page.goto(route, { waitUntil: 'load' })
-				// A script element added to the page runs at once wherever page
-				// scripts run, so this fails on every route if the context ever runs
-				// them again.
-				expect(await page.evaluate(() => {
-					const script = document.createElement('script')
-					script.textContent = 'window.__sweepScriptRan = true'
-					document.head.append(script)
-					return window.__sweepScriptRan === true
-				}), `${route}: the sweep must measure server-rendered markup, with no page script running`).toBe(false)
-				const found = await page.evaluate(({ selector, labelActivated, floor }) => {
-					const visible = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length > 0)
-					const measurements = visible.map((el) => {
-						const parent = el.parentElement
-						const target = el.matches(labelActivated) && parent?.tagName === 'LABEL' ? parent : el
-						const rect = target.getBoundingClientRect()
-						// getAttribute, not className: on an SVG element className is
-						// an SVGAnimatedString and would stringify to [object].
-						const cls = el.getAttribute('class') ?? ''
-						return { el, cls, text: (el.textContent ?? '').trim().slice(0, 24), w: rect.width, h: rect.height }
-					})
-					// Half a pixel of tolerance: a 44px control can measure 43.99
-					// after subpixel layout, and failing that would be noise
-					// rather than a control anyone can miss with a finger.
-					const low = measurements
-						.filter((m) => m.h < floor - 0.5 || (/(^|\s)btn(\s|$)/.test(m.cls) && m.w < floor - 0.5))
-						.map(({ el, ...m }) => m)
-					// The drawn box of a label-activated control, measured on the
-					// control ITSELF rather than on its target. The floor check above
-					// is satisfied just as well by a control grown to 44px as by a
-					// label carrying the floor around an unchanged one - and the grown
-					// control is the redesign the label rule exists to prevent, so the
-					// target check alone admits exactly the state the policy forbids.
-					// Each control reports which size variant its class declares; the
-					// comparison against the designed numbers happens outside, where
-					// the failure can name the route.
-					const drawn = []
-					for (const m of measurements) {
-						if (!m.el.matches(labelActivated)) continue
-						const own = m.el.getBoundingClientRect()
-						const type = m.el.matches('.checkbox') ? 'checkbox' : 'toggle'
-						const tokens = m.cls.split(/\s+/)
-						const isSize = (t) => new RegExp(`^${type}-(xs|sm|md|lg|xl)$`).test(t)
-						// On this coarse rung a pointer-coarse: size variant overrides
-						// the plain one, exactly as its media-scoped rule does in the
-						// stylesheet. Two size tokens in the same bucket have no single
-						// stylesheet winner worth modelling, so the joined name simply
-						// misses the designed-size table and gets reported as-is.
-						const coarse = tokens.filter((t) => t.startsWith('pointer-coarse:') && isSize(t.slice(15)))
-						const plain = tokens.filter(isSize)
-						const bucket = coarse.length ? coarse.map((t) => t.slice(15)) : plain
-						const variant = bucket.length === 0 ? `${type}-md` : bucket.length === 1 ? bucket[0] : bucket.join('+')
-						drawn.push({ cls: m.cls, variant, w: own.width, h: own.height })
-					}
-					return { low, drawn }
-				}, { selector: CONTROLS, labelActivated: LABEL_ACTIVATED, floor: FLOOR })
+				expect(await page.evaluate(() => ({
+					theme: document.documentElement.getAttribute('data-theme'),
+					booted: Object.keys(window).some((key) => key.startsWith('__sveltekit_')),
+					stylesLoaded: [...document.querySelectorAll('link[rel="stylesheet"]')].every((link) => link.sheet !== null)
+				})), `${route}: page scripts stay off and stylesheets finish loading`).toEqual({ theme: null, booted: false, stylesLoaded: true })
+				const found = await measureControls(page)
 
 				for (const item of found.low) {
 					offenders.push(`${route}  ${Math.round(item.w)}x${Math.round(item.h)}  "${item.text}"  [${item.cls}]`)
@@ -177,6 +190,7 @@ test.describe('coarse-pointer control floor', () => {
 		// red, because the floor it claims to defend would be gone silently. The
 		// bound is deliberately far below the ~240 controls actually rendered, so
 		// it catches collapse rather than tracking the design.
+		expect(delayedStylesheets, 'the load wait must see a delayed stylesheet').toBeGreaterThan(0)
 		expect(measured, 'the sweep must measure real controls or it proves nothing').toBeGreaterThan(100)
 		expect(routes.length, 'every demo route must be swept').toBeGreaterThan(30)
 
@@ -224,4 +238,58 @@ test.describe('coarse-pointer control floor', () => {
 			`selector controls at load diverged from the stated design (a control moved to another variant draws that variant's size, so only the census catches the swap):\n${censusDiff.join('\n')}`
 		).toEqual([])
 	})
+})
+
+test('controls rendered after hydration meet the touch floor and drawn sizes', async ({ browser }) => {
+	test.setTimeout(180_000)
+	const { context, page } = await openTouchPage(browser)
+	const checked = new Set()
+	try {
+		for (const route of routes) {
+			await page.goto(route, { waitUntil: 'load' })
+			await waitForWS(page)
+			let todoRow
+			if (route === '/demos/denials') {
+				await page.getByTestId('switch-acme').click()
+				await expect(page.getByTestId('append-input')).toBeVisible()
+				await expect(page.getByTestId('append-button')).toBeVisible()
+				checked.add('denials')
+			} else if (route === '/demos/kanban') {
+				await openKanban(page)
+				const ids = await page.locator('[data-testid^="kb-card-"]').evaluateAll((rows) => rows.map((row) => row.dataset.testid.slice('kb-card-'.length)))
+				for (const id of ids) await deleteCard(page, id)
+				await expect(page.getByTestId('kb-seed-button')).toBeVisible()
+				checked.add('kanban')
+			} else if (route === '/demos/flash-sales') {
+				await openSale(page)
+				for (const product of ['phone', 'watch', 'speaker']) await expect(page.getByTestId(`product-buy-${product}`)).toBeVisible()
+				checked.add('flash-sales')
+			} else if (route === '/demos/todos-rollback') {
+				await expect(page.getByTestId('todos')).toHaveAttribute('data-hydrated', 'true')
+				const text = `touch-${Date.now()}`
+				await page.getByTestId('todo-input').fill(text)
+				await page.getByTestId('add-button').click()
+				todoRow = page.getByTestId('todos').locator('li').filter({ hasText: text })
+				await expect(todoRow.locator('[data-testid^="todo-toggle-"]')).toBeVisible()
+				await expect(todoRow.locator('[data-testid^="todo-remove-"]')).toBeVisible()
+				await expect(page.getByTestId('clear-button')).toBeVisible()
+				checked.add('todos-rollback')
+			}
+			const found = await measureControls(page)
+			expect(found.low, `${route}: hydrated controls below the touch floor`).toEqual([])
+			for (const item of found.drawn) {
+				const designed = DESIGNED_SIZE[item.variant]
+				expect(designed, `${route}: ${item.variant} must name a designed size`).toBeDefined()
+				expect(Math.abs(item.w - designed.w), `${route}: ${item.cls} drawn width`).toBeLessThanOrEqual(0.5)
+				expect(Math.abs(item.h - designed.h), `${route}: ${item.cls} drawn height`).toBeLessThanOrEqual(0.5)
+			}
+			if (todoRow) {
+				await todoRow.locator('[data-testid^="todo-remove-"]').click()
+				await expect(todoRow).toHaveCount(0)
+			}
+		}
+		expect([...checked].sort()).toEqual(['denials', 'flash-sales', 'kanban', 'todos-rollback'])
+	} finally {
+		await context.close()
+	}
 })

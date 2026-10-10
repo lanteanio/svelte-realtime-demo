@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Touch-target coverage measures hydrated controls as well as server-rendered controls, waits for delayed stylesheets, and verifies the scripts-off context independently of the application CSP.
+
 - Alarm tests reject missing, null and infinite fire times after a refused fire, with distinct labels for missing keys and stored null values.
 
 - Cron registration tests cover mixed whitespace at each call boundary and ignore identifiers that only end in live.
