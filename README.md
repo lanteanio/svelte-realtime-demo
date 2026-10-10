@@ -87,11 +87,13 @@ Every page lives at `/demos/<slug>`, backed by one module in
 
 News and Top-K controls pair each Redis write with an atomic revision. Their
 pages ignore older stream revisions and reconcile notifications with serialized
-snapshot RPCs. Each subscribed page reads on initial load, reconnect and every
-notification burst: two control reads for Top-K, one for News on load/reconnect,
-and one per notified control otherwise. A notification during a read triggers
-another read after it finishes. This recovers writes hidden by browser frame
-batching and rebases counters after Redis resets, without reloading the page.
+snapshot RPCs. A cold load or reconnect reads each control once: two reads for
+Top-K, one for News. Returning by client-side navigation within the ten-minute
+stream resume window reads each control twice, for the retained value and then
+the resumed snapshot: four reads for Top-K, two for News. Each notification burst
+also reads the notified control; a notification during a read triggers another
+read after it finishes. This recovers writes hidden by browser frame batching
+and rebases the page's revision baseline after Redis resets, without reloading.
 
 ---
 
