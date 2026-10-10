@@ -723,6 +723,7 @@ export function watchWire(page) {
 	const freshRecord = () => ({ ...createWireRecord(), armedAt: Date.now() });
 	let current = freshRecord();
 	let navigation = null;
+	let navigationResponded = false;
 	// Callers retain this view across goto. Socket listeners below retain their
 	// own document's record, so late frames cannot alter the replacement page.
 	const record = new Proxy({}, {
@@ -735,22 +736,30 @@ export function watchWire(page) {
 	page.on('request', (request) => {
 		if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) return;
 		navigation = request;
+		navigationResponded = false;
 	});
 	page.on('framenavigated', (frame) => {
-		// History/hash changes also emit this event. Only a pending document
-		// request can establish a new subject, and only at its main-frame commit.
-		// Until then a reconnect still belongs to the previous live document.
-		if (frame !== page.mainFrame() || !navigation || frame.url().split('#')[0] !== navigation.url().split('#')[0]) return;
+		// History/hash changes also emit this event while a document request
+		// is pending. Wait for that request's response before accepting the
+		// matching main-frame event, so pre-response changes keep their evidence.
+		// Playwright does not identify document replacement on this event: a
+		// same-URL history change after the response is still indistinguishable.
+		if (frame !== page.mainFrame() || !navigation || !navigationResponded || frame.url().split('#')[0] !== navigation.url().split('#')[0]) return;
 		current = freshRecord();
 		navigation = null;
+		navigationResponded = false;
 	});
 	const finishNavigation = (request) => {
-		if (navigation === request) navigation = null;
+		if (navigation === request) {
+			navigation = null;
+			navigationResponded = false;
+		}
 	};
 	page.on('requestfailed', finishNavigation);
 	page.on('response', (response) => {
 		// These responses leave the existing document in place.
 		if ([204, 205].includes(response.status())) finishNavigation(response.request());
+		else if (navigation === response.request()) navigationResponded = true;
 	});
 	page.on('websocket', (ws) => {
 		if (!isAppWebSocket(ws)) return;

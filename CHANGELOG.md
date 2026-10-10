@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Update the WebSocket adapter to `0.6.0-next.95`, which skips subscription-total checks for incomplete connection snapshots and includes connection counts in mismatch diagnostics.
 
-- Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents.
+- Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents. History changes cannot rotate the observation while the matching document response is still pending.
 
 - Docker build-context checks reject Dockerfile-specific ignore files for every repository-root build declared in the deployment and rollback Compose files, including parent-relative and absolute context aliases. Unsupported multiline context and Dockerfile values fail explicitly.
 
