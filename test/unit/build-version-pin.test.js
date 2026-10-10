@@ -590,15 +590,46 @@ function commandsReachedBy(run, scripts) {
 	return reached
 }
 
-// Whether a glob, one path segment of a .dockerignore pattern, matches `name`:
-// `*` and `?` as wildcards, [...] as a class.
-function segmentMatches(glob, name) {
-	const pattern = glob.replace(/[.+^${}()|\\]/g, '\\$&').replace(/\*+/g, '.*').replace(/\?/g, '.')
-	try {
-		return new RegExp(`^${pattern}$`).test(name)
-	} catch {
-		return true
-	}
+// The rule for leaving the top-level directory `dir` out of the Docker build
+// context, checked as written and failing closed:
+// - no Dockerfile.dockerignore exists (Docker reads it in place of
+//   .dockerignore);
+// - .dockerignore holds only printable ASCII, tabs and line breaks, a
+//   byte-order mark at the very start aside;
+// - a trimmed line is exactly `dir`, `/dir`, `./dir`, `dir/`, `/dir/` or
+//   `./dir/`;
+// - every `!` line spells its pattern, right after the `!`, with letters,
+//   digits, `.`, `_`, `-`, `/` and `*` only, and that pattern's first segment,
+//   once resolved by posix.normalize and stripped of leading and trailing
+//   slashes, is a name of letters, digits, `.`, `_` and `-`
+//   that is neither all dots nor `dir`.
+// Docker compiles a pattern to a regular expression in which characters such
+// as `[`, `^`, `?` or a backslash keep a meaning of their own, and Docker
+// and this reader trim characters outside ASCII differently. None of that is
+// modelled here, so a `!` line holding such a character, or any line holding
+// a character outside ASCII, fails even where Docker would still leave `dir` out. A `*` in a later segment of a `!` pattern is not looked at:
+// the path it matches still starts with the first segment's name.
+function assertContextLeavesOut(dir) {
+	assert.equal(existsSync(new URL('../../Dockerfile.dockerignore', import.meta.url)), false,
+		'there may be no Dockerfile.dockerignore, which Docker reads in place of .dockerignore')
+	const read = readRepoFile('.dockerignore')
+	const text = read.charCodeAt(0) === 0xfeff ? read.slice(1) : read
+	const odd = /[^\t\r\n -~]/.exec(text)
+	assert.equal(odd, null,
+		`.dockerignore may hold only printable ASCII, tabs and line breaks: found U+${odd?.[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`)
+	const cleanPattern = (pattern) => posix.normalize(pattern.trim()).replace(/^\/+|\/+$/g, '')
+	const ignored = text.split('\n').map((line) => line.trim())
+		.filter((line) => line !== '' && !line.startsWith('#'))
+	const exclusions = [dir, `/${dir}`, `./${dir}`, `${dir}/`, `/${dir}/`, `./${dir}/`]
+	const leftOut = ignored.some((line) => exclusions.includes(line))
+	const unsafe = ignored.filter((line) => {
+		if (!line.startsWith('!')) return false
+		const pattern = line.slice(1)
+		const first = cleanPattern(pattern).split('/')[0]
+		return !/^[A-Za-z0-9._\-/*]+$/.test(pattern) || !/^[A-Za-z0-9._-]+$/.test(first) || /^\.+$/.test(first) || first === dir
+	})
+	assert.ok(leftOut && unsafe.length === 0,
+		`.dockerignore must include one of ${exclusions.join(', ')}, and every ! line must use only letters, digits, . _ - / and *, with a resolved first segment that is a plain name (no *, not all dots) other than ${dir}${unsafe.length ? `: ${unsafe.join(', ')}` : ''}`)
 }
 
 test('every build entry point runs scripts/build.mjs: npm run build and the e2e harness', QUICK, () => {
@@ -872,12 +903,8 @@ test('the image is built by npm run build, and takes only that build from the bu
 	// are not expanded here, so a resolved destination holding a `$` counts
 	// against this too. Not looked at: what a RUN writes into that directory,
 	// and what a COPY into a parent directory brings along - except for the
-	// context's top-level build directory: no Dockerfile.dockerignore exists
-	// (Docker would read it in place of .dockerignore), and .dockerignore has
-	// a line that reads as build with no later `!` line putting it back. Both
-	// are read as Docker reads a pattern: trimmed, with `./`, repeated slashes
-	// and leading and trailing slashes dropped; a `!` line puts build back
-	// when the first segment of its pattern matches build.
+	// context's top-level build directory, which .dockerignore must leave out
+	// by assertContextLeavesOut's rule.
 	const target = posix.resolve(shipped.workdir, dockerArgs(shipped).at(-1))
 	assert.equal(target, posix.resolve(image.workdir, 'build'), `the build must land in build/ under the image's last WORKDIR, ${image.workdir}`)
 	const onto = lineage.flatMap((stage) => stage.instructions)
@@ -888,16 +915,18 @@ test('the image is built by npm run build, and takes only that build from the bu
 		})
 	assert.deepEqual(onto.map(spelled), [],
 		`no other COPY or ADD in the image's lineage may have a destination at or under ${target}, or one spelled with a variable`)
-	assert.equal(existsSync(new URL('../../Dockerfile.dockerignore', import.meta.url)), false,
-		'there may be no Dockerfile.dockerignore, which Docker reads in place of .dockerignore')
-	const cleanPattern = (pattern) => posix.normalize(pattern.trim()).replace(/^\/+|\/+$/g, '')
-	const ignored = readRepoFile('.dockerignore').split('\n').map((line) => line.trim())
-		.filter((line) => line !== '' && !line.startsWith('#'))
-	const leftOut = ignored.findLastIndex((line) => !line.startsWith('!') && cleanPattern(line) === 'build')
-	const putBack = ignored.slice(leftOut + 1)
-		.filter((line) => line.startsWith('!') && segmentMatches(cleanPattern(line.slice(1)).split('/')[0], 'build'))
-	assert.ok(leftOut >= 0 && putBack.length === 0,
-		`.dockerignore must have a line that reads as build, and no later ! line whose pattern's first segment matches build: ${putBack.join(', ')}`)
+	assertContextLeavesOut('build')
+})
+
+test('the Docker build context leaves out the e2e harness\'s per-run builds', QUICK, () => {
+	// Each e2e harness run builds into build-runs/ in this checkout and tries to
+	// remove that build when it ends; the next run sweeps the builds of runs
+	// that were killed. What build-runs/ holds is therefore the builds of runs
+	// still going, of runs whose build could not be removed or that were killed
+	// and not yet swept, and anything put there by hand. In the context, a
+	// docker build sends those to the daemon, and the build stage's COPY . .
+	// puts them next to the source the image's own build reads.
+	assertContextLeavesOut('build-runs')
 })
 
 test('every evaluation of the config under one pinned build agrees on version.name', QUICK, async () => {
