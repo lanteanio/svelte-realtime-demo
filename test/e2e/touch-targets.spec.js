@@ -97,14 +97,14 @@ async function measureControls(page) {
 			// getAttribute, not className: on an SVG element className is
 			// an SVGAnimatedString and would stringify to [object].
 			const cls = el.getAttribute('class') ?? ''
-			return { el, cls, text: (el.textContent ?? '').trim().slice(0, 24), w: rect.width, h: rect.height }
+			return { el, cls, labelTarget: target !== el, text: (el.textContent ?? '').trim().slice(0, 24), w: rect.width, h: rect.height }
 		})
 		// Half a pixel of tolerance: a 44px control can measure 43.99
 		// after subpixel layout, and failing that would be noise
 		// rather than a control anyone can miss with a finger.
 		const low = measurements
-			.filter((m) => m.h < floor - 0.5 || (/(^|\s)btn(\s|$)/.test(m.cls) && m.w < floor - 0.5))
-			.map(({ el, ...m }) => m)
+			.filter((m) => m.h < floor - 0.5 || ((m.labelTarget || /(^|\s)btn(\s|$)/.test(m.cls)) && m.w < floor - 0.5))
+			.map(({ el, labelTarget, ...m }) => m)
 		// The drawn box of a label-activated control, measured on the
 		// control ITSELF rather than on its target. The floor check above
 		// is satisfied just as well by a control grown to 44px as by a
@@ -244,51 +244,62 @@ test('controls rendered after hydration meet the touch floor and drawn sizes', a
 	test.setTimeout(180_000)
 	const { context, page } = await openTouchPage(browser)
 	const checked = new Set()
+	let isolatedKanban = false
 	try {
 		for (const route of routes) {
 			await page.goto(route, { waitUntil: 'load' })
 			await waitForWS(page)
 			let todoRow
-			if (route === '/demos/denials') {
-				await page.getByTestId('switch-acme').click()
-				await expect(page.getByTestId('append-input')).toBeVisible()
-				await expect(page.getByTestId('append-button')).toBeVisible()
-				checked.add('denials')
-			} else if (route === '/demos/kanban') {
-				await openKanban(page)
-				const ids = await page.locator('[data-testid^="kb-card-"]').evaluateAll((rows) => rows.map((row) => row.dataset.testid.slice('kb-card-'.length)))
-				for (const id of ids) await deleteCard(page, id)
-				await expect(page.getByTestId('kb-seed-button')).toBeVisible()
-				checked.add('kanban')
-			} else if (route === '/demos/flash-sales') {
-				await openSale(page)
-				for (const product of ['phone', 'watch', 'speaker']) await expect(page.getByTestId(`product-buy-${product}`)).toBeVisible()
-				checked.add('flash-sales')
-			} else if (route === '/demos/todos-rollback') {
-				await expect(page.getByTestId('todos')).toHaveAttribute('data-hydrated', 'true')
-				const text = `touch-${Date.now()}`
-				await page.getByTestId('todo-input').fill(text)
-				await page.getByTestId('add-button').click()
-				todoRow = page.getByTestId('todos').locator('li').filter({ hasText: text })
-				await expect(todoRow.locator('[data-testid^="todo-toggle-"]')).toBeVisible()
-				await expect(todoRow.locator('[data-testid^="todo-remove-"]')).toBeVisible()
-				await expect(page.getByTestId('clear-button')).toBeVisible()
-				checked.add('todos-rollback')
-			}
-			const found = await measureControls(page)
-			expect(found.low, `${route}: hydrated controls below the touch floor`).toEqual([])
-			for (const item of found.drawn) {
-				const designed = DESIGNED_SIZE[item.variant]
-				expect(designed, `${route}: ${item.variant} must name a designed size`).toBeDefined()
-				expect(Math.abs(item.w - designed.w), `${route}: ${item.cls} drawn width`).toBeLessThanOrEqual(0.5)
-				expect(Math.abs(item.h - designed.h), `${route}: ${item.cls} drawn height`).toBeLessThanOrEqual(0.5)
-			}
-			if (todoRow) {
-				await todoRow.locator('[data-testid^="todo-remove-"]').click()
-				await expect(todoRow).toHaveCount(0)
+			try {
+				if (route === '/demos/denials') {
+					await page.getByTestId('switch-acme').click()
+					await expect(page.getByTestId('append-input')).toBeVisible()
+					await expect(page.getByTestId('append-button')).toBeVisible()
+					checked.add('denials')
+				} else if (route === '/demos/kanban') {
+					await openKanban(page)
+					// This document is shared by every visitor. Only the local harness
+					// owns its entire fixture; remote opt-in does not grant that ownership.
+					isolatedKanban = process.env.LOCAL_E2E === '1' && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(page.url()).hostname)
+					if (isolatedKanban) {
+						const ids = await page.locator('[data-testid^="kb-card-"]').evaluateAll((rows) => rows.map((row) => row.dataset.testid.slice('kb-card-'.length)))
+						for (const id of ids) await deleteCard(page, id)
+						await expect(page.getByTestId('kb-seed-button')).toBeVisible()
+						checked.add('kanban')
+					} else {
+						test.info().annotations.push({ type: 'coverage-skipped', description: 'Kanban empty-board seed control requires isolated LOCAL_E2E fixtures; existing cards are preserved.' })
+					}
+				} else if (route === '/demos/flash-sales') {
+					await openSale(page)
+					for (const product of ['phone', 'watch', 'speaker']) await expect(page.getByTestId(`product-buy-${product}`)).toBeVisible()
+					checked.add('flash-sales')
+				} else if (route === '/demos/todos-rollback') {
+					await expect(page.getByTestId('todos')).toHaveAttribute('data-hydrated', 'true')
+					const text = `touch-${Date.now()}`
+					await page.getByTestId('todo-input').fill(text)
+					todoRow = page.getByTestId('todos').locator('li').filter({ hasText: text })
+					await page.getByTestId('add-button').click()
+					await expect(todoRow.locator('[data-testid^="todo-toggle-"]')).toBeVisible()
+					await expect(todoRow.locator('[data-testid^="todo-remove-"]')).toBeVisible()
+					await expect(page.getByTestId('clear-button')).toBeVisible()
+					checked.add('todos-rollback')
+				}
+				const found = await measureControls(page)
+				expect(found.low, `${route}: hydrated controls below the touch floor`).toEqual([])
+				for (const item of found.drawn) {
+					const designed = DESIGNED_SIZE[item.variant]
+					expect(designed, `${route}: ${item.variant} must name a designed size`).toBeDefined()
+					expect(Math.abs(item.w - designed.w), `${route}: ${item.cls} drawn width`).toBeLessThanOrEqual(0.5)
+					expect(Math.abs(item.h - designed.h), `${route}: ${item.cls} drawn height`).toBeLessThanOrEqual(0.5)
+				}
+			} finally {
+				if (todoRow && await todoRow.count() > 0) {
+					await todoRow.locator('[data-testid^="todo-remove-"]').click({ timeout: 5_000 })
+					await expect(todoRow).toHaveCount(0, { timeout: 5_000 })
+				}
 			}
 		}
-		expect([...checked].sort()).toEqual(['denials', 'flash-sales', 'kanban', 'todos-rollback'])
+		expect([...checked].sort()).toEqual(['denials', 'flash-sales', ...(isolatedKanban ? ['kanban'] : []), 'todos-rollback'])
 	} finally {
 		await context.close()
 	}
