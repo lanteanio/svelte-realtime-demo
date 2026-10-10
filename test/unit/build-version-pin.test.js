@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, posix } from 'node:path'
+import { basename, join, posix, relative, resolve } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { parseAst } from 'vite'
@@ -618,12 +618,12 @@ function composeEntries(lines, indent, location) {
 }
 
 function composePath(value, location) {
-	const match = /^(?:([A-Za-z0-9._/-]+)|'([A-Za-z0-9._/-]+)'|"([A-Za-z0-9._/-]+)")$/.exec(value)
+	const match = /^(?:((?:[A-Za-z]:)?[A-Za-z0-9._/-]+)|'((?:[A-Za-z]:)?[A-Za-z0-9._/ -]+)'|"((?:[A-Za-z]:)?[A-Za-z0-9._/ -]+)")$/.exec(value)
 	assert.ok(match, `${location}: expected a literal path without interpolation or YAML escapes`)
 	return posix.normalize(match[1] ?? match[2] ?? match[3])
 }
 
-function rootContextDockerfiles(read = readRepoFile) {
+function rootContextDockerfiles(read = readRepoFile, root = fileURLToPath(new URL('../../', import.meta.url))) {
 	const files = new Set()
 	const builds = new Map()
 	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
@@ -638,6 +638,7 @@ function rootContextDockerfiles(read = readRepoFile) {
 			assert.ok(!fields.has('extends'), `${location}: extended services must be checked explicitly`)
 			const build = fields.get('build')
 			if (!build) continue
+			assert.ok(build.value === '' || build.lines.length === 0, `${location}: a short build context cannot have nested lines`)
 			const declared = build.value === '' ? composeEntries(build.lines, 6, `${location} build`)
 				: new Map([['context', { value: build.value }]])
 			// Compose merges build mappings by service: a rollback context can
@@ -645,10 +646,13 @@ function rootContextDockerfiles(read = readRepoFile) {
 			const options = new Map([...(builds.get(service) ?? []), ...declared])
 			builds.set(service, options)
 			assert.ok(!options.has('dockerfile_inline'), `${location}: inline Dockerfiles are not supported by this check`)
+			for (const key of ['context', 'dockerfile']) {
+				assert.ok(!options.get(key)?.lines?.length, `${location} ${key}: expected a single-line literal path`)
+			}
 			const context = composePath(options.get('context')?.value || '.', `${location} context`)
-			if (context.replace(/\/$/, '') !== '.') continue
+			if (relative(root, resolve(root, context)) !== '') continue
 			const dockerfile = composePath(options.get('dockerfile')?.value || 'Dockerfile', `${location} dockerfile`)
-			assert.ok(!posix.isAbsolute(dockerfile) && dockerfile !== '..' && !dockerfile.startsWith('../'),
+			assert.ok(!posix.isAbsolute(dockerfile) && !/^[A-Za-z]:/.test(dockerfile) && dockerfile !== '..' && !dockerfile.startsWith('../'),
 				`${location}: Dockerfile must be inside the repository`)
 			files.add(dockerfile)
 		}
@@ -658,7 +662,9 @@ function rootContextDockerfiles(read = readRepoFile) {
 }
 
 test('Compose build contexts include equivalent root paths and inherited Dockerfiles', QUICK, () => {
-	for (const context of ['.', './', 'nested/../', "'.'", '"./"']) {
+	const root = fileURLToPath(new URL('../../', import.meta.url))
+	const absoluteRoot = resolve(root).replaceAll('\\', '/')
+	for (const context of ['.', './', 'nested/../', "'.'", '"./"', `../${basename(root)}`, `'${absoluteRoot}'`]) {
 		const base = `services:
   app:
     build: .
@@ -678,12 +684,41 @@ test('Compose build contexts include equivalent root paths and inherited Dockerf
 	}
 })
 
+test('Compose root aliases are checked in both short and mapping build forms', QUICK, () => {
+	const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
+	for (const context of [`../${basename(root)}`, `'${root.replaceAll('\\', '/')}'`]) {
+		for (const build of [`build: ${context}`, `build:\n      context: ${context}\n      dockerfile: Dockerfile.postgres`]) {
+			const read = (name) => name === 'docker-compose.yml'
+				? `services:\n  postgres:\n    ${build}\n` : 'services:\n  postgres:\n    image: postgres\n'
+			assert.deepEqual([...rootContextDockerfiles(read)], [build.includes('dockerfile:') ? 'Dockerfile.postgres' : 'Dockerfile'])
+		}
+	}
+	const read = (name) => name === 'docker-compose.yml'
+		? 'services:\n  app:\n    build: .\n  migrations:\n    build:\n      context: ./migrations\n      dockerfile: Dockerfile.migrations\n'
+		: 'services:\n  app:\n    image: app\n'
+	assert.deepEqual([...rootContextDockerfiles(read)], ['Dockerfile'])
+})
+
+test('Compose context and Dockerfile scalars cannot hide on nested lines', QUICK, () => {
+	for (const [key, path] of [['dockerfile', 'Dockerfile.postgres'], ['context', './migrations']]) {
+		for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
+			const read = (file) => file === name
+				? `services:\n  postgres:\n    build:\n      ${key}:\n        ${path}\n`
+				: 'services:\n  postgres:\n    build: .\n'
+			assert.throws(() => rootContextDockerfiles(read), new RegExp(`${key}: expected a single-line literal path`))
+		}
+	}
+})
+
 // The rule for leaving the top-level directory `dir` out of the Docker build
 // context, checked as written and failing closed:
 // - for each repository-root build in docker-compose.yml and
 //   docker-compose.rollback.yml, no <dockerfile>.dockerignore exists (Docker
 //   reads it in place of .dockerignore); omitted dockerfile means Dockerfile
 //   unless inherited by the merged rollback build mapping;
+// - literal build contexts resolve against the checkout directory, including
+//   parent-relative and absolute aliases; nested context/dockerfile scalars
+//   require reader support rather than silently falling back to defaults;
 // - .dockerignore holds only printable ASCII, tabs and line breaks, a
 //   byte-order mark at the very start aside;
 // - a trimmed line is exactly `dir`, `/dir`, `./dir`, `dir/`, `/dir/` or
