@@ -1,5 +1,6 @@
 {
 	"extends": "./jsconfig.json",
+	"files": [".svelte-kit/ambient.d.ts", ".svelte-kit/env.d.ts"],
 	"include": [
 		"playwright.config.js",
 		"svelte.config.js",
@@ -19,6 +20,8 @@
 	"exclude": [
 		"node_modules/**",
 		".svelte-kit/**",
-		"build/**"
+		"build/**",
+		"build-runs/**",
+		"source/**"
 	]
 }

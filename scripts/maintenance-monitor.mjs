@@ -66,7 +66,7 @@ export function startMaintenanceMonitor({ origin, persist, probe = readinessProb
 			await save()
 			return observation
 		})
-		serial = work.catch(() => {})
+		serial = work.then(() => {}, () => {})
 		return work
 	}
 	const done = (async () => {

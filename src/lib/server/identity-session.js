@@ -60,8 +60,7 @@ async function withSessionStore(operation) {
 	try {
 		const timeout = new Promise((_, reject) => {
 			timer = setTimeout(() => {
-				const err = new Error('Redis session operation timed out')
-				err.code = 'REDIS_SESSION_TIMEOUT'
+				const err = Object.assign(new Error('Redis session operation timed out'), { code: 'REDIS_SESSION_TIMEOUT' })
 				reject(err)
 			}, REDIS_TIMEOUT_MS)
 			if (timer.unref) timer.unref()
@@ -113,7 +112,7 @@ function validate(hash) {
  * or Redis breaker-tripped.
  *
  * @param {string | undefined | null} sessionId
- * @returns {Promise<{ id: string, name: string, color: string, org: string | null } | null>}
+ * @returns {Promise<{ id: string, name: string, color: string, org: string | null, tenant: string | null } | null>}
  */
 export async function lookupSession(sessionId) {
 	if (!sessionId || typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return null
@@ -142,7 +141,7 @@ export async function lookupSession(sessionId) {
  * hints cannot select another visitor's identity.
  *
  * @param {{ name?: string, color?: string, org?: string } | null} [overrides]
- * @returns {Promise<{ sessionId: string, identity: { id: string, name: string, color: string, org: string } }>}
+ * @returns {Promise<{ sessionId: string, identity: { id: string, name: string, color: string, org: string, tenant: null } }>}
  */
 export async function createSession(overrides) {
 	const generated = generateIdentity()

@@ -353,7 +353,7 @@ export function activateRedisInfrastructure() {
 			max: 1000,
 			breaker,
 			metrics,
-			forgetUserId: (record) => record?.data?.userId ?? null
+			forgetUserId: (record) => /** @type {{ userId?: string } | null | undefined} */ (record?.data)?.userId ?? null
 		})
 	}
 }

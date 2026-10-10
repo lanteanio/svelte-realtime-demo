@@ -30,8 +30,9 @@ test('legacy migration extracts profile hints without an identity or tenant', ()
 
 test('session creation ignores a supplied identity ID and persists its own ID', async () => {
 	const victim = randomUUID()
-	const first = await sessions.createSession({ id: victim, ...profile })
-	const second = await sessions.createSession({ id: victim, ...profile })
+	const untrustedProfile = { id: victim, ...profile }
+	const first = await sessions.createSession(untrustedProfile)
+	const second = await sessions.createSession(untrustedProfile)
 	assert.notEqual(first.identity.id, victim)
 	assert.notEqual(second.identity.id, victim)
 	assert.notEqual(first.identity.id, second.identity.id)
@@ -46,9 +47,10 @@ test('session creation ignores a supplied identity ID and persists its own ID', 
 
 test('an unavailable session store cannot turn a legacy hint into a victim identity', async () => {
 	const victim = randomUUID()
+	const untrustedProfile = { id: victim, ...profile }
 	availability.failed = true
 	try {
-		const result = await sessions.createSession({ id: victim, ...profile })
+		const result = await sessions.createSession(untrustedProfile)
 		assert.notEqual(result.identity.id, victim)
 		assert.deepEqual(result.identity, { id: result.identity.id, ...profile, tenant: null })
 		assert.equal(hashes.has(`test:identity-session:${result.sessionId}`), false)

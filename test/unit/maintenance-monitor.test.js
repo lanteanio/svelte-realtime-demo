@@ -56,8 +56,7 @@ test('a successful smoke cannot finish while readiness fails', async () => {
 })
 
 test('sampling and persistence continue while external smoke is pending', async () => {
-	let releaseSmoke
-	const smokeResult = new Promise(resolve => { releaseSmoke = resolve })
+	const { promise: smokeResult, resolve: releaseSmoke } = Promise.withResolvers()
 	const written = []
 	const monitor = startMaintenanceMonitor({ origin: 'https://example.test', intervalMs: 2, persist: record => { written.push(record) }, probe: async () => 200, smoke: () => smokeResult })
 	try {
@@ -73,10 +72,8 @@ test('sampling and persistence continue while external smoke is pending', async 
 })
 
 test('successful final readiness atomically stops a queued failing background probe', async () => {
-	let releaseInitial
-	let releaseFinal
-	const initial = new Promise(resolve => { releaseInitial = resolve })
-	const final = new Promise(resolve => { releaseFinal = resolve })
+	const { promise: initial, resolve: releaseInitial } = Promise.withResolvers()
+	const { promise: final, resolve: releaseFinal } = Promise.withResolvers()
 	let calls = 0
 	let smokeEntered = false
 	const monitor = startMaintenanceMonitor({
