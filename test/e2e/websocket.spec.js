@@ -94,6 +94,78 @@ test.describe('WebSocket Connection', () => {
 		expect(failure.rehydrateReloads, 'retry budget must be spent, then the wait must fail').toBe(WS_HYDRATE_RELOADS);
 	});
 
+	for (const armedBeforeNavigation of [false, true]) {
+		test(`a failed start entry outranks its delivered app sibling with ${armedBeforeNavigation ? 'early' : 'late'} observation`, async ({ page }) => {
+			let documentLoads = 0;
+			page.on('framenavigated', (frame) => {
+				if (frame === page.mainFrame()) documentLoads++;
+			});
+			await page.route('**/_app/immutable/entry/*.js', (route) =>
+				/\/entry\/start\./.test(route.request().url())
+					? route.abort('connectionfailed')
+					: route.fulfill({ status: 200, contentType: 'application/javascript', body: '' })
+			);
+			if (armedBeforeNavigation) watchWire(page);
+			const importFailure = page.waitForEvent('pageerror', {
+				predicate: (error) => /dynamically imported module/.test(error.message)
+			});
+			const siblingResponse = page.waitForResponse((response) => /\/entry\/app\./.test(response.url()));
+			await page.goto('/');
+			// The initial failure happens before the ordinary post-goto wait, as
+			// in a real startup failure. The early record must retain that fact.
+			await importFailure;
+			expect((await siblingResponse).status()).toBe(200);
+			const failure = await waitForWS(page, 500).then(() => null, (error) => error);
+			expect(failure).not.toBeNull();
+			expect(failure.message).toContain('/_app/immutable/entry/start.');
+			expect(failure.message).not.toContain('ENTRY CHUNK DELIVERED');
+			expect(failure.message).not.toContain('Delivery is therefore excluded');
+			if (armedBeforeNavigation) {
+				expect(failure.message).toContain('PAGE NEVER HYDRATED');
+				expect(failure.message).toContain('failed requests:');
+				expect(failure.rehydrateReloads).toBe(WS_HYDRATE_RELOADS);
+				expect(documentLoads).toBe(1 + WS_HYDRATE_RELOADS);
+			} else {
+				expect(failure.message).toContain('ENTRY CHUNK FETCH FAILED');
+				expect(failure.message).toContain('resource timeline');
+				expect(failure.rehydrateReloads).toBe(0);
+				expect(documentLoads).toBe(1);
+			}
+		});
+	}
+
+	test('an observed HTTP entry failure outranks a successful sibling without broadening retries', async ({ page }) => {
+		await page.route('**/*', (route) => {
+			const request = route.request();
+			if (/\/entry\/(?:start|app)\.fixture\.js$/.test(request.url())) {
+				return route.fulfill({
+					status: /\/start\./.test(request.url()) ? 503 : 200,
+					contentType: 'application/javascript', body: ''
+				});
+			}
+			if (request.resourceType() === 'document') {
+				return route.fulfill({ status: 200, contentType: 'text/html', body:
+					'<!doctype html><html><body><script type="module">' +
+					'await Promise.all([fetch("/_app/immutable/entry/app.fixture.js"), fetch("/_app/immutable/entry/start.fixture.js")]);' +
+					'document.body.dataset.ready = "yes";</script></body></html>' });
+			}
+			return route.continue();
+		});
+		watchWire(page);
+		await page.goto('/');
+		await expect(page.locator('body')).toHaveAttribute('data-ready', 'yes');
+		const failure = await waitForWS(page, 500).then(() => null, (error) => error);
+		expect(failure).not.toBeNull();
+		expect(failure.faults.entryChunks.map(({ status }) => status).sort()).toEqual([200, 503]);
+		expect(failure.faults.requests).toEqual([]);
+		expect(failure.faults.errors).toEqual([]);
+		expect(failure.message).toContain('ENTRY CHUNK FETCH FAILED');
+		expect(failure.message).toContain('503');
+		expect(failure.message).toContain('/entry/start.fixture.js');
+		expect(failure.message).not.toContain('ENTRY CHUNK DELIVERED');
+		expect(failure.rehydrateReloads).toBe(0);
+	});
+
 	test('a wait recovers from a one-off dead bundle by reloading', async ({ page }) => {
 		// Kill the entry chunks on the FIRST document load only, then serve them
 		// normally. That is the transient this recovery exists for: the asset is
@@ -292,7 +364,8 @@ test.describe('WebSocket Connection', () => {
 
 		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
 		expect(failure, 'a page with no running client must fail the wait').not.toBeNull();
-		expect(failure.message).toContain('BUNDLE DELIVERED, CLIENT SILENT');
+		expect(failure.message).toContain('ENTRY CHUNK DELIVERED, CLIENT SILENT');
+		expect(failure.message).toContain('Delivery of the complete client is not established');
 		expect(failure.message).toContain('200');
 		// The two readings this one has to be told apart from. The proven wording
 		// is reserved for a delivery failure and gates the reload, so reaching it
@@ -326,7 +399,7 @@ test.describe('WebSocket Connection', () => {
 		expect(failure, 'a page with no client must fail the wait').not.toBeNull();
 		expect(failure.message).toContain('BUNDLE NEVER REQUESTED');
 		expect(failure.message).not.toContain('PAGE NEVER HYDRATED');
-		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.message).not.toContain('ENTRY CHUNK DELIVERED');
 		expect(failure.rehydrateReloads, 'there is no asset here to re-fetch').toBe(0);
 	});
 
@@ -359,7 +432,7 @@ test.describe('WebSocket Connection', () => {
 		expect(failure.message, 'the verdict must name its source').toContain('references no client');
 		// The readings this one must not reach: the delivery owner, the
 		// client-executed owner, and the shrug this branch used to end in.
-		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.message).not.toContain('ENTRY CHUNK DELIVERED');
 		expect(failure.message).not.toContain('ENTRY CHUNK FETCH FAILED');
 		expect(failure.message, 'the document answers here, so the record must not shrug').not.toContain('UNKNOWN');
 		expect(failure.rehydrateReloads, 'there is no asset here to re-fetch').toBe(0);
@@ -371,7 +444,7 @@ test.describe('WebSocket Connection', () => {
 		// the fetch entirely, and the old reading here was the hedged UNKNOWN -
 		// which left the most common gate failure shape covered by one sentence
 		// naming three owners. The document's resource timeline holds the fetch
-		// with its status, so the verdict now excludes delivery by evidence.
+		// with its status, without proving that the complete client was delivered.
 		await page.route('**/_app/immutable/entry/*.js', (route) =>
 			route.fulfill({ status: 200, contentType: 'application/javascript', body: '' })
 		);
@@ -379,7 +452,8 @@ test.describe('WebSocket Connection', () => {
 
 		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
 		expect(failure, 'a page with no running client must fail the wait').not.toBeNull();
-		expect(failure.message).toContain('BUNDLE DELIVERED, CLIENT SILENT');
+		expect(failure.message).toContain('ENTRY CHUNK DELIVERED, CLIENT SILENT');
+		expect(failure.message).toContain('Delivery of the complete client is not established');
 		expect(failure.message, 'the verdict must name its source').toContain('resource timeline');
 		expect(failure.message).not.toContain('BUNDLE NEVER REQUESTED');
 		expect(failure.message).not.toContain('ENTRY CHUNK FETCH FAILED');
@@ -401,7 +475,7 @@ test.describe('WebSocket Connection', () => {
 		expect(failure, 'a page whose entry chunk never arrived must fail the wait').not.toBeNull();
 		expect(failure.message).toContain('ENTRY CHUNK FETCH FAILED');
 		expect(failure.message, 'the verdict must say it does not gate the reload').toContain('does not gate the recovery reload');
-		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.message).not.toContain('ENTRY CHUNK DELIVERED');
 		expect(failure.message).not.toContain('BUNDLE NEVER REQUESTED');
 		expect(failure.message).not.toContain('UNKNOWN');
 		expect(failure.rehydrateReloads, 'timeline evidence must not spend the reload budget').toBe(0);
@@ -427,7 +501,7 @@ test.describe('WebSocket Connection', () => {
 		expect(failure.message).toContain('UNKNOWN');
 		expect(failure.message, 'the hedge must say what evidence is missing').toContain('no legible entry chunk fetch');
 		expect(failure.message, 'a referenced client must shield the document from accusation').not.toContain('BUNDLE NEVER REQUESTED');
-		expect(failure.message).not.toContain('BUNDLE DELIVERED');
+		expect(failure.message).not.toContain('ENTRY CHUNK DELIVERED');
 		expect(failure.message).not.toContain('ENTRY CHUNK FETCH FAILED');
 		expect(failure.rehydrateReloads).toBe(0);
 	});

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { expectTouchTarget, openTouchPage, waitForWS, watchWire } from './helpers.js'
 import { countWebSocketMessages, sampleRemoteMotion } from './arena-motion.js'
 
 // A `border` class paints nothing if its colour is transparent, so asking
@@ -22,6 +22,7 @@ function collectErrors(page) {
 }
 
 async function open(page) {
+	watchWire(page)
 	await page.goto('/demos/arena')
 	await waitForWS(page)
 	await expect(page.getByTestId('arena-me')).toBeVisible({ timeout: 15_000 })

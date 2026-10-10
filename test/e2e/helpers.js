@@ -158,10 +158,8 @@ function watchPageFaults(page) {
 	// at all, which is indistinguishable from a document that never asked for a
 	// client unless the record says which case it is in.
 	const faults = { requests: [], errors: [], entryChunks: [], sawNavigation: false };
-	// A failed request is evidence; a SUCCESSFUL one is evidence too, and it was
-	// being thrown away. A page with no socket and a delivered bundle is a
-	// different fault from a page with no socket and no bundle: the first
-	// excludes the network, which is the only thing the recovery reload fixes.
+	// Retain both successful and failed entry responses. One delivered entry
+	// does not prove that every module required to start the client arrived.
 	const onResponse = (response) => {
 		if (!ENTRY_CHUNK.test(response.url())) return;
 		faults.entryChunks.push({ url: response.url(), status: response.status(), ok: response.ok() });
@@ -321,15 +319,15 @@ function diagnoseFromDocument(dom) {
 	if (!dom) {
 		return `PAGE LIKELY NEVER HYDRATED: no app socket was constructed and the status never left its server-rendered value. Whether a client was ever requested is UNKNOWN here - ${lateArmed}, and the document's own evidence could not be read. Arm it before the navigation to tell a bundle that never arrived from one that arrived and did nothing.`;
 	}
-	const delivered = dom.entries.find(timelineDelivered);
-	if (delivered) {
-		const status = delivered.status === null ? `${delivered.body} bytes decoded` : `status ${delivered.status}`;
-		return `BUNDLE DELIVERED, CLIENT SILENT: the document's own resource timeline shows the entry chunk arrived (${status}, ${delivered.url}) and no app socket was constructed. Delivery is therefore excluded, and a reload would not fix this - the client either never executed or executed without opening a socket. The timeline is per-document and written by the browser itself, so it does not depend on when this record arrived.`;
-	}
 	const failed = dom.entries.find(timelineFailed);
 	if (failed) {
 		const status = failed.status === null ? 'no readable status' : `status ${failed.status}`;
 		return `ENTRY CHUNK FETCH FAILED: the document's own resource timeline shows the entry chunk was requested and never delivered (${status}, ${failed.transfer} bytes transferred, ${failed.url}). That is a delivery fault. It is read from the page's timeline rather than observed directly, so it does not gate the recovery reload - only a failure this record saw itself may spend that budget.`;
+	}
+	const delivered = dom.entries.find(timelineDelivered);
+	if (delivered) {
+		const status = delivered.status === null ? `${delivered.body} bytes decoded` : `status ${delivered.status}`;
+		return `ENTRY CHUNK DELIVERED, CLIENT SILENT: the document's own resource timeline shows an entry chunk arrived (${status}, ${delivered.url}) and no app socket was constructed. Delivery of the complete client is not established: other required modules may still have failed or never been requested. The timeline is per-document and written by the browser itself, so it does not depend on when this record arrived.`;
 	}
 	if (dom.entries.length === 0 && dom.clientRefs === 0) {
 		return 'BUNDLE NEVER REQUESTED: the current document references no client at all - no /_app/ script, no modulepreload, and no inline bootstrap naming /_app/immutable/ - and its resource timeline holds no entry chunk fetch. That is a fault in what was served, not in the network under it. Read from the document itself, which does not depend on when this record arrived.';
@@ -401,9 +399,13 @@ function diagnoseHydration(probe, faults, dom) {
 		// addresses one of them. Which is why this stops at what the requests
 		// prove and does not promote any of it to the proven wording above.
 		const chunks = faults?.entryChunks ?? [];
+		const failed = chunks.find((chunk) => chunk.status === 0 || chunk.status >= 400);
+		if (failed) {
+			return `ENTRY CHUNK FETCH FAILED: the entry chunk answered ${failed.status} (${failed.url}) and no app socket was constructed. A delivered sibling does not make this failed entry available. The HTTP response alone does not gate the recovery reload.`;
+		}
 		const delivered = chunks.filter((c) => c.ok);
 		if (delivered.length) {
-			return `BUNDLE DELIVERED, CLIENT SILENT: the entry chunk arrived (${delivered[0].status} ${delivered[0].url}) and no app socket was constructed. Delivery is therefore excluded, and a reload would not fix this - the client either never executed or executed without opening a socket.`;
+			return `ENTRY CHUNK DELIVERED, CLIENT SILENT: an entry chunk arrived (${delivered[0].status} ${delivered[0].url}) and no app socket was constructed. Delivery of the complete client is not established: other required modules may still have failed or never been requested.`;
 		}
 		if (chunks.length === 0 && !faults?.sawNavigation) {
 			// The record is structurally blind here - it was armed after the
