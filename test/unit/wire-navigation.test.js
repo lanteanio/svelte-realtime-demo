@@ -5,17 +5,15 @@ import { watchWire, formatWire } from '../e2e/helpers.js'
 
 const stream = 'boards/notes/notes'
 function fixture() {
-	const page = new EventEmitter()
 	const frame = { url: () => 'http://localhost/board/test' }
-	page.mainFrame = () => frame
+	const page = Object.assign(new EventEmitter(), { mainFrame: () => frame })
 	const record = watchWire(page)
 	const request = (owner = frame, navigation = true, previous = null) => ({
 	 isNavigationRequest: () => navigation, frame: () => owner, redirectedFrom: () => previous,
 	 url: () => 'http://localhost/board/test', resourceType: () => 'document', failure: () => ({ errorText: 'net::ERR_ABORTED' })
 	})
 	const socket = () => {
-	 const ws = new EventEmitter()
-	 ws.url = () => 'ws://localhost/ws'
+	 const ws = Object.assign(new EventEmitter(), { url: () => 'ws://localhost/ws' })
 	 page.emit('websocket', ws)
 	 return { send: (id) => ws.emit('framesent', { payload: JSON.stringify({ rpc: stream, id, stream: true }) }),
 	  reply: (id) => ws.emit('framereceived', { payload: JSON.stringify({ topic: '__rpc', event: id, data: { id, ok: true, data: [], topic: 'board:notes' } }) }) }
@@ -52,7 +50,7 @@ test('old-document frames cannot answer an equal request id on the current docum
 test('SPA navigation, subframes and ordinary requests retain the same observation', () => {
 	const h = fixture(); h.socket().send('pending')
 	h.page.emit('framenavigated', h.frame)
-	h.page.emit('request', h.request({}, true))
+	h.page.emit('request', h.request({ url: () => 'http://localhost/iframe' }, true))
 	h.page.emit('request', h.request(h.frame, false))
 	assert.equal(h.record.rpcs.length, 1)
 	assert.match(h.report(), /ASKED, NEVER ANSWERED:/)

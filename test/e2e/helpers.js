@@ -7,6 +7,15 @@ import { applyWireFrame, createWireRecord, formatWire } from './wire-report.js';
 
 export { formatWire } from './wire-report.js';
 
+/**
+ * @typedef {{ at: number, state: string }} ConnectionState
+ * @typedef {{ at: number, url: string, opened?: number, errored?: number,
+ * closed?: number, code?: number, reason?: string, wasClean?: boolean }} ConnectionSocket
+ * @typedef {{ t0: number, routed: boolean, states: ConnectionState[],
+ * sockets: ConnectionSocket[], timer?: ReturnType<typeof setInterval>, rearm?: () => void }} ConnectionProbe
+ * @typedef {Window & typeof globalThis & { __wsProbe?: ConnectionProbe }} ProbeWindow
+ */
+
 /** How long a page gets to show a connected socket before the wait fails. */
 export const WS_CONNECT_TIMEOUT = 15000;
 
@@ -44,6 +53,7 @@ export const WS_HYDRATE_RELOADS = 1;
  * timeout screenshot and have opposite fixes.
  */
 function installConnectionProbe() {
+	const probeWindow = /** @type {ProbeWindow} */ (window);
 	// Re-arm rather than bail out. Every wait ends by stopping the sampler, but
 	// the probe object stays on the page, so a second wait on the same page - a
 	// reconnect test, a repeated navigation - used to get the FIRST wait's
@@ -53,8 +63,8 @@ function installConnectionProbe() {
 	// wrapper installed: wrapping again per wait would nest the constructors,
 	// and each nested layer would record into whichever probe it had closed
 	// over instead of the live one.
-	if (window.__wsProbe) {
-		window.__wsProbe.rearm();
+	if (probeWindow.__wsProbe) {
+		probeWindow.__wsProbe.rearm();
 		return;
 	}
 	// Whether something had ALREADY replaced the constructor before this probe
@@ -63,8 +73,9 @@ function installConnectionProbe() {
 	// the page belong to the relay rather than to the page. Read once here,
 	// before the wrapper below makes the two indistinguishable.
 	const routed = !String(window.WebSocket).includes('[native code]');
+	/** @type {ConnectionProbe} */
 	const probe = { t0: performance.now(), routed, states: [], sockets: [] };
-	window.__wsProbe = probe;
+	probeWindow.__wsProbe = probe;
 	const since = () => Math.round(performance.now() - probe.t0);
 
 	const readState = () => {
@@ -108,7 +119,9 @@ function installConnectionProbe() {
 	// readyState constants or every attempt would look idle and re-enter.
 	Wrapped.prototype = Native.prototype;
 	Object.assign(Wrapped, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
-	window.WebSocket = Wrapped;
+	// Construction returns a native socket; its prototype and static constants
+	// are installed above, completing the constructor shape.
+	window.WebSocket = /** @type {typeof WebSocket} */ (/** @type {unknown} */ (Wrapped));
 }
 
 /**
@@ -255,7 +268,7 @@ async function harvestDocumentEvidence(page) {
 	try {
 		return await page.evaluate((entryPattern) => {
 			const entryChunk = new RegExp(entryPattern);
-			const entries = performance.getEntriesByType('resource')
+			const entries = /** @type {PerformanceResourceTiming[]} */ (performance.getEntriesByType('resource'))
 				.filter((entry) => entryChunk.test(entry.name))
 				.map((entry) => ({
 					url: entry.name,
@@ -270,7 +283,7 @@ async function harvestDocumentEvidence(page) {
 			// is no script[src] and no modulepreload link to find. All three
 			// reference shapes are counted so a preload-strategy change cannot
 			// silently turn every clientless-document verdict into a hedge.
-			const external = [...document.querySelectorAll('script[src], link[rel="modulepreload"]')]
+			const external = [.../** @type {NodeListOf<Element & { src?: string, href?: string }>} */ (document.querySelectorAll('script[src], link[rel="modulepreload"]'))]
 				.map((el) => el.src ?? el.href)
 				.filter((url) => typeof url === 'string' && url.includes('/_app/')).length;
 			const inline = [...document.querySelectorAll('script:not([src])')]
@@ -514,7 +527,8 @@ async function attemptConnectionWait(page, timeout) {
 	// `rearm` is a function and does not survive serialisation, so hand back a
 	// plain snapshot rather than the probe itself.
 	const probe = await page.evaluate(() => {
-		const found = window.__wsProbe ?? null;
+		const probeWindow = /** @type {ProbeWindow} */ (window);
+		const found = probeWindow.__wsProbe ?? null;
 		if (found?.timer) clearInterval(found.timer);
 		return found && { t0: found.t0, routed: found.routed, states: found.states, sockets: found.sockets };
 	}).catch(() => null);
@@ -759,7 +773,7 @@ export function watchWire(page) {
  * only say that SOME subscription succeeded, which a page waiting on a
  * different stream is entitled to have happen while it still shows nothing.
  */
-export async function waitForData(page, locator, { what, stream, timeout = 15000 } = {}) {
+export async function waitForData(page, locator, /** @type {{ what?: string, stream?: string, timeout?: number }} */ { what, stream, timeout = 15000 } = {}) {
 	const record = watchWire(page);
 	try {
 		await locator.waitFor({ state: 'visible', timeout });
@@ -778,7 +792,7 @@ export async function waitForData(page, locator, { what, stream, timeout = 15000
  * Playwright's websocket event so initial subscribe frames cannot race past
  * the test before it attaches frame listeners.
  */
-export function waitForAppWebSocket(page, { timeout = 15000, onOpen } = {}) {
+export function waitForAppWebSocket(page, /** @type {{ timeout?: number, onOpen?: (socket: import('@playwright/test').WebSocket) => void }} */ { timeout = 15000, onOpen } = {}) {
 	return new Promise((resolve, reject) => {
 		const timer = setTimeout(() => {
 			page.off('websocket', handleWebSocket);
