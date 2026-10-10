@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The README covers host sampling: bounded windows, traffic comparisons, recurring access checks and an external readiness check.
+
 - Touch-target coverage measures hydrated controls as well as server-rendered controls, waits for delayed stylesheets, and verifies the scripts-off context independently of the application CSP.
 
 - Board visitors can undo their own note deletions for 30 seconds. Server-owned receipts restore notes for everyone, survive reload, and refuse expired, replayed or conflicting restores.

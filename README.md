@@ -6,7 +6,7 @@ A collaborative sticky notes app built with [svelte-realtime](https://github.com
 
 Open the page, get a random name, drop notes on a shared canvas. Every note, cursor, and color change syncs across all browsers in real time. No login, no friction.
 
-**Try it now:** [svelte-realtime-demo.lantean.io](https://svelte-realtime-demo.lantean.io/) -- open two tabs and watch the magic. Runs on a Hetzner CPX22 (2 shared vCPUs, 4 GB RAM, 6.49/month).
+**Try it now:** [svelte-realtime-demo.lantean.io](https://svelte-realtime-demo.lantean.io/) -- open two tabs and watch the magic.
 
 **Source:** [github.com/lanteanio/svelte-realtime-demo](https://github.com/lanteanio/svelte-realtime-demo)
 
@@ -244,6 +244,128 @@ To scale replicas:
 ```bash
 docker compose up -d --scale app=4
 ```
+
+---
+
+## Host sampling
+
+Use bounded, read-only observations on the named deployment host. Agree the
+host, operator, observation windows and private evidence location before running
+commands. Record UTC start/end times, kernel, CPU count, RAM, application image
+IDs and replica count with each window. Keep credentials, peer addresses, board
+names and user content out of the evidence; do not export environment files,
+full container inspection output or raw application logs.
+
+Start with two five-minute windows per day for seven days, one during expected
+busy hours and one during expected quiet hours. Record aggregate traffic beside
+resource measurements. Only call a window high or low traffic after comparing it
+with the other; the time of day is not enough. If traffic is flat or absent, say
+so and extend the observation period; do not generate load to create a peak.
+Once a baseline exists, repeat the paired windows weekly and after a deployment
+or capacity change. Review patch, access and exposure state monthly and after a
+security or network change. This is an operator schedule, not an installed
+timer.
+
+On the Linux host, from the deployment checkout, record this compact inventory
+at the start and end of each window. Execute the commands individually in a
+Bash shell with `set -o pipefail`; immediately after each command or pipeline,
+append `printf 'exit=%s\n' "$?"` to the private capture before running the next
+command. This includes each sampler and external check below. A numeric line
+from a failed pipeline must not be treated as a valid sample.
+
+```bash
+set -o pipefail
+date -u +%Y-%m-%dT%H:%M:%SZ
+uname -r
+nproc
+uptime
+free -m
+df -h / /var/lib/docker
+df -i / /var/lib/docker
+docker compose ps --format json
+docker compose ps -q app | xargs -r docker inspect --format '{{.Name}} {{.Image}} {{.State.StartedAt}} {{.RestartCount}}'
+ss -Htan state established '( sport = :443 )' | wc -l
+cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
+cat /proc/net/dev
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+Retain each command's exit status; unavailable counters and permission failures
+are missing measurements, not zero values. `/proc/net/dev` contains interface
+totals, not peer addresses. Compare byte, packet, error and drop deltas over the
+recorded elapsed time, keeping interfaces separate and accounting for resets.
+The headerless `ss` count includes all established HTTPS connections, not only
+WebSockets or distinct people. Compare equivalent windows on the same topology;
+do not use that count as a useful-work total. Linux [pressure counters](https://docs.kernel.org/accounting/psi.html)
+report stall percentages over 10/60/300 seconds and cumulative microseconds;
+compare cumulative deltas for the recorded window. Use CPU `some`, since
+system-level CPU `full` is undefined and its compatibility zero is not evidence
+of no contention.
+
+During each window, run these bounded samplers in separate host terminals so
+their timestamps overlap. `iostat` requires an existing sysstat installation;
+record its absence rather than installing packages as part of observation.
+Use the same command/exit-status capture in each terminal.
+
+```bash
+TZ=UTC vmstat -w -t 5 61
+```
+
+```bash
+TZ=UTC iostat -xz -t 5 61
+```
+
+Discard the first vmstat/iostat report, which summarizes time since boot.
+At the start, midpoint and end of the window, capture container usage and
+aggregate connections with:
+
+```bash
+set -o pipefail
+date -u +%Y-%m-%dT%H:%M:%SZ
+docker compose ps -q app postgres redis | xargs -r docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}'
+ss -Htan state established '( sport = :443 )' | wc -l
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+CPU utilization, runnable/blocked work, swap activity and pressure counters
+separate resource use from contention; device latency/queues and interface
+error/drop deltas add storage and network context. Compare device utilization
+with its actual capacity, and retain kernel/device error counts from the
+approved monitoring system. Low CPU or a healthy container on its own does not
+mean the host is healthy.
+
+`scripts/observe.sh` remains a supplementary stress-run streamer. Its listener
+metrics scrape can reach a different worker on each request under SO_REUSEPORT:
+do not sum those samples or subtract successive counter values as fleet totals.
+Use consistent per-worker collection with instance identity and reset handling
+when calculating application rates. The host commands above do not scrape
+application metrics or read credentials.
+
+For the monthly access and exposure review, record service states with
+`systemctl --failed` and `systemctl is-active ssh docker unattended-upgrades`;
+record installed/running kernel versions and `/var/run/reboot-required.pkgs`
+when present. Inspect effective SSH authentication settings, privileged account
+and authorized-key inventory, listening service bindings, host firewall policy
+and the provider firewall policy through the operator's approved access. Keep
+only policy decisions, aggregate counts and service bindings in the report; do
+not export keys, login histories or raw logs. If a policy source cannot be
+reached, record it as unknown instead of guessing. Compare allowed ports and
+identities against the intended deployment, and make any changes as a separate
+step after the check.
+
+At each window's start and end, use an external workstation to run
+`node scripts/deployment-smoke.mjs https://svelte-realtime-demo.lantean.io`
+and check `/readyz` over HTTPS with normal certificate verification. Timestamp
+the result and record failures alongside internal container readiness. The
+smoke checks `/healthz`, the public page and the WebSocket upgrade; it opens a
+short connection but does not create board data. Internal Unix-socket health
+and the public TLS path are separate observations.
+
+Keep the private report structured as: window metadata and traffic context;
+per-resource utilization, saturation and errors; service/patch/access/exposure
+state; external readiness; comparison with the paired window; missing data;
+and the next scheduled observation with its operator. Store raw numeric samples
+alongside the summary so another operator can reproduce the comparisons.
 
 ---
 
