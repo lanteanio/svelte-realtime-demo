@@ -12,13 +12,14 @@ const LOCK = join('node_modules', '.cache', 'srd-build.lock')
 
 // Loaded with --import ahead of scripts/sync.mjs, so its spawn resolves to a
 // recorder instead of starting kit. Each spawn is recorded with its command,
-// its arguments, its options and whether the lock file at LOCK (relative to
-// the working directory) holds this process's pid at that moment. The fake
-// child lives 300 ms, as a real sync takes a while, so a lock released before
-// the child ends is seen released; it then exits with SRD_TEST_SYNC_EXIT (0
-// when unset), or is killed by the signal SRD_TEST_SYNC_SIGNAL names, or fails
-// to start with an 'error' when SRD_TEST_SYNC_ERROR is set. How it ended is
-// recorded with the lock's state at that moment.
+// its arguments, its options other than env, and whether the lock file at
+// LOCK (relative to the working directory) holds this process's pid at that
+// moment. The fake child lives 300 ms, as a real sync takes a while, so a
+// lock released before the child ends is seen released; it then exits with
+// SRD_TEST_SYNC_EXIT (0 when unset), or is killed by the signal
+// SRD_TEST_SYNC_SIGNAL names, or fails to start with an 'error' when
+// SRD_TEST_SYNC_ERROR is set. How it ended is recorded with the lock's state
+// at that moment.
 const recorderSource = `
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { EventEmitter } from 'node:events'
@@ -93,23 +94,24 @@ function fixture() {
 
 test('npm run check and npm\'s prepare step run svelte-kit sync through scripts/sync.mjs', () => {
 	// What is checked: package.json's check script starts with
-	// `node scripts/sync.mjs &&`, its prepare script is `node scripts/sync.mjs`
-	// with the existing `|| echo ''` fallback, and no script's text, in any
-	// letter case, contains `sveltejs`, or `svelte-kit` other than right after
-	// a dot (the .svelte-kit directory is not kit's command). Not looked at:
-	// kit reached through another spelling of its path (an 8.3 short name, a
-	// percent-encoded file URL, quotes or other characters a shell removes
-	// inside either word), a name built at run time (a variable, a cmd
-	// escape), a wrapper package that runs kit under another name, a vite
-	// build or vite dev (which write kit's generated files themselves), and
-	// what a script file other than scripts/sync.mjs that a package.json
-	// script runs starts.
+	// `node scripts/sync.mjs && ` (a space after the &&), its prepare script is
+	// `node scripts/sync.mjs` with the existing `|| echo ''` fallback, and no
+	// script's text, in any letter case, contains `sveltejs`, or `svelte-kit`
+	// other than right after a dot (the .svelte-kit directory is not kit's
+	// command). Not looked at: kit reached through another spelling of its
+	// path (an 8.3 short name, a percent-encoded file URL, quotes or other
+	// characters a shell removes inside either word), a name built at run time
+	// (a variable, a cmd escape), a wrapper package that runs kit under another
+	// name, a vite build, vite dev or another vite-based tool that loads kit's
+	// plugin, such as a test runner (each writes kit's generated files
+	// itself), and what a script file other than scripts/sync.mjs that a
+	// package.json script runs starts.
 	const { scripts } = JSON.parse(readRepoFile('package.json'))
 	assert.match(scripts.check, /^node scripts\/sync\.mjs && /)
 	assert.equal(scripts.prepare, 'node scripts/sync.mjs || echo \'\'')
 	const namesKit = /sveltejs|(?<!\.)svelte-kit/i
 	assert.deepEqual(Object.entries(scripts).filter(([, command]) => namesKit.test(command)).map(([name]) => name), [],
-		'no package.json script may name kit\'s command or package')
+		'no package.json script may contain sveltejs, or svelte-kit other than right after a dot, in any letter case')
 })
 
 test('scripts/sync.mjs takes the lock file scripts/build.mjs takes', () => {
