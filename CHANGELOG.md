@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Note deletion and undo acquire the board lock before child rows, preventing deadlocks with stale-board cleanup.
+
 - Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
 - Legacy identity cookies retain display-profile hints but receive a fresh server-generated visitor ID, preventing impersonation through a forged cookie.
 

@@ -14,9 +14,15 @@ export function postgresNoteUndo(pool) {
 	return {
 		async remove(boardId, noteId, actorId) {
 			// One statement: a failed receipt insert rolls the deletion back too.
+			// Lock the parent before its child, like a cascading board deletion.
+			// KEY SHARE still allows unrelated notes on this board to change.
 			const { rows } = await pool.query(`
-				WITH removed AS (
-					DELETE FROM note WHERE note_id = $1 AND board_id = $2 RETURNING *
+				WITH locked_board AS MATERIALIZED (
+					SELECT board_id FROM board WHERE board_id = $2 FOR KEY SHARE
+				), removed AS (
+					DELETE FROM note USING locked_board
+					WHERE note.note_id = $1 AND note.board_id = locked_board.board_id
+					RETURNING note.*
 				)
 				INSERT INTO note_deletion (board_id, actor_id, note_id, snapshot)
 				SELECT board_id, $3, note_id, to_jsonb(removed) FROM removed
@@ -39,10 +45,13 @@ export function postgresNoteUndo(pool) {
 			// Concurrent requests compete for one receipt. An existing note wins
 			// over a snapshot; consuming a conflicting receipt prevents a later
 			// deletion from making that obsolete snapshot usable again.
+			// Acquire the board lock before the receipt to match cascade order.
 			const { rows } = await pool.query(`
-				WITH consumed AS (
-					DELETE FROM note_deletion
-					WHERE receipt_id = $1 AND board_id = $2 AND actor_id = $3
+				WITH locked_board AS MATERIALIZED (
+					SELECT board_id FROM board WHERE board_id = $2 FOR KEY SHARE
+				), consumed AS (
+					DELETE FROM note_deletion USING locked_board
+					WHERE receipt_id = $1 AND note_deletion.board_id = locked_board.board_id AND actor_id = $3
 					AND expires_at > clock_timestamp()
 					RETURNING snapshot
 				)

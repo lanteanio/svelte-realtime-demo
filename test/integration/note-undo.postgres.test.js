@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { setTimeout as delay } from 'node:timers/promises'
 import { before, after, test } from 'node:test'
 import pg from 'pg'
 import { postgresNoteUndo } from '../../src/lib/server/note-undo.js'
@@ -118,3 +119,51 @@ test('a failed restore insert rolls receipt consumption back for retry', async (
 	await pool.query('UPDATE note_deletion SET snapshot=$2 WHERE receipt_id=$1', [token, JSON.stringify(f.note)])
 	assert.ok(await store.restore(f.boardId, token, f.actorId))
 })
+
+for (const action of ['remove', 'restore']) {
+	test(`board deletion serializes with ${action} without a deadlock`, { timeout: 20_000 }, async (t) => {
+		const f = await fixture()
+		const token = action === 'restore' ? (await store.remove(f.boardId, f.note.note_id, f.actorId)).token : null
+		const deletion = await pool.connect()
+		const undo = await pool.connect()
+		let operation
+		try {
+			await deletion.query("SET statement_timeout = '10s'")
+			await undo.query("SET statement_timeout = '10s'")
+			await deletion.query('BEGIN')
+			// Pause the board sweep after it locks the parent, before cascading
+			// into notes/receipts. Observe the real lock wait before continuing.
+			await deletion.query('SELECT board_id FROM board WHERE board_id=$1 FOR UPDATE', [f.boardId])
+			const competing = postgresNoteUndo(undo)
+			operation = (action === 'remove'
+				? competing.remove(f.boardId, f.note.note_id, f.actorId)
+				: competing.restore(f.boardId, token, f.actorId))
+				.then(value => ({ value }), error => ({ error }))
+			const deadline = Date.now() + 5_000
+			let blocked = false
+			while (Date.now() < deadline) {
+				const { rows: [row] } = await admin.query('SELECT pg_blocking_pids($1) AS blockers', [undo.processID])
+				if (row.blockers.includes(deletion.processID)) { blocked = true; break }
+				await delay(20)
+			}
+			assert.ok(blocked, 'the undo statement must reach its parent-row lock wait')
+			const deleted = await deletion.query('DELETE FROM board WHERE board_id=$1', [f.boardId])
+				.then(value => ({ value }), error => ({ error }))
+			await deletion.query(deleted.error ? 'ROLLBACK' : 'COMMIT')
+			const result = await operation
+			t.diagnostic(JSON.stringify({ action, deleteError: deleted.error?.code ?? null, undoError: result.error?.code ?? null }))
+			assert.equal(deleted.error?.code, undefined, 'board deletion must not deadlock or time out')
+			assert.equal(result.error?.code, undefined, 'undo must not deadlock or time out')
+			assert.equal(deleted.value.rowCount, 1)
+			assert.equal(result.value, null, 'a deleted board cannot produce a note or receipt')
+			assert.equal((await pool.query('SELECT 1 FROM note WHERE board_id=$1', [f.boardId])).rowCount, 0)
+			assert.equal((await pool.query('SELECT 1 FROM note_deletion WHERE board_id=$1', [f.boardId])).rowCount, 0)
+		} finally {
+			await deletion.query('ROLLBACK')
+			await operation
+			await Promise.all([deletion.query('RESET statement_timeout'), undo.query('RESET statement_timeout')])
+			deletion.release()
+			undo.release()
+		}
+	})
+}
