@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - The README covers host sampling: bounded windows, traffic comparisons, recurring access checks and an external readiness check.
+- The README has a runbook for a host maintenance restart, covering outage approval, what must be recoverable first, and kernel, container, TLS and WebSocket checks afterwards.
 
 - Touch-target coverage measures hydrated controls as well as server-rendered controls, waits for delayed stylesheets, and verifies the scripts-off context independently of the application CSP.
 

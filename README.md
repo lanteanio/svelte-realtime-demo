@@ -245,6 +245,126 @@ To scale replicas:
 docker compose up -d --scale app=4
 ```
 
+
+### Maintenance restart
+
+A host restart interrupts all app replicas, Postgres and Redis together. Reserve
+an outage window with the operator before restarting for installed kernel or
+system-library updates. These steps run in Bash on the Linux deployment host,
+from its existing checkout. Record the chosen host, window, expected downtime,
+operator and recovery deadline in the private maintenance record.
+
+Before requesting execution approval:
+
+1. Confirm provider-console access works for this host and identify the person
+   who can use it if SSH does not return. Confirm how to select the previously
+   working installed kernel in its boot menu. Do not assume console access or a
+   usable previous kernel is available.
+2. Verify the backup record: Postgres backup time and location, Redis persistence
+   and backup coverage, and recoverable deployment configuration and certificates.
+   Confirm the required recovery point and the last successful restore check.
+   Docker volumes alone are persistence, not a backup. If recovery evidence is
+   missing, stop and arrange backup/restore preparation before the outage.
+3. Capture the current kernel, pending restart markers, installed boot files,
+   service state, volume names, replica count and immutable image identities.
+   Keep this inventory private; do not print container environment variables or
+   `.env` contents. Confirm the expected next kernel from the installed boot
+   configuration; the restart marker alone does not identify what will boot.
+
+```bash
+uname -r
+uptime
+systemctl --failed
+systemctl is-enabled docker
+systemctl is-active docker
+if [ -f /var/run/reboot-required ]; then cat /var/run/reboot-required; fi
+if [ -f /var/run/reboot-required.pkgs ]; then cat /var/run/reboot-required.pkgs; fi
+ls -l /boot/vmlinuz-* /boot/initrd.img-*
+git rev-parse HEAD
+git status --short
+docker compose ps -a
+for id in $(docker compose ps -a -q app postgres redis certbot); do
+  docker inspect --format '{{.Name}} image={{.Config.Image}} digest={{.Image}} restart={{.HostConfig.RestartPolicy.Name}} running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id"
+  docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' "$id"
+done
+```
+
+Record the healthy running app count and image digest before proceeding; mixed
+images or an unhealthy baseline need investigation first. Confirm the containers'
+restart policies and Docker boot enablement will bring the existing stack back.
+Keep the current image locally available. A maintenance restart uses existing
+containers; `scripts/deploy.sh` pulls source, builds, migrates and recreates app
+replicas, so it is a separate deployment procedure.
+
+The operator must explicitly approve the named host, outage window, recovery
+plan and restart after reviewing this inventory. Only inside that approved
+window, with console access ready and no deployment or data migration running:
+
+```bash
+sudo systemctl reboot
+```
+
+After SSH returns, compare `uname -r` with the planned kernel, review boot
+errors, and require the restart marker to be absent. Keep raw journal output
+private and redact sensitive content before sharing it. If the marker is still
+there, find out why instead of deleting it. Re-run the container inventory above
+and compare app image digests with the preflight record. From the same checkout,
+set `MAINT_EXPECTED_REPLICAS` to the recorded count and `MAINT_BASE_URL` to the
+confirmed public HTTPS origin, then run:
+
+```bash
+(
+  set -e
+  uname -r
+  systemctl --failed
+  journalctl -b -p err --no-pager
+  test ! -e /var/run/reboot-required
+  : "${MAINT_EXPECTED_REPLICAS:?set the recorded app replica count}"
+  : "${MAINT_BASE_URL:?set the confirmed public HTTPS origin}"
+  [[ "$MAINT_EXPECTED_REPLICAS" =~ ^[1-9][0-9]*$ ]]
+  [[ "$MAINT_BASE_URL" == https://* ]]
+  . scripts/compose-health.sh
+  wait_for_app_health 180 "$MAINT_EXPECTED_REPLICAS"
+  mapfile -t maintenance_app_ids < <(docker compose ps -a -q app)
+  test "${#maintenance_app_ids[@]}" -eq "$MAINT_EXPECTED_REPLICAS"
+  curl --fail --silent --show-error --max-time 10 "$MAINT_BASE_URL/healthz"
+  curl --fail --silent --show-error --max-time 10 "$MAINT_BASE_URL/readyz"
+)
+```
+
+The subshell must exit successfully before continuing to the external smoke.
+Confirm Postgres and Redis are healthy in `docker compose ps -a`. From a separate
+external machine with Node and this checkout, set `MAINT_BASE_URL` again to the
+same confirmed public HTTPS origin; shell variables do not transfer between
+machines. Then run:
+
+```bash
+(
+  set -e
+  : "${MAINT_BASE_URL:?set the confirmed public HTTPS origin on this machine}"
+  [[ "$MAINT_BASE_URL" == https://* ]]
+  node scripts/deployment-smoke.mjs "$MAINT_BASE_URL"
+)
+```
+
+The smoke requires `/healthz` and the homepage to return 200, validates TLS using
+Node's normal certificate checks, then requires a valid `/ws` upgrade with the
+matching Origin and Sec-WebSocket-Accept. It closes that socket immediately;
+it does not verify application subscriptions or reach every replica. The local
+container health/count checks cover replicas separately. Record the observed
+kernel, cleared restart state, service health, image comparison and external
+smoke results before ending the maintenance window.
+
+If the host misses the agreed recovery deadline or boots the wrong kernel, use
+the provider console and the recorded boot recovery procedure. Select the
+previously working installed kernel when appropriate; preserve boot error
+messages and reassess the update before another attempt. Do not remove kernels
+or restore data speculatively. If the host boots but dependencies or the app do
+not recover, inspect service/container logs first. An app-image rollback cannot
+repair a failed kernel boot or restore a database. The automatic app rollback in
+`scripts/deploy.sh` applies to its own deployment attempt; it is not invoked by
+this restart and must not be used as an unattended host-recovery action.
+
 ---
 
 ## Host sampling
@@ -484,8 +604,8 @@ src/
 - `/healthz` is the app's dependency-aware health check (Postgres, Redis,
   identity store). The adapter's built-in health route is disabled
   (`healthCheckPath: false` in `svelte.config.js`) so it cannot shadow it.
-- `/readyz` is the adapter's readiness probe; deploys and compose
-  healthchecks gate on it.
+- `/readyz` is the adapter's readiness probe. The maintenance restart checks it
+  separately; deployment and Compose healthchecks gate on `/healthz`.
 - `/__realtime/*` is the fail-closed admin plane (introspect snapshot, DLQ
   inspect + replay, lifeline metrics). Requests need `Authorization: Bearer
   $ADMIN_TOKEN`; with `ADMIN_TOKEN` unset every request is denied. The
