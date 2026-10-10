@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
+- Legacy identity cookies retain display-profile hints but receive a fresh server-generated visitor ID, preventing impersonation through a forged cookie.
 
 - Cluster tests cover every configured cron replica and wait for auction push delivery.
 

@@ -137,16 +137,16 @@ export async function lookupSession(sessionId) {
  * Create a fresh session. The session-id is the value the caller writes
  * back to the cookie; the identity is what the page renders.
  *
- * `overrides` carries any already-known fields (e.g. when migrating a
- * legacy plain-JSON cookie's contents into a fresh session). Missing
- * fields are generated.
+ * `overrides` carries display-profile hints, including legacy cookie
+ * values. Identity IDs are always generated on the server; profile
+ * hints cannot select another visitor's identity.
  *
- * @param {{ id?: string, name?: string, color?: string, org?: string } | null} [overrides]
+ * @param {{ name?: string, color?: string, org?: string } | null} [overrides]
  * @returns {Promise<{ sessionId: string, identity: { id: string, name: string, color: string, org: string } }>}
  */
 export async function createSession(overrides) {
 	const generated = generateIdentity()
-	const id = overrides?.id ?? randomUUID()
+	const id = randomUUID()
 	const name = overrides?.name ?? generated.name
 	const color = overrides?.color ?? generated.color
 	const org = VALID_ORGS.has(overrides?.org) ? overrides.org : 'acme'
@@ -165,7 +165,8 @@ export async function createSession(overrides) {
 	} catch {
 		// Redis breaker tripped - return the identity anyway so the page
 		// can still render. The session will not persist; the next request
-		// will mint another. Acceptable for a demo: no real auth is gated.
+		// will mint another identity, without access to the previous one's
+		// visitor-scoped state.
 	}
 	return { sessionId, identity: { id, name, color, org, tenant: null } }
 }
@@ -198,13 +199,12 @@ export async function updateSessionField(sessionId, field, value) {
 }
 
 /**
- * Attempt to migrate a legacy plain-JSON identity cookie. Returns the
- * parsed identity if the cookie value is a valid pre-this-change shape,
- * null otherwise. Callers should mint a fresh session populated with
- * these fields so existing visitors don't lose their displayed name.
+ * Read display-profile hints from a legacy plain-JSON identity cookie.
+ * Its ID is untrusted and is never migrated. Callers must mint a fresh
+ * identity while preserving the visitor's displayed name and color.
  *
  * @param {string | undefined | null} raw
- * @returns {{ id: string, name: string, color: string, org: string } | null}
+ * @returns {{ name: string, color: string, org: string } | null}
  */
 export function tryParseLegacyJsonCookie(raw) {
 	if (!raw || typeof raw !== 'string') return null
@@ -218,7 +218,7 @@ export function tryParseLegacyJsonCookie(raw) {
 		if (typeof obj.name !== 'string' || obj.name.length < 1 || obj.name.length > 40) return null
 		if (typeof obj.color !== 'string' || !HEX_COLOR_RE.test(obj.color)) return null
 		const org = VALID_ORGS.has(obj.org) ? obj.org : 'acme'
-		return { id: obj.id, name: obj.name, color: obj.color, org }
+		return { name: obj.name, color: obj.color, org }
 	} catch {
 		return null
 	}

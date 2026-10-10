@@ -34,11 +34,8 @@ export async function load({ cookies }) {
 	const existing = await lookupSession(raw)
 	if (existing) return { identity: existing }
 
-	// Migration path: legacy plain-JSON cookies from before this change.
-	// Mint a session populated with the legacy values so the visitor
-	// keeps their displayed name across the upgrade. Runs at most once
-	// per pre-existing visitor; after the first hit they have a real
-	// session and follow the fast path.
+	// Legacy cookies supply display-profile hints only. Mint a fresh
+	// server-owned identity, then use its opaque session on later requests.
 	const legacy = tryParseLegacyJsonCookie(raw)
 	const { sessionId, identity } = await createSession(legacy)
 	cookies.set('identity', sessionId, COOKIE_OPTS)

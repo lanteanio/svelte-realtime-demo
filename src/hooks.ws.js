@@ -263,10 +263,8 @@ export async function upgrade({ headers, cookies, remoteAddress }) {
 	const existing = await lookupSession(raw)
 	if (existing) return existing
 
-	// Fallback: no session yet (or legacy plain-JSON cookie from before
-	// this change). Migrate legacy contents if possible, otherwise mint
-	// a fresh session. Either way, write the new session-id back into
-	// the cookie so the next request follows the fast path.
+	// Legacy cookies supply display-profile hints only. Mint a fresh
+	// server-owned identity for this connection; HTTP sets persistent cookies.
 	const legacy = tryParseLegacyJsonCookie(raw)
 	const { sessionId, identity } = await createSession(legacy)
 	cookies.identity = sessionId
