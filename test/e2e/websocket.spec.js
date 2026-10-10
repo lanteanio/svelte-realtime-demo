@@ -146,7 +146,7 @@ test.describe('WebSocket Connection', () => {
 			if (request.resourceType() === 'document') {
 				return route.fulfill({ status: 200, contentType: 'text/html', body:
 					'<!doctype html><html><body><script type="module">' +
-					'await Promise.all([fetch("/_app/immutable/entry/app.fixture.js"), fetch("/_app/immutable/entry/start.fixture.js")]);' +
+					'await Promise.all(["/_app/immutable/entry/app.fixture.js", "/_app/immutable/entry/start.fixture.js"].map(async (url) => (await fetch(url)).text()));' +
 					'document.body.dataset.ready = "yes";</script></body></html>' });
 			}
 			return route.continue();
