@@ -257,8 +257,14 @@ test('a fire the script refuses announces nothing, and re-arms the intent still 
 })
 
 test('a refused fire with no usable intent left arms nothing', async () => {
-	// The numeric string is a fire time only to code that coerces it.
-	for (const intent of [null, '{not json', '{"at":"soon"}', `{"at":"${NOW}"}`]) {
+	// Only an object whose `at` is a finite number is an intent. An `at` that
+	// is a numeric string is a fire time only to code that coerces it, and a
+	// bare number, null, boolean or string is no intent at all, whatever its
+	// value.
+	for (const intent of [
+		null, '{not json', '42', String(NOW), 'null', 'true', '"soon"', `"${NOW}"`,
+		'{"at":"soon"}', `{"at":"${NOW}"}`
+	]) {
 		const redis = memoryRedis()
 		redis.evalReply = [0, intent]
 		const ctx = alarmCtx({ at: NOW - 3, firedAt: NOW, lateMs: 3, recovered: false })
@@ -461,11 +467,12 @@ test('scheduling records the intent with a TTL a full retention window past its 
 
 test('an intent without a usable fire time reads as none', async () => {
 	const redis = memoryRedis()
-	// Only an object whose `at` is a finite number is an intent. The numeric
-	// string is a fire time only to code that coerces it, and a bare number,
-	// null, boolean or string is no intent at all, whatever its value.
+	// Only an object whose `at` is a finite number is an intent. An `at` that
+	// is a numeric string is a fire time only to code that coerces it, and a
+	// bare number, null, boolean or string is no intent at all, whatever its
+	// value.
 	for (const raw of [
-		'{not json', '42', String(NOW), 'null', 'true', '"soon"',
+		'{not json', '42', String(NOW), 'null', 'true', '"soon"', `"${NOW}"`,
 		'{"at":"soon"}', `{"at":"${NOW}"}`, '{"at":null}', '{"at":1e999}', '{}'
 	]) {
 		redis.strings.set(PENDING_KEY, raw)
