@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Touch-target coverage measures hydrated controls as well as server-rendered controls, waits for delayed stylesheets, and verifies the scripts-off context independently of the application CSP.
 
+- Board visitors can undo their own note deletions for 30 seconds. Server-owned receipts restore notes for everyone, survive reload, and refuse expired, replayed or conflicting restores.
+
 - Alarm tests reject missing, null and infinite fire times after a refused fire, with distinct labels for missing keys and stored null values.
 
 - Cron registration tests cover mixed whitespace at each call boundary and ignore identifiers that only end in live.

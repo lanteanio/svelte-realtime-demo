@@ -19,6 +19,7 @@ import { env } from '$env/dynamic/private'
 import { runWithAdvisoryLock } from '$lib/server/advisory-lock'
 import { boundedIntEnv } from '$lib/server/env-int'
 import { assertNoteCoords } from '$lib/server/note-bounds'
+import { postgresNoteUndo, memoryNoteUndo } from '$lib/server/note-undo'
 
 const DEFAULT_POOL_MAX = 10
 const DEFAULT_CONNECT_TIMEOUT_MS = 2000
@@ -436,6 +437,12 @@ function memDeleteNote(noteId) {
 // ============================================================
 // Export the right implementation based on environment
 // ============================================================
+
+const noteUndo = pool ? postgresNoteUndo(pool) : memoryNoteUndo(boardsMap, notesMap)
+export const deleteNoteWithUndo = noteUndo.remove
+export const listNoteDeletions = noteUndo.list
+export const restoreDeletedNote = noteUndo.restore
+export const pruneNoteDeletions = noteUndo.prune
 
 export const getNote = pool ? pgGetNote : memGetNote
 export const getBoard = pool ? pgGetBoard : memGetBoard

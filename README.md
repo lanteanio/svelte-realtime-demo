@@ -94,6 +94,8 @@ batched into one browser frame still converge on the current shared value.
 
 ## Board lifecycle
 
+Undo restores notes you deleted within the last 30 seconds, for every visitor. Use the deletion toast or Ctrl/Cmd+Z outside text fields; recent deletions are available again after reload. Each restore is accepted once and never replaces an existing note. Creating, editing, moving and arranging notes are excluded, and there is no redo. Deletion snapshots expire after 30 seconds and are removed by a minute cleanup task. PostgreSQL deployments require migration `004_note_deletion_undo.sql` before starting the new app.
+
 Boards are ephemeral by design. Every board starts with a 1-hour countdown. Any meaningful action (create/edit/delete a note, change settings, run an arrangement) resets the timer. Boards with no activity for 1 hour are deleted automatically by a server-side cron job.
 
 The `stress-me-out` board is exempt -- it's auto-created on startup and never expires. The E2E stress tests use it.
@@ -249,7 +251,7 @@ Playwright tests covering:
 - Board CRUD, note operations (create, edit, drag, delete, color, z-order)
 - Board settings (title, background), persistence across refresh
 - FAB menu (tidy, rearrange by color, shuffle, group by author)
-- No-undo policy on the shared board (the chords and header carry no local-only restore)
+- Collaborative deletion undo: actor-scoped receipts, second-visitor convergence, reload, expiry and replay protection
 - Multi-user realtime sync (two browser contexts)
 - Presence and cursor overlay
 - Activity ticker

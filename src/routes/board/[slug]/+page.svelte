@@ -12,16 +12,11 @@
 	- RPCs update the database and publish events
 	- All connected clients receive events and update their local state
 
-	The board offers no undo. The stream's history API restores a LOCAL
-	snapshot only - it issues no call and publishes nothing - so on a
-	shared board it would show the presser a restored note that stayed
-	deleted for everyone else. A control that looks collaborative and is
-	not is worse than no control, so none is offered. The kanban demo
-	shows what a real one costs: a compensating publish, scoped to your
-	own action, inside a stated window.
+	Deleting a note creates a short-lived server receipt owned by this visitor.
+	Undo restores that snapshot through an RPC and publishes it to everyone.
 -->
 <script>
-	import { notes, createNote, moveNote, editNote, deleteNote, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
+	import { notes, createNote, moveNote, editNote, deleteNote, pendingNoteDeletions, undoNoteDeletion, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
 	import { Layers, LayoutGrid, Shuffle, Users, Sparkles, X } from 'lucide-svelte'
 	import { activity } from '$live/boards/activity'
 	import { settings, updateSettings } from '$live/boards/settings'
@@ -31,6 +26,7 @@
 	import CursorOverlay from '$lib/components/CursorOverlay.svelte'
 	import ActivityTicker from '$lib/components/ActivityTicker.svelte'
 	import BoardHeader from '$lib/components/BoardHeader.svelte'
+	import { isBoardUndoShortcut } from '$lib/client/board-undo'
 
 	let { data } = $props()
 	const boardId = $derived(data.boardId)
@@ -74,6 +70,70 @@
 			y: 120 + Math.floor(Math.random() * 120),
 			color: localStorage.getItem('noteColor') || NOTE_COLORS[0]
 		})
+	}
+
+	// Receipts come from the server, including after navigation or reload.
+	let deletions = $state([])
+	let usedReceipts = new Set()
+	const localDeadline = (item, requestedAt) => ({ ...item, expiresAt: requestedAt + item.remainingMs })
+	let undoBusy = $state(false)
+	let noteError = $state('')
+	let clock = $state(Date.now())
+	const undoable = $derived(deletions.filter((item) => item.expiresAt > clock))
+	const latestDeletion = $derived(undoable[0])
+
+	$effect(() => {
+		const currentBoard = boardId
+		let active = true
+		deletions = []
+		usedReceipts = new Set()
+		const requestedAt = Date.now()
+		pendingNoteDeletions(currentBoard).then((items) => {
+			if (active) deletions = [...deletions, ...items.filter((item) => !usedReceipts.has(item.token) && !deletions.some((own) => own.token === item.token)).map((item) => localDeadline(item, requestedAt))]
+		}).catch((error) => { if (active) noteError = error?.message ?? 'Could not load recent deletions' })
+		const timer = setInterval(() => { clock = Date.now() }, 250)
+		return () => { active = false; clearInterval(timer) }
+	})
+
+	async function handleDelete(noteId) {
+		const currentBoard = boardId
+		const requestedAt = Date.now()
+		noteError = ''
+		try {
+			const receipt = await deleteNote(currentBoard, noteId)
+			if (currentBoard === boardId && !usedReceipts.has(receipt.token)) deletions = [localDeadline(receipt, requestedAt), ...deletions.filter((item) => item.token !== receipt.token)]
+		} catch (error) {
+			if (currentBoard === boardId) noteError = error?.message ?? 'Could not delete the note'
+		}
+	}
+
+	async function undoDeletion() {
+		if (!latestDeletion || undoBusy) return
+		const { token } = latestDeletion
+		const currentBoard = boardId
+		undoBusy = true
+		noteError = ''
+		try {
+			await undoNoteDeletion(currentBoard, token)
+			if (currentBoard === boardId) {
+				usedReceipts.add(token)
+				deletions = deletions.filter((item) => item.token !== token)
+			}
+		} catch (error) {
+			if (currentBoard === boardId) {
+				noteError = error?.message ?? 'Could not undo the deletion'
+				if (error?.code === 'CONFLICT') {
+					usedReceipts.add(token)
+					deletions = deletions.filter((item) => item.token !== token)
+				}
+			}
+		} finally { undoBusy = false }
+	}
+
+	function handleUndoKey(event) {
+		if (!latestDeletion || undoBusy || !isBoardUndoShortcut(event)) return
+		event.preventDefault()
+		void undoDeletion()
 	}
 
 	// --- Drag handling ---
@@ -136,6 +196,8 @@
 
 </script>
 
+<svelte:window onkeydown={handleUndoKey} />
+
 <!-- Loading state: notes stream hasn't returned data yet -->
 {#if $notesStore === undefined}
 	<div class="flex justify-center items-center h-[80vh]">
@@ -153,6 +215,10 @@
 	>
 		<PresenceBar {boardId} />
 	</BoardHeader>
+	<p class="px-3 py-1 text-xs opacity-70" data-testid="board-undo-help">
+		Undo your note deletions for 30 seconds, including after reloading (Ctrl/Cmd+Z outside text fields).
+		Creating, editing, moving and arranging notes are not undone. No redo.
+	</p>
 
 	<Canvas
 		background={$settingsStore?.background ?? '#f5f5f4'}
@@ -166,7 +232,7 @@
 				zIndex={note.z_index ?? 0}
 				onMove={(x, y) => handleMove(note.note_id, x, y)}
 				onEdit={(fields) => editNote(boardId, note.note_id, fields)}
-				onDelete={() => deleteNote(boardId, note.note_id)}
+				onDelete={() => handleDelete(note.note_id)}
 				onFocus={() => bringToFront(note.note_id)}
 			/>
 		{/each}
@@ -251,6 +317,18 @@
 	<div class="toast toast-top toast-center z-50">
 		<div class="alert alert-warning shadow-lg">
 			<span>Slow down! Retry in {rateLimitCountdown}s</span>
+		</div>
+	</div>
+{/if}
+
+{#if latestDeletion || noteError}
+	<div class="toast toast-bottom toast-center z-50" data-testid="board-undo-toast">
+		<div class="alert shadow-lg" role="status">
+			{#if noteError}<span>{noteError}</span>{/if}
+			{#if latestDeletion}
+				<span>Note deleted. Undo available for {Math.max(0, Math.ceil((latestDeletion.expiresAt - clock) / 1000))}s.</span>
+				<button class="btn btn-sm" data-testid="board-undo" disabled={undoBusy} onclick={undoDeletion}>Undo</button>
+			{/if}
 		</div>
 	</div>
 {/if}

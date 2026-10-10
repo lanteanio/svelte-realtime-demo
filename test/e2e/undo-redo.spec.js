@@ -1,93 +1,145 @@
-import { test, expect } from '@playwright/test';
-import { createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js';
-import { clickFabAction, createFreshBoard, positions } from './board-helpers.js';
+import { test, expect } from '@playwright/test'
+import { WebSocket } from 'ws'
+import { createNote, getNotes, waitForBoardReady, waitForWS } from './helpers.js'
+import { clickFabAction, createFreshBoard, positions, editNote, openBoard } from './board-helpers.js'
+import { callRpc } from './ws-rpc.js'
+import { toWebSocketURL, toHandshakeOrigin } from '../../scripts/test-target.mjs'
 
-// The board offers NO undo, and this spec is what keeps that honest.
-//
-// The stream's history API restores a LOCAL snapshot only: it issues no call
-// and publishes nothing. Wired to Ctrl+Z on a shared board, it showed the
-// presser a restored note that stayed deleted for everyone else - a silent,
-// confidently wrong answer on the app's headline surface. The wiring is
-// removed rather than kept as a local convenience, because a control that
-// looks collaborative and is not misleads exactly the visitor who trusts it.
-//
-// Each test presses the gesture that used to lie and asserts from the state
-// the illusion used to repaint: a deleted note must STAY deleted on the
-// pressing screen, and a shuffle must STAY shuffled. If anyone rewires the
-// history API to these gestures, the repaint returns and these fail on the
-// spot - which is the intended tripwire. A real collaborative undo (a
-// compensating publish, scoped to your own action, like the kanban delete
-// toast) replaces this spec rather than relaxing it.
+async function twoNotes(page) {
+	await createFreshBoard(page, `Deletion undo ${Date.now()}`)
+	await createNote(page, 200, 260)
+	await createNote(page, 520, 260)
+	await expect(getNotes(page)).toHaveCount(2)
+	await editNote(getNotes(page).first(), 'Restore this note')
+}
 
-test.describe('No undo on the shared board', () => {
-	test('the header offers no undo controls and Ctrl+Z restores nothing, not even locally', async ({ page }) => {
-		await createFreshBoard(page, `No undo ${Date.now()}`);
+async function deleteFirst(page) {
+	const note = getNotes(page).filter({ hasText: 'Restore this note' })
+	await note.hover({ force: true })
+	await note.getByLabel('Delete note').click({ force: true })
+	await expect(getNotes(page)).toHaveCount(1)
+	await expect(page.getByTestId('board-undo')).toBeEnabled()
+}
 
-		// Two notes, not one: the post-reload assertion expects a non-zero
-		// count, which a board that never finished loading cannot satisfy.
-		await createNote(page, 200, 260);
-		await createNote(page, 520, 260);
-		await expect(getNotes(page)).toHaveCount(2, { timeout: 15_000 });
+async function socketFor(page) {
+	const address = toWebSocketURL(new URL(page.url()).origin)
+	const cookies = await page.context().cookies()
+	const socket = new WebSocket(address, {
+		origin: toHandshakeOrigin(address),
+		headers: { Cookie: cookies.map(({ name, value }) => `${name}=${value}`).join('; ') }
+	})
+	await new Promise((resolve, reject) => {
+		socket.once('open', resolve)
+		socket.once('error', reject)
+	})
+	return socket
+}
 
-		// The controls that carried the illusion are gone.
-		await expect(page.getByTestId('board-undo')).toHaveCount(0);
-		await expect(page.getByTestId('board-redo')).toHaveCount(0);
+test.describe('Collaborative deletion undo', () => {
+	test('Undo publishes the restored note to another visitor and survives reload', async ({ page, browser }) => {
+		await twoNotes(page)
+		const otherContext = await browser.newContext()
+		try {
+			const other = await otherContext.newPage()
+			await openBoard(other, page.url())
+			await expect(getNotes(other)).toHaveCount(2)
+			await deleteFirst(page)
+			await expect(getNotes(other)).toHaveCount(1)
+			await expect(other.getByTestId('board-undo')).toHaveCount(0)
+			await page.getByTestId('board-undo').click()
+			for (const visitor of [page, other]) {
+				await expect(getNotes(visitor)).toHaveCount(2)
+				await expect(getNotes(visitor).filter({ hasText: 'Restore this note' })).toHaveCount(1)
+				await visitor.reload()
+				await waitForWS(visitor)
+				await waitForBoardReady(visitor)
+				await expect(getNotes(visitor)).toHaveCount(2)
+				await expect(getNotes(visitor).filter({ hasText: 'Restore this note' })).toHaveCount(1)
+			}
+			await expect(page.getByTestId('board-undo')).toHaveCount(0)
+		} finally { await otherContext.close() }
+	})
 
-		const note = getNotes(page).first();
-		await note.hover({ force: true });
-		await page.getByLabel('Delete note').first().click({ force: true });
-		await expect(getNotes(page)).toHaveCount(1, { timeout: 10_000 });
+	test('a deletion receipt survives reload and Ctrl+Z restores it', async ({ page }) => {
+		await twoNotes(page)
+		await deleteFirst(page)
+		await page.reload()
+		await waitForWS(page)
+		await waitForBoardReady(page)
+		await expect(getNotes(page)).toHaveCount(1)
+		await expect(page.getByTestId('board-undo')).toBeEnabled()
+		await page.locator('body').click({ position: { x: 5, y: 5 } })
+		await page.keyboard.press('Control+z')
+		await expect(getNotes(page)).toHaveCount(2)
+		await expect(page.getByTestId('board-undo')).toHaveCount(0)
+		await page.keyboard.press('Control+y')
+		await page.keyboard.press('Control+Shift+z')
+		await expect(getNotes(page)).toHaveCount(2)
+		await expect(page.getByTestId('board-redo')).toHaveCount(0)
+	})
 
-		// The exact gesture that used to repaint the deleted note. The old
-		// wiring restored it locally within a frame, so a bounded settle is
-		// enough for the tripwire: if the restore comes back, the count goes
-		// to 2 here and this fails.
-		await page.keyboard.press('Control+z');
-		await page.waitForTimeout(1500);
-		await expect(getNotes(page), 'Ctrl+Z must not repaint a deleted note').toHaveCount(1);
-		await page.keyboard.press('Control+y');
-		await page.keyboard.press('Control+Shift+z');
-		await page.waitForTimeout(1500);
-		await expect(getNotes(page), 'the redo chords must be equally inert').toHaveCount(1);
+	test('Ctrl+Z inside a note keeps native text undo and does not restore a deletion', async ({ page }) => {
+		await twoNotes(page)
+		await deleteFirst(page)
+		await getNotes(page).first().dblclick({ force: true })
+		const editor = getNotes(page).first().locator('textarea')
+		await editor.fill('Original text')
+		await editor.press('End')
+		await editor.pressSequentially(' extra')
+		await expect(editor).toHaveValue('Original text extra')
+		await editor.press('Control+z')
+		await expect(editor).toHaveValue('Original text')
+		await expect(getNotes(page)).toHaveCount(1)
+		await expect(page.getByTestId('board-undo')).toBeEnabled()
+	})
 
-		// And the screen was telling the truth: the server agrees.
-		await page.reload();
-		await waitForWS(page);
-		await waitForBoardReady(page);
-		await expect(getNotes(page), 'the deletion was real and survives a reload').toHaveCount(1, { timeout: 10_000 });
-	});
+	test('server refuses another visitor, another board, replay and expiry', async ({ page, browser }) => {
+		test.setTimeout(90_000)
+		await page.goto('/')
+		await waitForWS(page)
+		const otherContext = await browser.newContext()
+		const sockets = []
+		try {
+			const other = await otherContext.newPage()
+			await other.goto(page.url())
+			await waitForWS(other)
+			const owner = await socketFor(page)
+			const stranger = await socketFor(other)
+			sockets.push(owner, stranger)
+			const board = await callRpc(owner, 'boards/createBoard', ['Receipt permissions'])
+			const secondBoard = await callRpc(owner, 'boards/createBoard', ['Other receipt board'])
+			const note = await callRpc(owner, 'boards/notes/createNote', [board.board_id, { content: 'Keep this', x: 100, y: 100, color: '#fef08a' }])
+			const receipt = await callRpc(owner, 'boards/notes/deleteNote', [board.board_id, note.note_id])
+			await expect(callRpc(stranger, 'boards/notes/pendingNoteDeletions', [board.board_id])).resolves.toEqual([])
+			await expect(callRpc(stranger, 'boards/notes/undoNoteDeletion', [board.board_id, receipt.token])).rejects.toThrow('CONFLICT')
+			await expect(callRpc(owner, 'boards/notes/undoNoteDeletion', [secondBoard.board_id, receipt.token])).rejects.toThrow('CONFLICT')
+			await expect(callRpc(owner, 'boards/notes/undoNoteDeletion', [board.board_id, receipt.token])).resolves.toMatchObject({ note_id: note.note_id, content: 'Keep this' })
+			await expect(callRpc(owner, 'boards/notes/undoNoteDeletion', [board.board_id, receipt.token])).rejects.toThrow('CONFLICT')
+			const expired = await callRpc(owner, 'boards/notes/deleteNote', [board.board_id, note.note_id])
+			await page.waitForTimeout(expired.remainingMs + 100)
+			await expect(callRpc(owner, 'boards/notes/undoNoteDeletion', [board.board_id, expired.token])).rejects.toThrow('CONFLICT')
+			await expect(callRpc(owner, 'boards/notes/pendingNoteDeletions', [board.board_id])).resolves.toEqual([])
+		} finally {
+			for (const socket of sockets) socket.close()
+			await otherContext.close()
+		}
+	})
 
-	test('Ctrl+Z after a FAB shuffle leaves the shuffle in place instead of repainting the old arrangement', async ({ page }) => {
-		await createFreshBoard(page, `No FAB undo ${Date.now()}`);
-		// Spaced apart: a double-click landing on an existing note opens its
-		// editor instead of creating a neighbour.
-		for (const [x, y] of [[150, 150], [450, 150], [750, 150]]) await createNote(page, x, y);
-		await expect(getNotes(page)).toHaveCount(3, { timeout: 15_000 });
-		const before = JSON.stringify(await positions(page));
-
-		await clickFabAction(page, 'Shuffle notes');
-		await expect
-			.poll(async () => JSON.stringify(await positions(page)), { timeout: 15_000 })
-			.not.toBe(before);
-		const shuffled = JSON.stringify(await positions(page));
-
-		// The old wiring repainted the pre-shuffle arrangement here - on this
-		// screen only - while every other visitor kept the shuffle. Now the
-		// pressing screen shows the same truth as everyone else's.
-		await page.locator('body').click({ position: { x: 5, y: 5 } });
-		await page.keyboard.press('Control+z');
-		await page.waitForTimeout(2000);
-		expect(
-			JSON.stringify(await positions(page)),
-			'the shuffle is shared state and stays; no local repaint pretends otherwise'
-		).toBe(shuffled);
-
-		await page.reload();
-		await waitForWS(page);
-		await waitForBoardReady(page);
-		expect(
-			JSON.stringify(await positions(page)),
-			'what the screen showed is what the server holds'
-		).toBe(shuffled);
-	});
-});
+	test('Ctrl+Z after a FAB shuffle leaves the shared arrangement in place', async ({ page }) => {
+		await createFreshBoard(page, `Arrangement ${Date.now()}`)
+		for (const [x, y] of [[150, 150], [450, 150], [750, 150]]) await createNote(page, x, y)
+		await expect(getNotes(page)).toHaveCount(3)
+		const before = JSON.stringify(await positions(page))
+		await clickFabAction(page, 'Shuffle notes')
+		await expect.poll(async () => JSON.stringify(await positions(page))).not.toBe(before)
+		const shuffled = JSON.stringify(await positions(page))
+		await page.locator('body').click({ position: { x: 5, y: 5 } })
+		await page.keyboard.press('Control+z')
+		await page.waitForTimeout(500)
+		expect(JSON.stringify(await positions(page))).toBe(shuffled)
+		await page.reload()
+		await waitForWS(page)
+		await waitForBoardReady(page)
+		expect(JSON.stringify(await positions(page))).toBe(shuffled)
+	})
+})

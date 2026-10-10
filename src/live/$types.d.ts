@@ -27,11 +27,13 @@ declare module "$live/boards/notes" {
   export const moveNote: (...args: any[]) => Promise<any>;
   export const focusNote: (...args: any[]) => Promise<any>;
   export const deleteNote: (...args: any[]) => Promise<any>;
+  export const pendingNoteDeletions: (...args: any[]) => Promise<any>;
+  export const undoNoteDeletion: (...args: any[]) => Promise<any>;
   export const tidyNotes: (...args: any[]) => Promise<any>;
   export const rearrangeNotes: (...args: any[]) => Promise<any>;
   export const shuffleNotes: (...args: any[]) => Promise<any>;
   export const groupByAuthor: (...args: any[]) => Promise<any>;
-  export type ErrorCode = "FORBIDDEN" | "NOT_FOUND" | "VALIDATION";
+  export type ErrorCode = "CONFLICT" | "FORBIDDEN" | "NOT_FOUND" | "VALIDATION";
   export const notes: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const editNote: (...args: any[]) => Promise<any>;
   export const createNote: (...args: any[]) => Promise<any>;

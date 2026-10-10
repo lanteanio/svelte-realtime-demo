@@ -23,7 +23,10 @@ import {
 	getNote as dbGetNote,
 	createNote as dbCreateNote,
 	updateNote as dbUpdateNote,
-	deleteNote as dbDeleteNote,
+	deleteNoteWithUndo,
+	restoreDeletedNote,
+	listNoteDeletions,
+	pruneNoteDeletions,
 	batchUpdateNotes as dbBatchUpdateNotes,
 	touchBoard
 } from '$lib/server/db'
@@ -288,8 +291,13 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 	await verifyNoteOwnership(noteId, boardId)
 	const detached = _noteCache.get(noteId)
 	_noteCache.delete(noteId)
+	let receipt
 	try {
-		await dbDeleteNote(noteId)
+		// Finish this replica's earlier write before saving the deletion snapshot.
+		// Keep the latest drag position even when its timer has not flushed yet.
+		if (detached?.flushPromise) await Promise.resolve(detached.flushPromise).catch(() => {})
+		if (detached?.dirty) await dbUpdateNote(noteId, { x: detached.note.x, y: detached.note.y })
+		receipt = await deleteNoteWithUndo(boardId, noteId, ctx.user.id)
 	} catch (error) {
 		// Preserve a buffered position if the delete itself did not commit.
 		if (detached && !_noteCache.has(noteId)) {
@@ -298,9 +306,33 @@ export const deleteNote = live(async (ctx, boardId, noteId) => {
 		}
 		throw error
 	}
+	if (!receipt) throw new LiveError('NOT_FOUND', 'Note not found')
 	ctx.publish(TOPICS.notes(boardId), 'deleted', { note_id: noteId })
 	ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'removed a note'))
 	touch(ctx, boardId)
+	return receipt
+})
+
+export const pendingNoteDeletions = live(async (ctx, boardId) => {
+	validateBoardId(boardId)
+	return listNoteDeletions(boardId, ctx.user.id)
+})
+
+export const undoNoteDeletion = live(async (ctx, boardId, token) => {
+	validateBoardId(boardId)
+	validateNoteId(token)
+	const note = await restoreDeletedNote(boardId, token, ctx.user.id)
+	if (!note) throw new LiveError('CONFLICT', 'Undo expired, was already used, or the note already exists')
+	_noteCache.delete(note.note_id)
+	ctx.publish(TOPICS.notes(boardId), 'created', note)
+	ctx.publish(TOPICS.activity(boardId), 'created', activityEvent(ctx, 'restored a deleted note'))
+	touch(ctx, boardId)
+	return note
+})
+
+// Expired receipts cannot be used between cleanup ticks.
+export const purgeNoteDeletions = live.cron('* * * * *', 'board-note-undo-cleanup', async () => {
+	await pruneNoteDeletions()
 })
 
 // --- Batch arrangement actions ---
