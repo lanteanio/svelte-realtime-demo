@@ -61,21 +61,28 @@ test('the cron registration check reads a checkout whose path needs percent-enco
 })
 
 test('the cron registration check flags a live.cron() in any file outside src/live/', { timeout: 60_000 }, () => {
-	// What is checked: each of these fails the check and is named, while the
-	// one under src/live/ is not: a sibling directory sharing the stem
-	// (src/live-extra/), a directory named live elsewhere (src/lib/live/), an
-	// .mjs file, a .ts file, and a call that is not an exported const. Not
-	// looked at: .d.ts files, which the check skips on purpose, and calls
-	// spelled across lines.
+	// What is checked: one checkout holding all of these offenders and a
+	// live.cron() under src/live/ fails the check, the output names every
+	// offender, and it does not name the file under src/live/. The offenders: a
+	// sibling directory sharing the stem (src/live-extra/), a directory named
+	// live elsewhere (src/lib/live/), an .mjs file, a .ts file, a call that is
+	// not an exported const, a file under src/routes/, and a file directly in
+	// src/ whose call has spaces around the dot and before the paren. Not looked
+	// at: .d.ts files, which the check skips on purpose, and calls spelled
+	// across lines.
 	const failing = runCopyOf('check-cron-registration.mjs', {
 		'src/live/jobs.js': CRON,
 		'src/live-extra/jobs.js': CRON,
 		'src/lib/live/schedule.mjs': 'const tick = enabled ? live.cron(\'* * * * *\', () => {}) : null\n',
-		'src/lib/jobs.ts': CRON
+		'src/lib/jobs.ts': CRON,
+		'src/routes/api/jobs/+server.js': CRON,
+		'src/hooks.server.js': 'export const tick = live . cron (\'* * * * *\', () => {})\n'
 	})
 	assert.notEqual(failing.status, 0, failing.output)
 	assert.match(failing.output, /src[\\/]live-extra[\\/]jobs\.js/)
 	assert.match(failing.output, /src[\\/]lib[\\/]live[\\/]schedule\.mjs/)
 	assert.match(failing.output, /src[\\/]lib[\\/]jobs\.ts/)
+	assert.match(failing.output, /src[\\/]routes[\\/]api[\\/]jobs[\\/]\+server\.js/)
+	assert.match(failing.output, /src[\\/]hooks\.server\.js/)
 	assert.doesNotMatch(failing.output, /src[\\/]live[\\/]jobs\.js/)
 })
