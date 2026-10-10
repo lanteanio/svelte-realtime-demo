@@ -340,6 +340,60 @@ test.describe('/demos/privacy', () => {
 		}
 	})
 
+	test('releasing a round id pin puts back the last id the page wrote, on either pin path', async ({ page }) => {
+		await openPrivacy(page)
+		await waitForFreshRound(page, { requireRoom: false, minSecondsLeft: 10 })
+		const hint = page.getByTestId('pv-round-hint')
+		const real = Number(await hint.getAttribute('data-round-id'))
+		// A write from the test stands in for the framework's own at a tumble,
+		// which takes up to a minute to arrive: the attribute observer cannot
+		// tell the two apart.
+		const pageWrites = (id) => page.evaluate((value) => {
+			document.querySelector('[data-testid="pv-round-hint"]').setAttribute('data-round-id', value)
+		}, String(id))
+		try {
+			await pinRoundId(page, real + STAGED_ROUND_STEP)
+			await pageWrites(real + 1)
+			expect(await hint.getAttribute('data-round-id'), 'the pin must hold over a page write').toBe(String(real + STAGED_ROUND_STEP))
+			await unpinRoundId(page)
+			expect(await hint.getAttribute('data-round-id'), 'releasing must put back the id the page last wrote, not the one from when the pin was placed')
+				.toBe(String(real + 1))
+
+			// The staged path pins when a mood button's click lands. The click is
+			// stopped at the button, so the page's own handler never runs and
+			// nothing is submitted.
+			const click = () => page.evaluate(() => {
+				const button = document.querySelector('[data-testid="pv-submit-3"]')
+				button.addEventListener('click', (event) => event.stopImmediatePropagation(), { capture: true, once: true })
+				button.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+			})
+			await expect(page.getByTestId('pv-submit-3')).toBeEnabled()
+			await stageRollOnNextSubmit(page)
+			await click()
+			expect(await hint.getAttribute('data-round-id'), 'the staged pin must take hold on the click').toBe(String(real + 1 + STAGED_ROUND_STEP))
+			await pageWrites(real + 2)
+			expect(await hint.getAttribute('data-round-id'), 'the staged pin must hold over a page write').toBe(String(real + 1 + STAGED_ROUND_STEP))
+			await unpinRoundId(page)
+			expect(await hint.getAttribute('data-round-id'), 'releasing a staged pin must put back the id the page last wrote').toBe(String(real + 2))
+
+			// Released before its click, a stage never takes hold.
+			await stageRollOnNextSubmit(page)
+			await unpinRoundId(page)
+			await click()
+			expect(await hint.getAttribute('data-round-id'), 'a stage released before its click must not pin on a later one').toBe(String(real + 2))
+
+			await pinRoundId(page, real + STAGED_ROUND_STEP)
+			await unpinRoundId(page)
+			await pageWrites(real + 3)
+			await pinRoundId(page, real + STAGED_ROUND_STEP + 1)
+			await unpinRoundId(page)
+			expect(await hint.getAttribute('data-round-id'), 'a fresh pin after a release must record the attribute it finds')
+				.toBe(String(real + 3))
+		} finally {
+			await unpinRoundId(page)
+		}
+	})
+
 	test('a retry after a crossing waits for a round later than the latest one the crossing reached', async ({ page }) => {
 		// The guard's own wait for that later round is what is under test, so
 		// the rounds are staged on the readout's id. Room and a fresh countdown

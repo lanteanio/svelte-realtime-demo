@@ -511,10 +511,9 @@ ${formatDeliverySince(wire, mark)}`
  * How far a staged round id sits from the real one.
  *
  * Deliberately far larger than one. A staged crossing races the page's own
- * 5-second refresh: unpinning leaves the stale value in the DOM until that
- * refresh rewrites it, so a stage computed as "whatever is showing, plus
- * one" can land on the exact id the code under test already read, and then
- * there is no crossing to detect and the test passes having proved nothing.
+ * 5-second refresh: a stage only one round ahead can match a real tumble
+ * between arming the stage and clicking. The staged id would then equal
+ * the id read before the click, leaving no crossing to detect.
  * A thousand minutes is far enough ahead that no real tumble during a run
  * can coincide with it, which makes the crossing unconditional.
  */
@@ -528,26 +527,46 @@ export const STAGED_ROUND_STEP = 1_000
  * crossing where it actually presents: the attribute the helpers read. The
  * detection code under test is the real one, reading the real DOM.
  *
- * Re-applied on an interval because the page overwrites the attribute from
- * `roundInfo()` every 5 seconds, which would otherwise retire the staged
- * crossing mid-assertion.
+ * Held by the observer installRoundPin places, because the page rewrites the
+ * attribute when its round changes, which would otherwise retire the staged
+ * crossing mid-assertion. Calling it again moves the pin.
  */
 export async function pinRoundId(page, roundId) {
-	await page.evaluate((id) => {
-		const hint = () => document.querySelector('[data-testid="pv-round-hint"]')
-		// Remember the page's own value: the attribute is only ever rewritten
-		// by the framework when the id CHANGES, so an overwritten one is not
-		// restored by the next poll and has to be put back by hand.
-		if (window.__pvRealRound === undefined) window.__pvRealRound = hint()?.getAttribute('data-round-id')
+	await page.evaluate(installRoundPin)
+	await page.evaluate((id) => window.__pvPlaceRoundPin(id), String(roundId))
+}
+
+/**
+ * Defines window.__pvPlaceRoundPin(id) in the page, once. Placing the pin
+ * holds the round hint's data-round-id at `id`. A MutationObserver on the
+ * attribute records its value when the callback runs as the page's own and
+ * puts the pin back; its callback runs before the page yields to any other
+ * task, so a read from the test never sees the page's value while pinned. The
+ * pin's own writes are taken off the observer's queue as they are made, so
+ * what it records is only what the page wrote. Placing it again moves the pin
+ * and keeps what it recorded. The privacy page renders the hint once its round
+ * loads and never removes it, so the observed element is the one every read
+ * finds.
+ */
+function installRoundPin() {
+	if (window.__pvPlaceRoundPin) return
+	window.__pvPlaceRoundPin = (id) => {
+		const el = document.querySelector('[data-testid="pv-round-hint"]')
+		if (!el) throw new Error('pv-round-hint is not rendered, so there is no round id to pin')
+		const pin = (window.__pvRoundPin ??= { el, real: el.getAttribute('data-round-id') })
+		pin.observer?.disconnect()
+		const observer = new MutationObserver(() => {
+			pin.real = el.getAttribute('data-round-id')
+			apply()
+		})
 		const apply = () => {
-			const el = hint()
-			if (el) el.setAttribute('data-round-id', String(id))
+			el.setAttribute('data-round-id', id)
+			observer.takeRecords()
 		}
-		// Calling it again moves the pin rather than adding a second one.
-		clearInterval(window.__pvPinnedRound)
+		observer.observe(el, { attributes: true, attributeFilter: ['data-round-id'] })
 		apply()
-		window.__pvPinnedRound = setInterval(apply, 50)
-	}, roundId)
+		pin.observer = observer
+	}
 }
 
 /**
@@ -561,45 +580,48 @@ export async function pinRoundId(page, roundId) {
  * exactly where the real race puts it: after the starting read, while the
  * raw count is being waited on.
  *
- * The staged id is fixed when the stage is armed and applied the instant the
- * click lands. Deriving it at click time, or letting the first application
- * wait for a timer, both leave a window in which the count can settle first
- * and the crossing is never seen.
+ * The staged id is fixed when the stage is armed and pinned (installRoundPin)
+ * the instant a mood button's click lands. Deriving it at click time, or
+ * letting the first application wait for a timer, both leave a window in
+ * which the count can settle first and the crossing is never seen.
  */
 export async function stageRollOnNextSubmit(page) {
+	await page.evaluate(installRoundPin)
 	await page.evaluate((step) => {
-		const hint = () => document.querySelector('[data-testid="pv-round-hint"]')
-		if (window.__pvRealRound === undefined) window.__pvRealRound = hint()?.getAttribute('data-round-id')
-		const next = String(Number(hint().getAttribute('data-round-id')) + step)
+		const hint = document.querySelector('[data-testid="pv-round-hint"]')
+		const next = String(Number(hint.getAttribute('data-round-id')) + step)
 		const onClick = (event) => {
-			if (!event.target.closest('[data-testid^="pv-submit-"]')) return
+			if (!event.target.closest('button[data-testid^="pv-submit-"]')) return
 			document.removeEventListener('click', onClick, true)
-			const apply = () => {
-				const el = hint()
-				if (el) el.setAttribute('data-round-id', next)
-			}
-			apply()
-			window.__pvPinnedRound = setInterval(apply, 25)
+			delete window.__pvPendingRoundStage
+			window.__pvPlaceRoundPin(next)
 		}
+		window.__pvPendingRoundStage = onClick
 		document.addEventListener('click', onClick, true)
 	}, STAGED_ROUND_STEP)
 }
 
 /**
- * Release a staged crossing and put the page's own value back.
+ * Release a pinned or staged round id and put back the last value the page
+ * wrote to the attribute, before or during the pin. The last stage armed is
+ * cancelled if it is still waiting for its click.
  *
  * The value is restored explicitly rather than waited for. The framework
- * writes this attribute only when the id changes, so an id overwritten here
- * survives every subsequent poll that reports the same round - waiting for
- * the page to correct it would wait out the rest of the round.
+ * writes this attribute only when the id changes, and remembers what it
+ * wrote, so a value left here survives every later poll that reports the same
+ * round. Restoring the id from when the pin was placed would leave the
+ * previous round named after a real tumble while pinned, until the next one.
  */
 export async function unpinRoundId(page) {
 	await page.evaluate(() => {
-		clearInterval(window.__pvPinnedRound)
-		delete window.__pvPinnedRound
-		const el = document.querySelector('[data-testid="pv-round-hint"]')
-		if (el && window.__pvRealRound != null) el.setAttribute('data-round-id', window.__pvRealRound)
-		delete window.__pvRealRound
+		if (window.__pvPendingRoundStage) document.removeEventListener('click', window.__pvPendingRoundStage, true)
+		delete window.__pvPendingRoundStage
+		const pin = window.__pvRoundPin
+		if (!pin) return
+		pin.observer.disconnect()
+		if (pin.real === null) pin.el.removeAttribute('data-round-id')
+		else pin.el.setAttribute('data-round-id', pin.real)
+		delete window.__pvRoundPin
 	})
 }
 
