@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Docker build-context checks reject Dockerfile-specific ignore files for every repository-root build declared in the deployment and rollback Compose files.
+
 - The local cluster harness can run four replicas, with arena coverage that follows individual visitors through interest entry, removal and re-entry on every process.
 
 - News and Top-K controls retain the latest Redis write when replica publishes arrive out of order and recover after Redis revision counters reset. Each subscribed page reconciles every notified control with serialized snapshot reads, including initial load and reconnect; notifications arriving during a read trigger another read.

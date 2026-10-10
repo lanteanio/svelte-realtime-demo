@@ -593,10 +593,97 @@ function commandsReachedBy(run, scripts) {
 	return reached
 }
 
+// Read only block mappings at the named indentation. Values and nested lines
+// outside the build declarations are not interpreted. Quoted keys, aliases,
+// merges and flow mappings at these levels fail instead of hiding a build.
+function composeEntries(lines, indent, location) {
+	const entries = new Map()
+	let entry
+	for (const line of lines) {
+		if (!line.trim() || line.trimStart().startsWith('#')) continue
+		assert.ok(!/^\s*\t/.test(line), `${location}: tabs in indentation are not supported`)
+		const depth = line.length - line.trimStart().length
+		if (depth > indent) {
+			assert.ok(entry, `${location}: unexpected nested line`)
+			entry.lines.push(line)
+			continue
+		}
+		const match = /^([A-Za-z0-9_-]+):(?:\s+(.*))?$/.exec(line.slice(indent).trimEnd())
+		assert.ok(depth === indent && match, `${location}: expected a plain block-mapping key: ${line}`)
+		assert.ok(!entries.has(match[1]), `${location}: duplicate key ${match[1]}`)
+		entry = { value: (match[2] ?? '').replace(/\s+#.*$/, '').trim(), lines: [] }
+		entries.set(match[1], entry)
+	}
+	return entries
+}
+
+function composePath(value, location) {
+	const match = /^(?:([A-Za-z0-9._/-]+)|'([A-Za-z0-9._/-]+)'|"([A-Za-z0-9._/-]+)")$/.exec(value)
+	assert.ok(match, `${location}: expected a literal path without interpolation or YAML escapes`)
+	return posix.normalize(match[1] ?? match[2] ?? match[3])
+}
+
+function rootContextDockerfiles(read = readRepoFile) {
+	const files = new Set()
+	const builds = new Map()
+	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
+		const top = composeEntries(read(name).split('\n'), 0, name)
+		assert.ok(!top.has('include'), `${name}: included Compose files must be checked explicitly`)
+		const services = top.get('services')
+		assert.ok(services && services.value === '', `${name}: services must be a block mapping`)
+		for (const [service, declaration] of composeEntries(services.lines, 2, `${name} services`)) {
+			const location = `${name} service ${service}`
+			assert.equal(declaration.value, '', `${location}: service must be a block mapping`)
+			const fields = composeEntries(declaration.lines, 4, location)
+			assert.ok(!fields.has('extends'), `${location}: extended services must be checked explicitly`)
+			const build = fields.get('build')
+			if (!build) continue
+			const declared = build.value === '' ? composeEntries(build.lines, 6, `${location} build`)
+				: new Map([['context', { value: build.value }]])
+			// Compose merges build mappings by service: a rollback context can
+			// change while its Dockerfile stays inherited from the base file.
+			const options = new Map([...(builds.get(service) ?? []), ...declared])
+			builds.set(service, options)
+			assert.ok(!options.has('dockerfile_inline'), `${location}: inline Dockerfiles are not supported by this check`)
+			const context = composePath(options.get('context')?.value || '.', `${location} context`)
+			if (context.replace(/\/$/, '') !== '.') continue
+			const dockerfile = composePath(options.get('dockerfile')?.value || 'Dockerfile', `${location} dockerfile`)
+			assert.ok(!posix.isAbsolute(dockerfile) && dockerfile !== '..' && !dockerfile.startsWith('../'),
+				`${location}: Dockerfile must be inside the repository`)
+			files.add(dockerfile)
+		}
+	}
+	assert.ok(files.size > 0, 'Compose must declare at least one repository-root build context')
+	return files
+}
+
+test('Compose build contexts include equivalent root paths and inherited Dockerfiles', QUICK, () => {
+	for (const context of ['.', './', 'nested/../', "'.'", '"./"']) {
+		const base = `services:
+  app:
+    build: .
+  database:
+    build:
+      context: nested
+      dockerfile: Dockerfile.database
+`
+		const rollback = `services:
+  database:
+    build:
+      context: ${context}
+`
+		const read = (name) => name === 'docker-compose.yml' ? base : rollback
+		assert.deepEqual([...rootContextDockerfiles(read)], ['Dockerfile', 'Dockerfile.database'],
+			`rollback context ${context} must retain its inherited Dockerfile`)
+	}
+})
+
 // The rule for leaving the top-level directory `dir` out of the Docker build
 // context, checked as written and failing closed:
-// - no Dockerfile.dockerignore exists (Docker reads it in place of
-//   .dockerignore);
+// - for each repository-root build in docker-compose.yml and
+//   docker-compose.rollback.yml, no <dockerfile>.dockerignore exists (Docker
+//   reads it in place of .dockerignore); omitted dockerfile means Dockerfile
+//   unless inherited by the merged rollback build mapping;
 // - .dockerignore holds only printable ASCII, tabs and line breaks, a
 //   byte-order mark at the very start aside;
 // - a trimmed line is exactly `dir`, `/dir`, `./dir`, `dir/`, `/dir/` or
@@ -614,8 +701,11 @@ function commandsReachedBy(run, scripts) {
 // `dir` out. A `*` in a later segment of a `!` pattern is not looked at:
 // the path it matches still starts with the first segment's name.
 function assertContextLeavesOut(dir) {
-	assert.equal(existsSync(new URL('../../Dockerfile.dockerignore', import.meta.url)), false,
-		'there may be no Dockerfile.dockerignore, which Docker reads in place of .dockerignore')
+	for (const dockerfile of rootContextDockerfiles()) {
+		const override = `${dockerfile}.dockerignore`
+		assert.equal(existsSync(new URL(`../../${override}`, import.meta.url)), false,
+			`there may be no ${override}, which Docker reads in place of .dockerignore`)
+	}
 	const read = readRepoFile('.dockerignore')
 	const text = read.charCodeAt(0) === 0xfeff ? read.slice(1) : read
 	const odd = /[^\t\r\n -~]/.exec(text)
