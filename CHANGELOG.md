@@ -181,6 +181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The unit suite no longer leaves lock fixtures in the temp directory.** Four of the build lock's tests each made a `srd-lock-*` directory and never removed it, so every `npm run test:unit` added four, one still holding a lock file. Each test now removes its directory when it ends, pass or fail, and a last test fails if one of those directories is still there.
 
+- **The Docker build test rejects COPY flags that it cannot model.** In the build stage and its parent stages, only `--chown`, `--chmod`, `--from` and `--link` are accepted; flags such as `--parents` cannot silently change the file placement the test checks.
+
 - **The Docker build test rejects parser directives it cannot model.** Comment lines declaring `syntax`, `escape` or `check` now fail the test, including mixed-case keys and whitespace around `=`.
 
 - **A Docker build no longer ships the e2e harness's per-run builds as context.** `.dockerignore` left out `build/` but not `build-runs/`, where each local e2e run keeps its build until the run ends, so a `docker build` started during a run, or while a build the harness could not remove or had not yet swept was left there, sent those builds to the daemon and copied them into the build stage next to the source. `build-runs` is now ignored, and the build pin test fails if that line goes.

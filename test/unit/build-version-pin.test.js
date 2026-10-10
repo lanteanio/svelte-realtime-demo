@@ -806,6 +806,12 @@ test('the image is built by npm run build, and takes only that build from the bu
 		return stages
 	}
 	const buildLineage = stagesUpFrom(build).flatMap((stage) => stage.instructions)
+	// These flags preserve the source-to-destination placement read below.
+	// --from is checked separately when the source files are inspected.
+	const unknownCopyFlags = buildLineage.filter((instruction) => instruction.keyword === 'COPY'
+		&& instruction.flags.some((flag) => !/^(?:--(?:chown|chmod|from)=\S+|--link(?:=(?:true|false))?)$/.test(flag)))
+	assert.deepEqual(unknownCopyFlags.map(spelled), [],
+		'COPY in the build stage lineage may use only --chown=, --chmod=, --from= and --link (optionally =true or =false); other flags are not modelled')
 	const repoFile = (path) => {
 		try {
 			return statSync(new URL(`../../${path}`, import.meta.url)).isFile()
