@@ -181,6 +181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The unit suite no longer leaves lock fixtures in the temp directory.** Four of the build lock's tests each made a `srd-lock-*` directory and never removed it, so every `npm run test:unit` added four, one still holding a lock file. Each test now removes its directory when it ends, pass or fail, and a last test fails if one of those directories is still there.
 
+- **The adapter-output config test supplies the build command's process inputs.** Its probe sets the Vite entry path, empty Node options and npm build lifecycle event before loading the config, and defaults `NODE_ENV` only when empty or unset. Config branches on those inputs are now checked against the output directory read by the build check.
+
 - **The Docker build test rejects COPY flags that it cannot model.** In the build stage and its parent stages, only `--chown`, `--chmod`, `--from` and `--link` are accepted; flags such as `--parents` cannot silently change the file placement the test checks.
 
 - **The Docker build test rejects parser directives it cannot model.** Comment lines declaring `syntax`, `escape` or `check` now fail the test, including mixed-case keys and whitespace around `=`.

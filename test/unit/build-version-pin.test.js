@@ -225,9 +225,10 @@ function buildLock() {
 // globalThis.__sveltekit_<SRD_TEST_CLIENT_HASH>. The server hash is pinned1
 // when unset and the client hash the server's; SRD_TEST_NO_OUTPUT=1 writes
 // neither half. Every fs.readdirSync and fs.readFileSync call in the build's
-// process is recorded with the path it read, relative to the build's working
-// directory whether the call gave it relative or absolute, and whether the
-// lock is held at that moment.
+// process is recorded with its path passed through path.resolve and then
+// path.relative from the build working directory, and whether the lock is
+// held at that moment. Windows namespaced and UNC paths are not mapped to
+// equivalent drive-letter paths.
 // Every other launcher child_process exports is replaced by name, and so is
 // ChildProcess.prototype.spawn, which exec, execFile and fork end in and a
 // hand-made ChildProcess calls directly. Each of those records a launch and
@@ -609,7 +610,8 @@ function commandsReachedBy(run, scripts) {
 // as `[`, `^`, `?` or a backslash keep a meaning of their own, and Docker
 // and this reader trim characters outside ASCII differently. None of that is
 // modelled here, so a `!` line holding such a character, or any line holding
-// a character outside ASCII, fails even where Docker would still leave `dir` out. A `*` in a later segment of a `!` pattern is not looked at:
+// a character outside ASCII, fails even where Docker would still leave
+// `dir` out. A `*` in a later segment of a `!` pattern is not looked at:
 // the path it matches still starts with the first segment's name.
 function assertContextLeavesOut(dir) {
 	assert.equal(existsSync(new URL('../../Dockerfile.dockerignore', import.meta.url)), false,
@@ -1019,11 +1021,14 @@ test('the build check reads the build output while the build lock is held', QUIC
 	// A build waiting on the lock clears and rewrites the same output directory
 	// once it holds it, so a check made after the release can read that build's
 	// files. What is checked: the check listed both halves and read a file in
-	// each, and every directory listing and file read under build/ in the run
-	// happened while the lock file held the build's pid. Not looked at: reads
-	// made through anything but fs.readdirSync and fs.readFileSync on a path
+	// each, and every recorded path equal to build or starting with build/
+	// (or build followed by a backslash) after path.resolve and path.relative
+	// from the run's working directory was read while the lock file held the
+	// build's pid. Not looked at: reads made through anything but
+	// fs.readdirSync and fs.readFileSync on a path
 	// (a file descriptor, another fs function), and a path spelled in other
-	// letter case on a file system that ignores case.
+	// letter case on a file system that ignores case. Namespaced and UNC paths
+	// that remain absolute after path.relative do not enter the build/ filter.
 	const run = runBuildScript({})
 	assert.equal(run.status, 0, `build script failed: ${run.stderr}`)
 	const pathOf = (read) => read.readdir ?? read.readFile
@@ -1100,7 +1105,10 @@ test('a version hash spelled like one of kit\'s other names still counts as a ha
 // The `out` the adapter kit will use takes from svelte.config.js, evaluated in
 // a child process under the environment a build gives vite for `env`
 // (buildEnvironment over the parent's environment with BUILD_OUT_DIR removed,
-// NODE_ENV=production, 'build' as the second argument), with
+// NODE_ENV defaulted to production when empty or unset, npm_lifecycle_event
+// set to build). Before importing the config, the probe sets argv to node,
+// the vite.js path and build, and clears execArgv, as scripts/vite-build.mjs
+// launches node without options. It still uses an import hook, with
 // svelte-adapter-uws resolved to a stub that reads `out` when it is called and
 // defaults it as the real adapter does. The real adapter keeps it to itself.
 function adapterOutUnder(env) {
@@ -1116,10 +1124,14 @@ function adapterOutUnder(env) {
 		writeFileSync(register, `import { register } from 'node:module'\nregister(${JSON.stringify(pathToFileURL(hooks).href)})\n`)
 		const parentEnv = { ...process.env }
 		delete parentEnv.BUILD_OUT_DIR
-		const probe = 'const config = (await import(process.argv[1])).default\n'
+		const probe = `process.argv = [process.execPath, ${JSON.stringify(fileURLToPath(new URL('../../node_modules/vite/bin/vite.js', import.meta.url)))}, 'build']\n`
+			+ 'process.execArgv.length = 0\n'
+			+ `const config = (await import(${JSON.stringify(configHref)})).default\n`
 			+ 'console.log(JSON.stringify({ stub: config.kit.adapter?.name === \'stub-adapter\', out: config.kit.adapter?.out ?? null }))'
-		const result = spawnSync(process.execPath, ['--import', pathToFileURL(register).href, '--input-type=module', '-e', probe, configHref, 'build'], {
-			env: { ...buildEnvironment({ ...parentEnv, ...env }), NODE_ENV: 'production' },
+		const childEnv = buildEnvironment({ ...parentEnv, ...env, npm_lifecycle_event: 'build' })
+		childEnv.NODE_ENV ||= 'production'
+		const result = spawnSync(process.execPath, ['--import', pathToFileURL(register).href, '--input-type=module', '-e', probe], {
+			env: childEnv,
 			encoding: 'utf8',
 			timeout: 20_000
 		})
@@ -1136,13 +1148,14 @@ test('svelte.config.js hands the adapter the directory buildOutDir names', QUICK
 	// The check is only worth anything on the directory the adapter wrote.
 	// What is checked: with BUILD_OUT_DIR unset, empty and set, the config,
 	// evaluated as adapterOutUnder describes, calls the adapter kit then uses
-	// with an `out` equal to what buildOutDir names for the same environment.
+	// with an `out`, or the adapter's default when omitted, equal to what
+	// buildOutDir names for the same environment.
 	// A config that computes the same directory without buildOutDir passes.
 	// Not looked at: options given to sveltekit() in vite.config.js, which
 	// replace svelte.config.js; anything else a real build sets that the
-	// config could read (the vite config, its mode); and a config importing a
-	// named export of svelte-adapter-uws, which the stub does not have (the
-	// test then fails on the import).
+	// config could read (other npm variables or the importer's identity); and
+	// a config importing a named export of svelte-adapter-uws, which the stub
+	// does not have (the test then fails on the import).
 	for (const env of [{}, { BUILD_OUT_DIR: '' }, { BUILD_OUT_DIR: join('build-runs', 'x') }]) {
 		assert.equal(adapterOutUnder(env), buildOutDir(env), `under ${JSON.stringify(env)} the adapter must write where the check reads`)
 	}

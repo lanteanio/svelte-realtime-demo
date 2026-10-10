@@ -73,11 +73,11 @@ function hashesUnder(dir, pattern) {
  * of its own. A vite dev server takes no lock either and writes it when it
  * starts and when it restarts (as it does on an edit to svelte.config.js, the
  * vite config or .env), each time under a fresh version. While it runs, its
- * syncs write the file only when the text differs
- * from what that process last wrote, which is once app.html has changed, the
- * server or universal hooks file has been created, deleted or renamed, or the
- * service worker has come or gone. Edits to the contents of the hooks, the
- * service worker or error.html leave the text as it was and make no write.
+ * syncs write the file only when the text differs from what that process
+ * last wrote, which is once app.html has changed, the server or universal
+ * hooks file has been created, deleted or renamed, or the service worker
+ * has come or gone. Edits to the contents of the hooks, the service worker
+ * or error.html leave the text as it was and make no write.
  *
  * The hashes are read as kit spells them in the built files:
  * `version_hash: "<hash>"` in the server, `__sveltekit_<hash>` in the client.
