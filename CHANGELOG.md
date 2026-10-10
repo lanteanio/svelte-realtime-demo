@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Board rename tests locate the labelled editor independently of its responsive width.
+
 - JavaScript syntax checks skip retained local worktrees while continuing to validate nested application source directories.
 
 - Project checks include generated environment declarations and preserve type coverage for session identity and serialized maintenance sampling.

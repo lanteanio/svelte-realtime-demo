@@ -193,7 +193,7 @@ test.describe('/board/[slug]', () => {
 
 			const renamed = `Renamed realtime ${Date.now()}`
 			await a.locator('h1').dblclick()
-			const titleInput = a.locator('input.input-sm.w-36, input.input-sm.sm\\:w-48').first()
+			const titleInput = a.getByRole('textbox', { name: 'Board name', exact: true })
 			await titleInput.fill(renamed)
 			await titleInput.press('Enter')
 			await Promise.all([

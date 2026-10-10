@@ -55,7 +55,7 @@ test.describe('cluster: /board/[slug]', () => {
 
 			const renamed = `Cluster renamed ${Date.now()}`
 			await b.locator('h1').dblclick()
-			const input = b.locator('input.input-sm.w-36, input.input-sm.sm\\:w-48').first()
+			const input = b.getByRole('textbox', { name: 'Board name', exact: true })
 			await input.fill(renamed)
 			await input.press('Enter')
 			await expect(a.locator('h1')).toHaveText(renamed, { timeout: 15_000 })

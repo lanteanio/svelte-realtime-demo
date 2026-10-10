@@ -22,7 +22,7 @@ test.describe.serial('Board Settings', () => {
 		await waitForWS(page);
 		await waitForBoardReady(page);
 		await page.locator('h1').dblclick();
-		await expect(page.locator('input.input.input-sm')).toBeVisible();
+		await expect(page.getByRole('textbox', { name: 'Board name', exact: true })).toBeVisible();
 	});
 
 	test('editing title and pressing Enter saves it', async ({ page }) => {
@@ -31,7 +31,7 @@ test.describe.serial('Board Settings', () => {
 		await waitForBoardReady(page);
 		await page.locator('h1').dblclick();
 
-		const input = page.locator('input.input.input-sm');
+		const input = page.getByRole('textbox', { name: 'Board name', exact: true });
 		await input.fill('Renamed Board');
 		await input.press('Enter');
 		await page.waitForTimeout(1500);
