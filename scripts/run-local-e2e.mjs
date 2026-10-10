@@ -12,6 +12,12 @@ if (!TIERS.has(tier)) {
 	process.exit(2)
 }
 
+const clusterReplicas = process.env.E2E_CLUSTER_REPLICAS ?? '2'
+if (!['2', '4'].includes(clusterReplicas)) {
+	console.error('E2E_CLUSTER_REPLICAS must be 2 or 4')
+	process.exit(2)
+}
+
 const suffix = `${process.pid}-${Date.now()}`
 const postgresName = `srd-test-postgres-${suffix}`
 const redisName = `srd-test-redis-${suffix}`
@@ -89,11 +95,14 @@ try {
 			await resetState()
 
 			const targetPort = await freePort()
-			let instanceB
+			const replicaPorts = [targetPort]
 			await startApp(targetPort)
 			if (project === 'cluster') {
-				instanceB = await freePort()
-				await startApp(instanceB)
+				for (let i = 1; i < Number(clusterReplicas); i++) {
+					const port = await freePort()
+					replicaPorts.push(port)
+					await startApp(port)
+				}
 			}
 
 			await waitForCronWarmup()
@@ -101,7 +110,10 @@ try {
 			const env = {
 				...commonEnvironment(),
 				BASE_URL: `http://127.0.0.1:${targetPort}`,
-				...(instanceB ? { INSTANCE_B: `http://127.0.0.1:${instanceB}` } : {}),
+				// Override ambient targets even when this tier owns fewer replicas.
+				...Object.fromEntries(['INSTANCE_B', 'INSTANCE_C', 'INSTANCE_D'].map((name, i) => [
+					name, replicaPorts[i + 1] ? `http://127.0.0.1:${replicaPorts[i + 1]}` : ''
+				])),
 				...(project === 'resilience' ? { LOCAL_E2E_RESILIENCE: '1' } : {}),
 				// The named destroyer and complete commands are themselves the
 				// explicit authorization. Direct run-e2e calls retain their guard.

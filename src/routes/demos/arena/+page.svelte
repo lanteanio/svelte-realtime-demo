@@ -296,7 +296,7 @@
 					<g transform="translate({VIEW_W - MAP_W - 10}, 10)" data-testid="arena-minimap">
 						<rect width={MAP_W} height={MAP_H} rx="3" class="fill-base-100/80 stroke-base-content/30" />
 						{#each [...view.remote] as [key, s] (key)}
-							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={remoteKind(s.npc).dot} data-testid="arena-minimap-entity" data-kind={remoteKind(s.npc).id} />
+							<circle cx={mapX(s.x)} cy={mapY(s.y)} r="1.5" class={remoteKind(s.npc).dot} data-testid="arena-minimap-entity" data-key={key} data-kind={remoteKind(s.npc).id} />
 						{/each}
 						<!-- The camera's interest circle, at world scale. This is the
 						     same 420-unit boundary the scene draws as arena-cull-ring,

@@ -281,6 +281,8 @@ npm run test:e2e:destroyer
 npm run test:all
 ```
 
+Set `E2E_CLUSTER_REPLICAS=4` when running the cluster tier to start four isolated app processes (the default is two). The arena four-replica spec checks explicit interest-exit removals and re-entry on each process, using distinct loopback origins. It also checks that the received set stays bounded after panning. This exercises the shared Redis authority and relay topology; it does not emulate Linux SO_REUSEPORT socket distribution.
+
 The normal target is always a dynamically allocated loopback port. Assertion-free `_*.spec.js` probes run only in the explicit diagnostics project. To point a low-level Playwright command at a remote test environment, set both `BASE_URL` and `ALLOW_REMOTE_E2E=1`; without that opt-in the configuration refuses any non-loopback host. Never enable the opt-in for production.
 
 ---
