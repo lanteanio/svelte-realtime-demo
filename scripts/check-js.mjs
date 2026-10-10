@@ -24,7 +24,8 @@ console.log(`JavaScript syntax: ${files.length} files checked`)
 async function collect(dir) {
 	for (const entry of await readdir(dir, { withFileTypes: true })) {
 		if (entry.isDirectory()) {
-			if (!SKIP.has(entry.name)) await collect(join(dir, entry.name))
+			const localArtifacts = dir === ROOT && entry.name === 'source'
+			if (!localArtifacts && !SKIP.has(entry.name)) await collect(join(dir, entry.name))
 		} else if (entry.isFile() && /\.(?:js|mjs|cjs)$/.test(entry.name)) {
 			files.push(join(dir, entry.name))
 		}

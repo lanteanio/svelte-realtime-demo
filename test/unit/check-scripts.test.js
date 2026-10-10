@@ -47,6 +47,15 @@ test('the syntax check does not read the harness\'s per-run build directories', 
 	assert.match(checked.output, /JavaScript syntax check failed: src[\\/]srd-build-1[\\/]server[\\/]chunk\.js/)
 })
 
+test('the syntax check excludes root scratch files while checking nested application source', { timeout: 60_000 }, () => {
+	const skipped = runCopyOf('check-js.mjs', { 'src/ok.js': 'export const ok = 1\n', 'source/retained/server.js': BROKEN })
+	assert.equal(skipped.status, 0, skipped.output)
+	assert.match(skipped.output, /JavaScript syntax: 2 files checked/)
+	const checked = runCopyOf('check-js.mjs', { 'src/source/retained/server.js': BROKEN })
+	assert.notEqual(checked.status, 0, checked.output)
+	assert.match(checked.output, /JavaScript syntax check failed: src[\\/]source[\\/]retained[\\/]server\.js/)
+})
+
 test('the cron registration check reads a checkout whose path needs percent-encoding in a URL', { timeout: 60_000 }, () => {
 	// What is checked: in such a checkout, with a live.cron() under src/live/
 	// and a file without one both inside src/live/ and outside it, the check

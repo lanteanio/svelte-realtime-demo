@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JavaScript syntax checks skip retained local worktrees while continuing to validate nested application source directories.
+
 - Project checks include generated environment declarations and preserve type coverage for session identity and serialized maintenance sampling.
 
 - Board undo errors clear after six seconds; countdown updates stop at expiry and stay outside the live announcement region.
