@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cluster tests cover every configured cron replica and wait for auction push delivery.
+
 - Update the WebSocket adapter to `0.6.0-next.95`, which skips subscription-total checks for incomplete connection snapshots and includes connection counts in mismatch diagnostics.
 
 - Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents.

@@ -8,6 +8,8 @@ const execFileAsync = promisify(execFile)
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
+const INSTANCES = [INSTANCE_A, INSTANCE_B, process.env.INSTANCE_C, process.env.INSTANCE_D]
+	.filter(Boolean).map((origin) => assertSafeE2ETarget(origin).href.replace(/\/$/, ''))
 const DISTINCT_TARGETS = new URL(INSTANCE_A).origin !== new URL(INSTANCE_B).origin
 const REMOTE_TARGET = !['localhost', '127.0.0.1', '[::1]'].includes(new URL(INSTANCE_A).hostname)
 const TICK_CAP = 30
@@ -27,6 +29,26 @@ async function openAt(page, origin) {
 
 async function selfId(page) {
 	return (await page.getByTestId('self-instance-id').textContent())?.trim() ?? ''
+}
+
+async function openReplicas(browser, run) {
+	const contexts = INSTANCES.map((baseURL) => browser.newContext({ baseURL }))
+	const opened = await Promise.allSettled(contexts)
+	try {
+		const failed = opened.find((result) => result.status === 'rejected')
+		if (failed) throw failed.reason
+		const pages = await Promise.all(opened.map(({ value }) => value.newPage()))
+		await Promise.all(pages.map((page, index) => openAt(page, INSTANCES[index])))
+		const ids = await Promise.all(pages.map(selfId))
+		if (DISTINCT_TARGETS) expect(new Set(ids).size, 'each configured origin must serve a distinct replica').toBe(INSTANCES.length)
+		await run(pages, ids)
+	} finally {
+		await Promise.allSettled(opened.filter((result) => result.status === 'fulfilled').map(({ value }) => value.close()))
+	}
+}
+
+async function waitForAllReplicas(pages) {
+	await Promise.all(pages.slice(1).map((page) => waitForConvergence(pages[0], page)))
 }
 
 async function latestLeader(page) {
@@ -109,37 +131,25 @@ async function scrape(request, origin) {
 
 test.describe('cluster: /demos/cluster-cron', () => {
 	test('replicas converge on one leader while retaining distinct self identities', async ({ browser }) => {
-		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
-		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
-		const a = await ctxA.newPage()
-		const b = await ctxB.newPage()
-		try {
-			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
-			await waitForConvergence(a, b)
-
-			const [idA, idB, leaderA, leaderB] = await Promise.all([
-				selfId(a), selfId(b), latestLeader(a), latestLeader(b)
-			])
-			if (DISTINCT_TARGETS) expect(idA).not.toBe(idB)
-			expect(leaderB).toBe(leaderA)
-			if (DISTINCT_TARGETS) expect([idA, idB]).toContain(leaderA)
-			await expect(a.getByTestId('current-leader-id')).toHaveText(`${leaderA.slice(0, 8)}...`)
-			await expect(b.getByTestId('current-leader-id')).toHaveText(`${leaderA.slice(0, 8)}...`)
-			await expect(a.getByTestId('instance-leader-badge')).toHaveCount(1)
-			await expect(b.getByTestId('instance-leader-badge')).toHaveCount(1)
-
-			if (DISTINCT_TARGETS) {
-				const statuses = await Promise.all([
-					a.getByTestId('self-leader-status').textContent(),
-					b.getByTestId('self-leader-status').textContent()
-				])
-				expect(statuses.filter((status) => status?.trim() === 'leader')).toHaveLength(1)
-				const follower = leaderA === idA ? b : a
-				await expect(follower.getByTestId('cluster-cron-instance-row')).toHaveCount(2)
+		await openReplicas(browser, async (pages, ids) => {
+			await waitForAllReplicas(pages)
+			const leader = await latestLeader(pages[0])
+			if (DISTINCT_TARGETS) expect(ids).toContain(leader)
+			for (const [index, page] of pages.entries()) {
+				await expect(page.getByTestId('current-leader-id')).toHaveText(`${leader.slice(0, 8)}...`)
+				await expect(page.getByTestId('instance-leader-badge')).toHaveCount(1)
+				if (DISTINCT_TARGETS) {
+					await expect(page.getByTestId('self-leader-status')).toHaveText(ids[index] === leader ? 'leader' : 'follower')
+					const displayedIds = page.getByTestId('cluster-cron-instance-row').locator('span.font-mono')
+					const shortId = (id) => `${id.slice(0, 8)}...`
+					await expect.poll(() => displayedIds.allTextContents()).toEqual(
+						expect.arrayContaining([...new Set([ids[index], leader])].map(shortId))
+					)
+					const knownIds = ids.map(shortId)
+					for (const displayed of await displayedIds.allTextContents()) expect(knownIds).toContain(displayed)
+				}
 			}
-		} finally {
-			await Promise.allSettled([ctxA.close(), ctxB.close()])
-		}
+		})
 	})
 
 	test('global sequence advances at one cron per second and fans out continuously to both replicas', async ({ browser }) => {
@@ -178,27 +188,20 @@ test.describe('cluster: /demos/cluster-cron', () => {
 		}
 	})
 
-	test('a leader change after mount moves the badge on both replicas', async ({ browser }) => {
+	test('a leader change after mount moves the badge across all replicas', async ({ browser }) => {
 		test.skip(!LOCAL_PROVISIONER, 'forcing a re-election needs the provisioned local Redis')
 		test.skip(!DISTINCT_TARGETS, 'a takeover needs two distinct replicas')
 		test.setTimeout(200_000)
 
-		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
-		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
-		const a = await ctxA.newPage()
-		const b = await ctxB.newPage()
-		try {
-			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
-			await waitForConvergence(a, b)
-
-			const [idA, idB] = await Promise.all([selfId(a), selfId(b)])
-			expect(idA).not.toBe(idB)
+		await openReplicas(browser, async (pages, ids) => {
+			const a = pages[0]
+			await waitForAllReplicas(pages)
 			const leaderBefore = await latestLeader(a)
-			expect([idA, idB]).toContain(leaderBefore)
+			expect(ids).toContain(leaderBefore)
 
-			// Both pages have been mounted and have answered once. Whatever the
+			// All pages have been mounted and have answered once. Whatever the
 			// badge says from here on is a post-mount claim.
-			const before = await Promise.all([statusOf(a), statusOf(b)])
+			const before = await Promise.all(pages.map(statusOf))
 			expect(before.filter((status) => status === 'leader')).toHaveLength(1)
 
 			const leaseKey = (await a.getByTestId('lease-key').textContent())?.trim().replace(/^'|'$/g, '') ?? ''
@@ -220,56 +223,48 @@ test.describe('cluster: /demos/cluster-cron', () => {
 				leaderAfter = await latestLeader(a)
 			}
 			expect(leaderAfter, 'no replica took the lease over after five expiries').not.toBe(leaderBefore)
-			expect([idA, idB]).toContain(leaderAfter)
+			expect(ids).toContain(leaderAfter)
 
-			await waitForConvergence(a, b)
+			await waitForAllReplicas(pages)
 
 			// The assertion this test exists for. A mount-time snapshot keeps
-			// both pages on their boot answer forever, so the page that was
+			// every page on its boot answer forever, so the page that was
 			// elected at mount would still claim the lease it just lost.
-			const demoted = leaderBefore === idA ? a : b
-			const promoted = leaderBefore === idA ? b : a
+			const demoted = pages[ids.indexOf(leaderBefore)]
+			const promoted = pages[ids.indexOf(leaderAfter)]
 			await expect(demoted.getByTestId('self-leader-status')).toHaveText('follower', { timeout: 15_000 })
 			await expect(promoted.getByTestId('self-leader-status')).toHaveText('leader', { timeout: 15_000 })
 
-			// The rest of the panel has to agree, on both replicas.
-			for (const page of [a, b]) {
+			// The rest of the panel has to agree on every replica.
+			for (const [index, page] of pages.entries()) {
 				await expect(page.getByTestId('current-leader-id')).toHaveText(`${leaderAfter.slice(0, 8)}...`)
 				await expect(page.getByTestId('instance-leader-badge')).toHaveCount(1)
+				await expect(page.getByTestId('self-leader-status')).toHaveText(ids[index] === leaderAfter ? 'leader' : 'follower')
 			}
 			await expect(promoted.getByTestId('current-leader-self')).toBeVisible()
 			await expect(demoted.getByTestId('current-leader-self')).toHaveCount(0)
-		} finally {
-			await Promise.allSettled([ctxA.close(), ctxB.close()])
-		}
+		})
 	})
 
 	test('per-replica metrics prove one successful cron and follower skips', async ({ request }) => {
-		const [scrapeA, scrapeB] = await Promise.all([
-			scrape(request, INSTANCE_A),
-			scrape(request, INSTANCE_B)
-		])
-		if (REMOTE_TARGET && [scrapeA.status, scrapeB.status].includes(401)) {
+		const results = await Promise.all(INSTANCES.map((origin) => scrape(request, origin)))
+		if (REMOTE_TARGET && results.some(({ status }) => status === 401)) {
 			test.skip(true, 'remote per-replica metrics require the deployment-specific METRICS_SCRAPE_TOKEN')
 		}
-		expect(scrapeA.status).toBe(200)
-		expect(scrapeB.status).toBe(200)
-		const bodyA = scrapeA.body
-		const bodyB = scrapeB.body
-		for (const body of [bodyA, bodyB]) {
+		for (const { status, body } of results) {
+			expect(status).toBe(200)
 			expect(body).toMatch(/^# (HELP|TYPE) leader_acquired_total\b/m)
 			expect(body).toMatch(/^# (HELP|TYPE) leader_renewals_total\b/m)
 			expect(body).toMatch(/^# (HELP|TYPE) svelte_realtime_cron_total\b/m)
 		}
-		expect(metricSum(bodyA, 'leader_acquired_total') + metricSum(bodyB, 'leader_acquired_total')).toBeGreaterThan(0)
+		const sum = (name, labels) => results.reduce((total, { body }) => total + metricSum(body, name, labels), 0)
+		expect(sum('leader_acquired_total')).toBeGreaterThan(0)
 		expect(
-			metricSum(bodyA, 'svelte_realtime_cron_total', (labels) => labels.includes('status="ok"')) +
-			metricSum(bodyB, 'svelte_realtime_cron_total', (labels) => labels.includes('status="ok"'))
+			sum('svelte_realtime_cron_total', (labels) => labels.includes('status="ok"'))
 		).toBeGreaterThan(0)
 		if (DISTINCT_TARGETS) {
 			expect(
-				metricSum(bodyA, 'svelte_realtime_cron_total', (labels) => labels.includes('status="not-leader"')) +
-				metricSum(bodyB, 'svelte_realtime_cron_total', (labels) => labels.includes('status="not-leader"'))
+				sum('svelte_realtime_cron_total', (labels) => labels.includes('status="not-leader"'))
 			).toBeGreaterThan(0)
 		}
 	})

@@ -256,11 +256,10 @@ test.describe('cluster bugs: presence + push', () => {
 
 			// Pre-fix bug: only the same-replica bidder sees the card; the
 			// other-replica bidder never receives the push.
-			const baVisible = await baCard.isVisible({ timeout: 8_000 }).catch(() => false)
-			const bbVisible = await bbCard.isVisible({ timeout: 8_000 }).catch(() => false)
-			console.log(`[PUSH] sameReplica=${baVisible} otherReplica=${bbVisible}`)
-			expect(baVisible, 'bidder on same replica as seller should see push').toBe(true)
-			expect(bbVisible, 'bidder on other replica should also see push').toBe(true)
+			await Promise.all([
+				expect(baCard, 'bidder on same replica as seller should see push').toBeVisible({ timeout: 8_000 }),
+				expect(bbCard, 'bidder on other replica should also see push').toBeVisible({ timeout: 8_000 })
+			])
 		} finally {
 			await seller.close()
 			await bidderSameReplica.close()
