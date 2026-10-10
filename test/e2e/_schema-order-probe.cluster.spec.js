@@ -26,9 +26,9 @@
  *
  * So this captures the frames rather than the outcome. Assertion-free by
  * design: it measures, it does not gate, and it stays off unless asked for
- * because the cluster project matches every *.cluster.spec.js.
+ * in the diagnostics project.
  *
- *   SCHEMA_ORDER_PROBE=1 node scripts/run-local-e2e.mjs cluster _schema-order-probe
+ *   SCHEMA_ORDER_PROBE=1 node scripts/run-local-e2e.mjs diagnostics _schema-order-probe
  */
 
 import { test } from '@playwright/test'

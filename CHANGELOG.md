@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI runs the functional cluster tier on four replicas for pushes and pull requests, with failed-test artifacts retained for 14 days. Diagnostic probes stay opt-in and receive separate replica targets from the local harness.
+
 - The README covers host sampling: bounded windows, traffic comparisons, recurring access checks and an external readiness check.
 - The README has a runbook for a host maintenance restart, covering outage approval, what must be recoverable first, and kernel, container, TLS and WebSocket checks afterwards.
 

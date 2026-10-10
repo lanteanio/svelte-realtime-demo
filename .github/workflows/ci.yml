@@ -25,3 +25,28 @@ jobs:
       - run: npm run check:deps
       - run: npx playwright install --with-deps chromium
       - run: npm test
+
+  cluster:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      E2E_CLUSTER_REPLICAS: '4'
+      PLAYWRIGHT_HTML_OPEN: never
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:cluster -- --reporter=line,html
+      - uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: cluster-failure-evidence
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 14
+          if-no-files-found: ignore

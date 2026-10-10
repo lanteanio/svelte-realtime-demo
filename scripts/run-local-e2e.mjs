@@ -3,6 +3,7 @@ import { readdir, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { selectOrphans } from './orphan-sweep.mjs'
+import { startProjectReplicas } from './e2e-topology.mjs'
 
 const tier = process.argv[2]
 const playwrightArgs = process.argv.slice(3)
@@ -94,26 +95,13 @@ try {
 			await stopApps()
 			await resetState()
 
-			const targetPort = await freePort()
-			const replicaPorts = [targetPort]
-			await startApp(targetPort)
-			if (project === 'cluster') {
-				for (let i = 1; i < Number(clusterReplicas); i++) {
-					const port = await freePort()
-					replicaPorts.push(port)
-					await startApp(port)
-				}
-			}
+			const targets = await startProjectReplicas(project, Number(clusterReplicas), { freePort, startApp })
 
 			await waitForCronWarmup()
 
 			const env = {
 				...commonEnvironment(),
-				BASE_URL: `http://127.0.0.1:${targetPort}`,
-				// Override ambient targets even when this tier owns fewer replicas.
-				...Object.fromEntries(['INSTANCE_B', 'INSTANCE_C', 'INSTANCE_D'].map((name, i) => [
-					name, replicaPorts[i + 1] ? `http://127.0.0.1:${replicaPorts[i + 1]}` : ''
-				])),
+				...targets,
 				...(project === 'resilience' ? { LOCAL_E2E_RESILIENCE: '1' } : {}),
 				// The named destroyer and complete commands are themselves the
 				// explicit authorization. Direct run-e2e calls retain their guard.

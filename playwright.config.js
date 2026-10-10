@@ -30,7 +30,7 @@ const BASE_URL = resolveE2EBaseURL(process.env);
 // - `isolated`: workers=1, runs only the tests that assert they are alone.
 // - resilience/cluster/stress/destroyer/diagnostics: opt-in projects exposed
 //   by the local tier runner. They are not registered during a default
-//   `playwright test`, which keeps expensive and assertion-free probes out
+//   `playwright test`, which keeps expensive tests and diagnostic probes out
 //   of the everyday pass count.
 //
 // `npm run test:e2e:safe` provisions dependencies and runs both core
@@ -82,6 +82,7 @@ if (optionalProject === 'resilience') {
 		name: 'cluster',
 		workers: 1,
 		retries: 0,
+		testIgnore: ['**/_*.spec.js'],
 		testMatch: [
 			'**/*.cluster.spec.js',
 			'**/cluster-probe.spec.js',
