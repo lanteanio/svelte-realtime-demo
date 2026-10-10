@@ -382,9 +382,9 @@ function onlySpawn(run) {
 // nothing put in between, so a word split across two lines is one word.
 // Comment and blank lines are skipped, inside a continuation too. Keywords
 // come back upper-cased, the leading `--flag` options split off from the
-// rest, and whitespace collapsed. Heredocs and an `# escape=` directive are
-// not modelled; the Dockerfile test refuses both (HEREDOC_WORD,
-// ESCAPE_DIRECTIVE).
+// rest, and whitespace collapsed. Heredocs and parser directives are not
+// modelled; the Dockerfile test refuses both (HEREDOC_WORD,
+// PARSER_DIRECTIVE).
 function dockerInstructions(text) {
 	const instructions = []
 	let pending = null
@@ -504,9 +504,11 @@ const HEREDOC_WORD = /^\d*<<-?\s*[^<\s]/
 // The node options the build script may carry, each one word.
 const BUILD_NODE_OPTIONS = /^(?:--(?:max-old-space-size|max-semi-space-size|stack-size)=\d+|--enable-source-maps|--title=[\w.-]+|--(?:no|trace)-warnings|--(?:no|trace|throw|pending)-deprecation|--unhandled-rejections=[\w-]+|--disable-warning=[\w-]+)$/
 
-// A parser directive that changes the escape character, which would change
-// what continues a line.
-const ESCAPE_DIRECTIVE = /^\s*#\s*escape\s*=/im
+// Recognised parser-directive spellings, with case-insensitive keys and
+// optional whitespace. Refuse these comment lines anywhere, including where
+// Docker would ignore them: another frontend, escape character or lint mode
+// is outside this reader.
+const PARSER_DIRECTIVE = /^[ \t]*#[ \t]*(?:syntax|escape|check)[ \t]*=/im
 
 // The arguments after an instruction's flags: for a COPY or ADD, its sources
 // and then its destination. JSON form when the text is a JSON array of
@@ -717,7 +719,7 @@ test('every build entry point runs scripts/build.mjs: npm run build and the e2e 
 
 test('the image is built by npm run build, and takes only that build from the build stage', QUICK, () => {
 	const dockerfile = readRepoFile('Dockerfile')
-	assert.doesNotMatch(dockerfile, ESCAPE_DIRECTIVE, 'the Dockerfile may not have an `# escape=` line; dockerInstructions reads only the default escape')
+	assert.doesNotMatch(dockerfile, PARSER_DIRECTIVE, 'the Dockerfile may not have a syntax, escape or check parser-directive line; dockerInstructions models none of them')
 	// A SHELL instruction changes what runs every later RUN; NODE_OPTIONS or an
 	// npm_config_* variable can change what npm run build runs; HOME, PREFIX
 	// and DESTDIR move the config files npm reads; and ONBUILD carries any
