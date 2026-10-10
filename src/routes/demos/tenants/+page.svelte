@@ -96,7 +96,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Multi-tenancy: strict per-connection isolation</h1>
+		<h1 class="page-title mt-2">Multi-tenancy: strict per-connection isolation</h1>
 		<p class="text-sm opacity-70 mt-1" data-testid="tn-lede">
 			One scratchpad stream on one literal topic.
 			{#if activeTenant}
@@ -205,7 +205,7 @@
 	<div class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
 			<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-				<h2 class="card-title text-sm">
+				<h2 class="section-title card-title">
 					{activeTenant ? `${tenantLabel(activeTenant)} scratchpad` : 'Public scratchpad'}
 					<span class="text-xs opacity-50 font-normal">last 20 notes, live</span>
 				</h2>

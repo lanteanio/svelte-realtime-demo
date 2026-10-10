@@ -134,7 +134,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Newsroom: cron + windowed aggregate + derived + webhook</h1>
+		<h1 class="page-title mt-2">Newsroom: cron + windowed aggregate + derived + webhook</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Four realtime primitives in one page. A 1Hz <code>live.cron</code> firehose feeds a windowed
 			<code>live.aggregate</code> with three trending slices. A <code>live.derived</code> stats strip
@@ -150,7 +150,7 @@
 			<!-- Each widget names the primitive it demonstrates; without the
 			     tag only the publish form said what it was showing. -->
 			<div class="flex flex-wrap items-baseline gap-x-2">
-				<h2 class="card-title text-sm">Live stats</h2>
+				<h2 class="section-title card-title">Live stats</h2>
 				<span class="badge badge-xs badge-ghost font-mono">live.derived</span>
 			</div>
 			<div class="grid grid-cols-2 @2xl:grid-cols-4 gap-3 text-sm">
@@ -208,7 +208,7 @@
 	</div>
 
 	<div class="flex flex-wrap items-baseline gap-x-2">
-		<h2 class="card-title text-sm">Trending</h2>
+		<h2 class="section-title card-title">Trending</h2>
 		<span class="badge badge-xs badge-ghost font-mono">live.aggregate</span>
 	</div>
 
@@ -222,7 +222,7 @@
 					<!-- gap + wrap so the subtitle drops to its own line instead of
 					     butting into the title at narrow rungs. -->
 					<div class="flex flex-wrap justify-between items-baseline gap-x-2">
-						<h2 class="card-title text-sm">{panel.title}</h2>
+						<h2 class="section-title card-title">{panel.title}</h2>
 						<span class="text-xs opacity-70">{panel.subtitle}</span>
 					</div>
 					<p class="text-[0.65rem] opacity-70">bars relative to this panel's leader</p>
@@ -251,7 +251,7 @@
 	<div class="grid grid-cols-1 @5xl:grid-cols-3 gap-4">
 		<form class="card bg-base-100 border border-base-300 @5xl:col-span-1" onsubmit={handlePublish} data-testid="news-publish-form">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Publish via webhook</h2>
+				<h2 class="section-title card-title">Publish via webhook</h2>
 				<p class="text-xs opacity-60 leading-snug">
 					Server signs the payload, page POSTs it to <code>/api/demos/news/webhook</code>.
 					HMAC verified at the bridge, then published to every subscriber.
@@ -309,7 +309,7 @@
 
 		<div class="card bg-base-100 border border-base-300 @5xl:col-span-2" data-testid="news-stories">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Stories ({sortedStories.length})</h2>
+				<h2 class="section-title card-title">Stories ({sortedStories.length})</h2>
 				{#if sortedStories.length === 0}
 					<p class="opacity-40 text-xs" data-testid="news-stories-empty">No stories yet.</p>
 				{:else}

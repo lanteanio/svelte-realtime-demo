@@ -72,7 +72,7 @@
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Idempotency under a retry storm</h1>
+		<h1 class="page-title mt-2">Idempotency under a retry storm</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Click "Retry x5 (same key)" to fire five rapid RPCs with the same
 			idempotencyKey. Only the first runs the handler; the other four
@@ -119,7 +119,7 @@
 	{#if history.length > 0}
 		<div class="card bg-base-100 border border-base-300">
 			<div class="card-body py-4">
-				<h2 class="card-title text-sm">RPC history (newest first)</h2>
+				<h2 class="section-title card-title">RPC history (newest first)</h2>
 				<ul class="text-xs space-y-1 font-mono" data-testid="checkout-history">
 					<!-- Keyed on content alone. The index used to be part of the key,
 				     so every prepend re-keyed every existing row and the whole

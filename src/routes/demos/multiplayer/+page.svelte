@@ -197,7 +197,7 @@
 
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Multiplayer lounge: one room, every surface</h1>
+		<h1 class="page-title mt-2">Multiplayer lounge: one room, every surface</h1>
 		<p class="text-sm opacity-70 mt-1" data-testid="mp-intro">
 			A single <code>live.multiplayer</code> export with
 			<code>cursors</code>, <code>typing</code>, <code>locks</code>, and
@@ -220,7 +220,7 @@
 	<!-- Presence roster -->
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3">
-			<h2 class="card-title text-sm">In the lounge</h2>
+			<h2 class="section-title card-title">In the lounge</h2>
 			<ul class="flex flex-wrap gap-2 text-xs" data-testid="mp-roster">
 				{#if me}
 					<li class="badge gap-1" style:background={me.color} style:color={labelColorOn(me.color)}>{me.name} (you)</li>
@@ -240,7 +240,7 @@
 	<!-- Shared canvas: cursors + floating reactions -->
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Shared canvas</h2>
+			<h2 class="section-title card-title">Shared canvas</h2>
 			<div
 				class="relative h-72 rounded bg-base-200 border border-base-300 cursor-crosshair overflow-hidden touch-none select-none"
 				onpointermove={onPointerMove}
@@ -293,7 +293,7 @@
 	<!-- Headline: data stream + advisory lock + typing -->
 	<section class="card bg-base-200">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Shared headline (advisory lock on focus)</h2>
+			<h2 class="section-title card-title">Shared headline (advisory lock on focus)</h2>
 			<p class="text-xs opacity-70" data-testid="mp-headline-live-label">Live value - what every visitor sees right now:</p>
 			<p class="text-lg font-semibold" data-testid="mp-headline-display">
 				{headline?.text ?? 'loading...'}

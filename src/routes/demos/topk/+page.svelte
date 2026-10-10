@@ -90,7 +90,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Top-K leaderboards: four windows, one config</h1>
+		<h1 class="page-title mt-2">Top-K leaderboards: four windows, one config</h1>
 		<p class="text-sm opacity-70 mt-1">
 			One firehose, four leaderboards. Sliding (10s and 1min), tumbling (per-minute), and lifetime,
 			all declared in a single <code>live.aggregate(&#123; windows &#125;)</code> block. Crank
@@ -152,7 +152,7 @@
 			<div class="card bg-base-100 border border-base-300" data-testid={panel.testid}>
 				<div class="card-body py-3 space-y-2">
 					<div class="flex justify-between items-baseline">
-						<h2 class="card-title text-sm">{panel.title}</h2>
+						<h2 class="section-title card-title">{panel.title}</h2>
 						<span class="text-xs opacity-50">{panel.subtitle} &middot; bars: share of shown</span>
 					</div>
 					{#if !panel.data?.top?.length}

@@ -354,7 +354,7 @@
 <div class="max-w-4xl mx-auto p-8 flex flex-col gap-4">
 	<header class="order-first">
 
-		<h1 class="text-2xl font-bold mt-2">Auctions: deadline-bounded bid race</h1>
+		<h1 class="page-title mt-2">Auctions: deadline-bounded bid race</h1>
 		<p class="text-sm opacity-70 mt-1">
 			List a lot. The server fans out a <code>live.push</code> to every other
 			tab with the lot's duration as the deadline.
@@ -383,7 +383,7 @@
 	<!-- Inbox: incoming bid-request cards -->
 	<section class="card bg-base-100 border border-base-300" data-testid="inbox-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Inbox ({inbox.length})</h2>
+			<h2 class="section-title card-title">Inbox ({inbox.length})</h2>
 			{#if inbox.length === 0}
 				<p class="opacity-40 text-sm" data-testid="inbox-empty">
 					No bid requests right now. When a seller lists a lot, this is where
@@ -503,7 +503,7 @@
 	<!-- Active lots: live waterfall -->
 	<section class="card bg-base-100 border border-base-300" data-testid="active-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Active lots ({activeList.length})</h2>
+			<h2 class="section-title card-title">Active lots ({activeList.length})</h2>
 			{#if activeList.length === 0}
 				<p class="opacity-40 text-sm" data-testid="active-empty">
 					No lots in flight. List one below to fan out a <code>live.push</code>
@@ -564,7 +564,7 @@
 	<!-- List a Lot form -->
 	<section class="card bg-base-200 {nothingLive ? 'order-first @2xl:order-none' : ''}" data-testid="list-section">
 		<div class="card-body py-3 space-y-3">
-			<h2 class="card-title text-sm">List a lot</h2>
+			<h2 class="section-title card-title">List a lot</h2>
 			<form onsubmit={(e) => { e.preventDefault(); handleList() }} class="space-y-2">
 				<div class="flex flex-wrap gap-2">
 					<label class="flex flex-col gap-1 flex-1 min-w-0 @2xl:min-w-[14rem]">
@@ -644,7 +644,7 @@
 	<!-- Recent results log -->
 	<section class="card bg-base-100 border border-base-300" data-testid="recent-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Recent results ({recentList.length})</h2>
+			<h2 class="section-title card-title">Recent results ({recentList.length})</h2>
 			{#if recentList.length === 0}
 				<p class="opacity-40 text-sm" data-testid="recent-empty">Nothing yet.</p>
 			{:else}

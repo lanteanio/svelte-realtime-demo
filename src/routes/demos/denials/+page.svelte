@@ -124,7 +124,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Subscribe denials with org switcher</h1>
+		<h1 class="page-title mt-2">Subscribe denials with org switcher</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Two organizations, one identity cookie. Each org's audit log
 			lives on its own topic; subscribes from the wrong org return
@@ -189,7 +189,7 @@
 			<div class="card border border-base-300 @2xl:min-h-[20rem]" data-testid="card-{col.slug}">
 				<div class="card-body py-3">
 					<div class="flex justify-between items-baseline">
-						<h2 class="card-title text-sm">{col.label} audit log</h2>
+						<h2 class="section-title card-title">{col.label} audit log</h2>
 						{#if me.org === col.slug}
 							<span class="badge badge-success badge-xs">your org</span>
 						{/if}
@@ -246,7 +246,7 @@
 	{#if recentDenials.length > 0}
 		<div class="card bg-base-100 border border-base-300">
 			<div class="card-body py-3">
-				<h2 class="card-title text-sm">Recent denials <span class="font-normal">(adapter <code>denials</code> Readable)</span></h2>
+				<h2 class="section-title card-title">Recent denials <span class="font-normal">(adapter <code>denials</code> Readable)</span></h2>
 				<ul class="text-xs font-mono space-y-1" data-testid="recent-denials">
 					{#each recentDenials as d, i (i + ':' + d.topic + ':' + d.at)}
 						<li class="flex justify-between gap-3">

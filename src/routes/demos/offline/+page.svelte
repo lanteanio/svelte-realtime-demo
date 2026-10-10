@@ -143,7 +143,7 @@
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Offline queue: post now, sync later</h1>
+		<h1 class="page-title mt-2">Offline queue: post now, sync later</h1>
 		<p class="text-sm opacity-70 mt-1">
 			A guestbook whose posts survive losing the network. With
 			<code>offline: &#123; queue: true, persist: true &#125;</code>,
@@ -267,7 +267,7 @@
 	<!-- Entries -->
 	<section class="card bg-base-100 border border-base-300 min-h-[16rem]">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">
+			<h2 class="section-title card-title">
 				Entries <span class="font-normal">(<span data-testid="off-entries-count">{entries.length}</span>, newest first, capped at 50)</span>
 			</h2>
 			<ul class="space-y-1 text-sm" data-testid="off-entries">

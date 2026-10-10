@@ -3,6 +3,29 @@
 	themes: light --default, dark;
 }
 
+/* Page, section and subsection titles share one scale across the landing
+ * page, demos and board. Text and badges within a title keep their own styles. */
+.page-title {
+	font-size: 1.5rem;
+	line-height: 2rem;
+	font-weight: 700;
+	overflow-wrap: anywhere;
+}
+
+.section-title {
+	font-size: 1.125rem;
+	line-height: 1.75rem;
+	font-weight: 600;
+	flex-wrap: wrap;
+	overflow-wrap: anywhere;
+}
+
+.subsection-title {
+	font-size: 0.875rem;
+	line-height: 1.25rem;
+	font-weight: 600;
+}
+
 /* Reserve the vertical scrollbar gutter so demo pages with different
  * content heights don't shift the sidebar horizontally as they swap
  * the scrollbar on and off. */

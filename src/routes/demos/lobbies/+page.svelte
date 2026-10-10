@@ -172,7 +172,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Lobbies: browse, own, share</h1>
+		<h1 class="page-title mt-2">Lobbies: browse, own, share</h1>
 		<p class="text-sm opacity-70 mt-1">
 			<code>live.room()</code> with <code>meta</code> +
 			<code>enumerable</code> gives every export a live lobby browser
@@ -189,7 +189,7 @@
 		<div class="space-y-4">
 			<div class="card bg-base-200">
 				<div class="card-body py-3 space-y-3">
-					<h2 class="card-title text-sm">Open a table</h2>
+					<h2 class="section-title card-title">Open a table</h2>
 					<form class="space-y-1" onsubmit={(e) => { e.preventDefault(); joinTable(newId) }}>
 						<label for="lob-new-id" class="block text-xs font-medium">Table number</label>
 						<div class="grid grid-cols-1 gap-2 @2xl:grid-cols-[minmax(8rem,1fr)_auto]">
@@ -235,7 +235,7 @@
 
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-2">
-					<h2 class="card-title text-sm">Active tables</h2>
+					<h2 class="section-title card-title">Active tables</h2>
 					<ul class="space-y-2" data-testid="lob-rooms">
 						{#each tables as t (t.key)}
 							<li
@@ -271,7 +271,7 @@
 			<div class="card-body py-3 space-y-2">
 				{#if joinedId}
 					<div class="flex items-center gap-2 flex-wrap">
-						<h2 class="card-title text-sm" data-testid="lob-table-title">Table {joinedId}</h2>
+						<h2 class="section-title card-title" data-testid="lob-table-title">Table {joinedId}</h2>
 						{#if isOwner}
 							<span class="badge badge-sm badge-primary" data-testid="lob-owner-badge">you own this table</span>
 						{:else if ownerName}

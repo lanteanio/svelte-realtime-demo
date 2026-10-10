@@ -103,7 +103,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Aggregate privacy: k-anonymity + differential privacy</h1>
+		<h1 class="page-title mt-2">Aggregate privacy: k-anonymity + differential privacy</h1>
 		<p class="text-sm opacity-70 mt-1" data-testid="pv-lede">
 			Pick a mood below. The raw card moves at once; the protected one
 			stays put until three distinct people have submitted this round,
@@ -138,7 +138,7 @@
 	<!-- Mood picker -->
 	<section class="card bg-base-200" data-testid="pv-picker-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">How is your day? (each submission feeds both aggregates)</h2>
+			<h2 class="section-title card-title">How is your day?</h2>
 			<div class="flex flex-wrap gap-2">
 				{#each MOODS as m (m.score)}
 					<!-- The page's single participatory act: keep the compact dress on
@@ -160,6 +160,7 @@
 					</button>
 				{/each}
 			</div>
+			<p class="text-xs opacity-70">Each submission feeds both aggregates.</p>
 			{#if submittedScore !== null}
 				<p class="text-xs opacity-60" data-testid="pv-submit-note">
 					Submitted {submittedScore}/5. Submit again anytime - every event counts,
@@ -197,7 +198,7 @@
 		<section class="card bg-base-100 border border-base-300" data-testid="pv-raw-card">
 			<div class="card-body py-3 space-y-1">
 				<div class="flex justify-between items-baseline">
-					<h2 class="card-title text-sm">Raw (this round)</h2>
+					<h2 class="section-title card-title">Raw (this round)</h2>
 					<span class="text-xs opacity-50">exact, every event</span>
 				</div>
 				{#if raw && raw.n > 0}
@@ -215,7 +216,7 @@
 		<section class="card bg-base-100 border border-base-300" data-testid="pv-protected-card">
 			<div class="card-body py-3 space-y-1">
 				<div class="flex justify-between items-baseline">
-					<h2 class="card-title text-sm">Protected (this round)</h2>
+					<h2 class="section-title card-title">Protected (this round)</h2>
 					<span class="text-xs opacity-50">k = 3, Laplace noise</span>
 				</div>
 				<div data-testid="pv-protected-value-area">

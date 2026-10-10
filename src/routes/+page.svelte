@@ -163,7 +163,7 @@
 
 <div class="max-w-xl 2xl:max-w-5xl mx-auto p-8">
 	<header class="mb-10 2xl:max-w-xl 2xl:mx-auto">
-		<h1 class="text-2xl font-bold mb-2">Realtime for SvelteKit, running live</h1>
+		<h1 class="page-title mb-2">Realtime for SvelteKit, running live</h1>
 		<p class="text-sm text-base-content/70">
 			A working playground for
 			<a class="link" href="https://github.com/lanteanio/svelte-realtime" target="_blank" rel="noopener" data-testid="framing-link-realtime">svelte-realtime</a>
@@ -178,7 +178,7 @@
 	     page widens for the two-column catalog; a row of title + meta has
 	     nothing to gain from 900px of track. -->
 	<div class="2xl:max-w-xl 2xl:mx-auto">
-		<h2 class="text-xl font-bold mb-2">Boards</h2>
+		<h2 class="section-title mb-2">Boards</h2>
 		<p class="text-sm text-base-content/70 mb-6">Pick a board or create a new one. Boards expire after 1 hour of inactivity.</p>
 
 		<form onsubmit={handleCreate} class="flex gap-2 mb-6">
@@ -220,7 +220,7 @@
 	</div>
 
 	<section class="mt-12">
-		<h2 class="text-lg font-bold mb-1">Demos</h2>
+		<h2 class="section-title mb-1">Demos</h2>
 		<p class="text-xs opacity-50 mb-3">Focused single-feature reproducers. Each tile is tagged with its minimum <code>svelte-realtime</code> version requirement.</p>
 		<div class="flex items-center gap-2 mb-3">
 			<input
@@ -262,7 +262,7 @@
 			{:else}
 				{#each groupedDemos as section (section.name)}
 					<li class="2xl:col-span-2 mt-3 first:mt-0">
-						<h3 class="text-xs font-semibold uppercase tracking-wide text-base-content/70">{section.name}</h3>
+						<h3 class="subsection-title uppercase tracking-wide text-base-content/70">{section.name}</h3>
 					</li>
 					{#each section.demos as d (d.slug)}
 						{@render tile(d)}

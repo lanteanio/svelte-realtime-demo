@@ -16,7 +16,7 @@
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Chat rooms</h1>
+		<h1 class="page-title mt-2">Chat rooms</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Pick a room. <code>live.room()</code> bundles the message
 			stream and the user-presence list into one declaration.

@@ -120,7 +120,7 @@
 <div class="max-w-2xl mx-auto p-8 space-y-6">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Reconnect-resume with no flicker</h1>
+		<h1 class="page-title mt-2">Reconnect-resume with no flicker</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Server ticks every second. Press <strong>Drop the
 			connection</strong> - it severs the WebSocket for {DROP_SECONDS}
@@ -172,7 +172,7 @@
 
 	<div class="card bg-base-100 border border-base-300">
 		<div class="card-body py-4">
-			<h2 class="card-title text-sm">Event ledger (newest first)</h2>
+			<h2 class="section-title card-title">Event ledger (newest first)</h2>
 			<p class="text-xs opacity-60">
 				Each row is one received event. Rows marked
 				<span class="badge badge-warning badge-xs align-middle">replayed</span>

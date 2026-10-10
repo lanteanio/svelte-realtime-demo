@@ -255,7 +255,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Kanban: a shared CRDT document</h1>
+		<h1 class="page-title mt-2">Kanban: a shared CRDT document</h1>
 		<p class="text-sm opacity-70 mt-1">
 			One <code>live.doc</code>, zero RPC handlers. A
 			<code>cards</code> map plus one order array per column; every
@@ -307,7 +307,7 @@
 		{#each columns as col (col.id)}
 			<section class="card bg-base-100 border border-base-300" data-testid="kb-col-{col.id}">
 				<div class="card-body p-3 space-y-2">
-					<h2 class="card-title text-sm justify-between">
+					<h2 class="section-title card-title justify-between">
 						{col.label}
 						<span class="badge badge-ghost badge-sm" data-testid="kb-count-{col.id}">{col.cardIds.length}</span>
 					</h2>

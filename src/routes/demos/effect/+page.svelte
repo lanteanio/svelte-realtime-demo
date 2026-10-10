@@ -136,7 +136,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">live.effect: one publish, three streams</h1>
+		<h1 class="page-title mt-2">live.effect: one publish, three streams</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Place an order. The RPC publishes <code>'created'</code> on the
 			orders topic and returns. A separately-registered
@@ -214,7 +214,7 @@
 	<section class="grid @2xl:grid-cols-3 gap-3" data-testid="columns" bind:this={columnsEl}>
 		<div class="card bg-base-100 border border-base-300" data-testid="orders-column">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Orders ({ordersList.length})</h2>
+				<h2 class="section-title card-title">Orders ({ordersList.length})</h2>
 				<p class="text-xs opacity-70">source topic; the RPC publishes here.</p>
 				<ul class="space-y-1 text-xs" data-testid="orders-list">
 					{#each ordersList as o (o.id)}
@@ -234,7 +234,7 @@
 
 		<div class="card bg-base-100 border border-base-300" data-testid="audit-column">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Audit ({auditList.length})</h2>
+				<h2 class="section-title card-title">Audit ({auditList.length})</h2>
 				<p class="text-xs opacity-70">populated by the effect handler.</p>
 				<ul class="space-y-1 text-xs" data-testid="audit-list">
 					{#each auditList as a (a.id)}
@@ -257,7 +257,7 @@
 
 		<div class="card bg-base-100 border border-base-300" data-testid="notifications-column">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Notifications ({notifsList.length})</h2>
+				<h2 class="section-title card-title">Notifications ({notifsList.length})</h2>
 				<p class="text-xs opacity-70">populated by the same effect handler.</p>
 				<ul class="space-y-1 text-xs" data-testid="notifications-list">
 					{#each notifsList as n (n.id)}

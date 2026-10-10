@@ -83,7 +83,7 @@
 	<header class="flex items-center justify-between">
 		<div>
 			<a href="/demos/chat" class="link link-hover text-sm opacity-60">&larr; Rooms</a>
-			<h1 class="text-2xl font-bold mt-2">
+			<h1 class="page-title mt-2">
 				Chat: <span class="font-mono">{roomId}</span>
 			</h1>
 		</div>
@@ -114,7 +114,7 @@
 	{#if !denied}
 		<div class="card bg-base-200 shadow">
 			<div class="card-body py-3">
-				<h2 class="card-title text-sm">Online</h2>
+				<h2 class="section-title card-title">Online</h2>
 				<ul class="flex flex-wrap gap-2 text-xs">
 					{#each presence as user (user.key)}
 						<li class="badge gap-1" style="background-color: {user.data?.color ?? '#888'}; color: white;">
@@ -130,7 +130,7 @@
 
 	<div class="card bg-base-100 border border-base-300 min-h-[20rem]">
 		<div class="card-body py-3">
-			<h2 class="card-title text-sm">Messages</h2>
+			<h2 class="section-title card-title">Messages</h2>
 			<ul class="space-y-1 text-sm" data-testid="messages">
 				{#each messages as msg (msg.id)}
 					<li class="flex gap-2 items-baseline">

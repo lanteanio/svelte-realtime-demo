@@ -114,7 +114,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Ops: the introspection dashboard</h1>
+		<h1 class="page-title mt-2">Ops: the introspection dashboard</h1>
 		<p class="text-sm opacity-70 mt-1">
 			One <code>introspect()</code> call returns the server's entire
 			live dispatch state - counts only, PII-free by design (no user
@@ -137,7 +137,7 @@
 	<section class="card bg-base-200" data-testid="ops-headline-card">
 		<div class="card-body py-3">
 			<div class="flex items-center justify-between gap-2">
-				<h2 class="card-title text-sm">Dispatch state</h2>
+				<h2 class="section-title card-title">Dispatch state</h2>
 				<div class="flex items-center gap-2 text-xs opacity-50">
 					{#if replica}
 						<span
@@ -197,7 +197,7 @@
 		<!-- Handlers -->
 		<section class="card bg-base-100 border border-base-300" data-testid="ops-handlers-card">
 			<div class="card-body py-3 space-y-1">
-				<h2 class="card-title text-sm">
+				<h2 class="section-title card-title">
 					Handlers <span class="font-normal">(<span data-testid="ops-handlers-total">{count(snap?.handlers?.total)}</span>)</span>
 				</h2>
 				{#if byKind}
@@ -224,7 +224,7 @@
 		<!-- Push + cron + reactive -->
 		<section class="card bg-base-100 border border-base-300" data-testid="ops-machinery-card">
 			<div class="card-body py-3 space-y-1">
-				<h2 class="card-title text-sm">Background machinery</h2>
+				<h2 class="section-title card-title">Background machinery</h2>
 				<!-- Two real columns, not a justified flex row: when the card
 				     narrowed, both sides wrapped independently and a label's
 				     tail ended up beside the previous row's value. A grid
@@ -263,7 +263,7 @@
 	<!-- Admission / pressure -->
 	<section class="card bg-base-100 border border-base-300" data-testid="ops-pressure-card">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Admission posture (transport)</h2>
+			<h2 class="section-title card-title">Admission posture (transport)</h2>
 			{#if posture === 'unsampled'}
 				<!-- The snapshot exists but nothing in it has been measured: the
 				     adapter populates every field with 0 at process start and
@@ -369,7 +369,7 @@
 	<!-- DLQ summary -->
 	<section class="card bg-base-100 border border-base-300" data-testid="ops-dlq-card">
 		<div class="card-body py-3 space-y-1">
-			<h2 class="card-title text-sm">
+			<h2 class="section-title card-title">
 				Outbound-webhook DLQ <span class="font-normal">(<span data-testid="ops-dlq-total">{count(dlq?.total)}</span>)</span>
 			</h2>
 			{#if dlq === null}
@@ -404,7 +404,7 @@
 	<!-- Admin plane note -->
 	<section class="card bg-base-200" data-testid="ops-admin-card">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">The authenticated admin plane</h2>
+			<h2 class="section-title card-title">The authenticated admin plane</h2>
 			<p class="text-xs opacity-70">
 				The adapter auto-mounts <code>/__realtime/*</code> when
 				<code>hooks.ws.js</code> exports the <code>admin</code> handler

@@ -165,6 +165,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Page, section and subsection headings use a shared 24/18/14px scale across the landing page, demos and board. Section titles wrap within narrow panels.
+
 - A wire report with one received frame lists its value without claiming it repeated an unchanged payload.
 
 - Privacy test round pins restore the last id written by the page, including after a release and a new pin.

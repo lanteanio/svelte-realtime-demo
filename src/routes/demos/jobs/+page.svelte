@@ -140,7 +140,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Jobs: durable task runner with fence + retry + force-takeover</h1>
+		<h1 class="page-title mt-2">Jobs: durable task runner with fence + retry + force-takeover</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Postgres-backed task framework via <code>createTaskRunner</code>. Per-attempt fence in
 			Postgres + an optional Redis mirror via <code>createRedisFence</code>.
@@ -152,7 +152,7 @@
 	{#if !available}
 		<div class="alert alert-warning" data-testid="jobs-unavailable">
 			<div>
-				<h2 class="font-bold">Postgres required</h2>
+				<h2 class="section-title">Postgres required</h2>
 				<p class="text-xs opacity-80">
 					This demo needs <code>DATABASE_URL</code> wired to a running Postgres instance.
 					The repo's <code>.env</code> points at <code>localhost:5434</code>; make sure the
@@ -192,7 +192,7 @@
 
 		<form class="card bg-base-100 border border-base-300" onsubmit={handleEnqueue} data-testid="jobs-enqueue-form">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Enqueue simulate-work</h2>
+				<h2 class="section-title card-title">Enqueue simulate-work</h2>
 				<div class="flex flex-wrap gap-3 items-end">
 					<label class="flex flex-col gap-1 flex-1 min-w-[10rem]">
 						<span class="opacity-70 text-xs">Duration ({durationSec.toFixed(1)}s)</span>
@@ -241,7 +241,7 @@
 				     form, and reports its own failures here rather than into the
 				     unrelated form's error slot. -->
 				<div class="flex flex-wrap items-baseline justify-between gap-2">
-					<h2 class="card-title text-sm">Recent tasks ({list.length})</h2>
+					<h2 class="section-title card-title">Recent tasks ({list.length})</h2>
 					<button
 						type="button"
 						class="btn btn-outline btn-error btn-sm pointer-coarse:min-h-11"

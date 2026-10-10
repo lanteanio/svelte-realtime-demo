@@ -218,7 +218,7 @@
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Arena: area-of-interest culling</h1>
+		<h1 class="page-title mt-2">Arena: area-of-interest culling</h1>
 		<p class="text-sm opacity-70 mt-1">
 			A 2400x1600 world with ~150 server-driven NPCs, but your client only
 			receives what is inside a 420-unit radius around you -
@@ -362,7 +362,7 @@
 
 		<div class="card bg-base-100 border border-base-300">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Interest HUD</h2>
+				<h2 class="section-title card-title">Interest HUD</h2>
 				<p class="font-mono text-sm" data-testid="arena-hud">
 					receiving {receiving} of {totalRemote} entities ({pctCulled}% culled)
 				</p>

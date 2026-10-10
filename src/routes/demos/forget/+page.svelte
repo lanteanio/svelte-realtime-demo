@@ -81,7 +81,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Right to erasure: <code>live.forget</code></h1>
+		<h1 class="page-title mt-2">Right to erasure: <code>live.forget</code></h1>
 		<p class="text-sm opacity-70 mt-1">
 			One server call purges every trace of a user across the framework - push
 			registry and sessions, presence rosters, rate-limit buckets, idempotency
@@ -105,7 +105,7 @@
 	<!-- Step 1: leave traces -->
 	<section class="card bg-base-200" data-testid="fg-traces-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">1. Leave traces</h2>
+			<h2 class="section-title card-title">1. Leave traces</h2>
 			<p class="text-xs opacity-60">
 				Writes three entries to an app-owned Redis log keyed by your user id and
 				caches a cluster-shared idempotent RPC result keyed by you. Your presence entry and
@@ -138,7 +138,7 @@
 	<!-- Step 2: audit -->
 	<section class="card bg-base-100 border border-base-300" data-testid="fg-audit-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">2. Audit (app-side)</h2>
+			<h2 class="section-title card-title">2. Audit (app-side)</h2>
 			<p class="text-xs opacity-60">
 				The app can only count its own storage. Framework-internal surfaces are
 				not enumerable from app code - the authoritative audit is the surfaces
@@ -163,7 +163,7 @@
 	<!-- Step 3: forget -->
 	<section class="card bg-base-100 border border-base-300" data-testid="fg-forget-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">3. Forget me</h2>
+			<h2 class="section-title card-title">3. Forget me</h2>
 			<p class="text-sm opacity-70" data-testid="fg-consequence">
 				Your notes, presence traces, uploads, and log entries are permanently
 				erased from every shared surface on every replica. The connection

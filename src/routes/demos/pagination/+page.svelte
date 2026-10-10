@@ -155,7 +155,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Pagination: cursor-based load-more</h1>
+		<h1 class="page-title mt-2">Pagination: cursor-based load-more</h1>
 		<p class="text-sm opacity-70 mt-1">
 			A log feed with {state.totalAtBoot} entries served in pages of
 			{state.pageSize}. The server's loader returns
@@ -178,7 +178,7 @@
 	<!-- Append controls -->
 	<section class="card bg-base-200" data-testid="append-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Append a new entry (lands at the bottom of the visible list)</h2>
+			<h2 class="section-title card-title">Append a new entry (lands at the bottom of the visible list)</h2>
 			<form onsubmit={(e) => { e.preventDefault(); handleAppend() }} class="flex flex-wrap gap-2 items-end">
 				<label class="flex flex-col gap-1 flex-1 min-w-[8rem]">
 					<span class="opacity-70 text-xs">Severity</span>
@@ -202,7 +202,7 @@
 	<!-- Log entries -->
 	<section class="card bg-base-100 border border-base-300" data-testid="entries-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Entries <span class="font-normal">(<span data-testid="entries-count">{entries.length}</span>)</span></h2>
+			<h2 class="section-title card-title">Entries <span class="font-normal">(<span data-testid="entries-count">{entries.length}</span>)</span></h2>
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="entries-empty">loading...</p>
 			{:else}

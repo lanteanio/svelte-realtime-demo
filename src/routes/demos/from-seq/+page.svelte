@@ -212,7 +212,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Reconnect: three-tier gap fill via delta.fromSeq</h1>
+		<h1 class="page-title mt-2">Reconnect: three-tier gap fill via delta.fromSeq</h1>
 		<p class="text-sm opacity-70 mt-1">
 			A 1Hz <code>live.cron</code> publishes numbered events and each row's
 			badge names the path that delivered it. Pause, wait, then resume:
@@ -305,7 +305,7 @@
 	<!-- Events list -->
 	<section class="card bg-base-100 border border-base-300" data-testid="events-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Events ({entries.length})</h2>
+			<h2 class="section-title card-title">Events ({entries.length})</h2>
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="events-empty">no events yet</p>
 			{:else}

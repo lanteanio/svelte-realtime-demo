@@ -214,7 +214,7 @@
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Notifications: push, reply, schedule</h1>
+		<h1 class="page-title mt-2">Notifications: push, reply, schedule</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Open this page in two browsers, pick the other user as recipient,
 			send a message. Their tab pops a card; the value they click comes
@@ -234,7 +234,7 @@
 	<!-- Inbox: incoming cards -->
 	<section class="card bg-base-100 border border-base-300" data-testid="inbox-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Incoming ({incoming.length})</h2>
+			<h2 class="section-title card-title">Incoming ({incoming.length})</h2>
 			{#if incoming.length === 0}
 				<p class="opacity-70 text-sm" data-testid="inbox-empty">
 					Nothing yet. When someone pushes you a notification, the card appears here with reply buttons.
@@ -269,7 +269,7 @@
 	<!-- Send form -->
 	<section class="card bg-base-200">
 		<div class="card-body py-3 space-y-3">
-			<h2 class="card-title text-sm">Send a notification</h2>
+			<h2 class="section-title card-title">Send a notification</h2>
 			<div class="flex flex-wrap gap-2 items-end">
 				<label class="flex flex-col gap-1 flex-1 min-w-[14rem]">
 					<span class="opacity-70 text-xs">Recipient</span>
@@ -361,7 +361,7 @@
 	<!-- Scheduled queue -->
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Scheduled ({scheduledList.length})</h2>
+			<h2 class="section-title card-title">Scheduled ({scheduledList.length})</h2>
 			{#if scheduledList.length === 0}
 				<p class="opacity-70 text-sm" data-testid="scheduled-empty">
 					Nothing pending. Set a schedule above to enqueue a notification.
@@ -390,7 +390,7 @@
 	<!-- Activity log -->
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Recent activity ({activityList.length})</h2>
+			<h2 class="section-title card-title">Recent activity ({activityList.length})</h2>
 			<p class="text-xs opacity-70" data-testid="activity-wiring-note">
 				Each entry names the worker that handled that step, and marks how
 				the push reached its recipient. Those are two different pieces of

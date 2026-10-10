@@ -134,7 +134,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Outbound webhooks: sign, retry, dead-letter, replay</h1>
+		<h1 class="page-title mt-2">Outbound webhooks: sign, retry, dead-letter, replay</h1>
 		<p class="text-sm opacity-70 mt-1">
 			<code class="break-all">live.webhooks.outbound(['demos:outbound:orders'], ...)</code>
 			POSTs a signed body to a sink endpoint on every publish - no
@@ -157,7 +157,7 @@
 	<!-- Controls -->
 	<section class="card bg-base-200" data-testid="ow-controls-card">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Place an order</h2>
+			<h2 class="section-title card-title">Place an order</h2>
 			<div class="flex flex-wrap gap-2 items-center">
 				<button class="btn btn-sm btn-primary" onclick={() => handlePlace('ok')} disabled={placing} data-testid="ow-place-ok">
 					Place order
@@ -196,7 +196,7 @@
 	<!-- Receipts -->
 	<section class="card bg-base-100 border border-base-300 min-h-[10rem]" data-testid="ow-receipts-card">
 		<div class="card-body py-3 space-y-1">
-			<h2 class="card-title text-sm">
+			<h2 class="section-title card-title">
 				Sink receipts <span class="font-normal">(<span data-testid="ow-receipts-count">{receipts.length}</span>)</span>
 			</h2>
 			<ul class="text-xs font-mono space-y-1" data-testid="ow-receipts">
@@ -232,7 +232,7 @@
 	<section class="card bg-base-100 border border-base-300 min-h-[8rem]" data-testid="ow-dlq-card">
 		<div class="card-body py-3 space-y-1">
 			<div class="flex items-center justify-between">
-				<h2 class="card-title text-sm">
+				<h2 class="section-title card-title">
 					Dead-letter queue <span class="font-normal">(<span data-testid="ow-dlq-count">{dlqRows.length}</span>)</span>
 				</h2>
 				<button

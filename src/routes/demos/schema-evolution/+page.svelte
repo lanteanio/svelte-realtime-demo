@@ -133,7 +133,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Schema evolution: subscribe-time migrate hooks</h1>
+		<h1 class="page-title mt-2">Schema evolution: subscribe-time migrate hooks</h1>
 		<!-- At 320-360 the first screen held the h1 and seven lines of
 		     inline-code-heavy prose and nothing else: no panel, no counter, no
 		     button, so a phone visitor met a wall of spec and no evidence the
@@ -187,7 +187,7 @@
 			     heights in the two panels - which is exactly the row-to-row
 			     comparison a side-by-side layout promises. -->
 			<div class="card-body py-3 space-y-2 justify-start @2xl:grid @2xl:grid-rows-subgrid @2xl:row-span-3 @2xl:space-y-0 @2xl:gap-2">
-				<h2 class="card-title text-sm">Live (v2): subscribed normally</h2>
+				<h2 class="section-title card-title">Live (v2): subscribed normally</h2>
 				<p class="text-xs opacity-60 grow-0">no <code>schemaVersion</code> on the wire; migrate chain skipped.</p>
 				<ul class="space-y-2" data-testid="v2-list">
 					{#each v2List as c (c.id)}
@@ -206,7 +206,7 @@
 
 		<div class="card bg-base-100 border border-base-300 @2xl:row-span-3 @2xl:grid @2xl:grid-rows-subgrid" data-testid="v1mig-panel">
 			<div class="card-body py-3 space-y-2 justify-start @2xl:grid @2xl:grid-rows-subgrid @2xl:row-span-3 @2xl:space-y-0 @2xl:gap-2">
-				<h2 class="card-title text-sm">subscribeAt &#123; schemaVersion: 1 &#125;: migrate chain ran</h2>
+				<h2 class="section-title card-title">subscribeAt &#123; schemaVersion: 1 &#125;: migrate chain ran</h2>
 				<p class="text-xs opacity-60 grow-0">wire envelope claims v1; server runs <code>migrate[1]</code> on the loader output.</p>
 				<ul class="space-y-2" data-testid="v1mig-list">
 					{#each v1List as c (c.id)}
@@ -227,7 +227,7 @@
 	<!-- Increment controls -->
 	<section class="card bg-base-200" data-testid="controls-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Bump a counter</h2>
+			<h2 class="section-title card-title">Bump a counter</h2>
 			<div class="flex flex-wrap gap-2 items-center">
 				{#each state.seedIds as id (id)}
 					<button
@@ -257,7 +257,7 @@
 	<!-- Migrate config snippet -->
 	<section class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Stream registration</h2>
+			<h2 class="section-title card-title">Stream registration</h2>
 			{#if stateError}
 				<p class="text-xs text-error" data-testid="state-error">
 					Could not load the stream registration ({stateError}). The
@@ -273,7 +273,7 @@
 					     one ran without ever seeing what it transformed. This is
 					     the real `v1ToV2` applied to a real v1-shaped row on the
 					     server, so it cannot drift from the code it documents. -->
-					<h3 class="text-xs font-semibold opacity-70 pt-2">What <code>migrate[1]</code> does to a row</h3>
+					<h3 class="subsection-title opacity-70 pt-2">What <code>migrate[1]</code> does to a row</h3>
 					<div class="grid @2xl:grid-cols-2 gap-2" data-testid="migrate-sample">
 						<div>
 							<div class="text-xs opacity-60 mb-1">v1 row, as a v1 client stored it</div>

@@ -199,7 +199,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Upload: streaming uploads with content-addressed dedup</h1>
+		<h1 class="page-title mt-2">Upload: streaming uploads with content-addressed dedup</h1>
 		<DemoLede>
 			Pick a file. The page hands it to <code>live.upload</code>; the framework streams it to the
 			server as binary chunks, hashes each chunk SHA-256 server-side, and short-circuits via
@@ -249,7 +249,7 @@
 
 	<section class="card bg-base-100 border border-base-300" data-testid="upload-form">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Pick a file</h2>
+			<h2 class="section-title card-title">Pick a file</h2>
 			<div class="flex flex-wrap gap-3 items-end">
 				<!-- Compact dress on fine pointers, 44px floor where taps land. -->
 				<input
@@ -307,7 +307,7 @@
 	{#if incoming.length > 0}
 		<section class="card bg-info/10 border border-info" data-testid="incoming-banner">
 			<div class="card-body py-3 space-y-1">
-				<h2 class="card-title text-sm">Latest upload notifications</h2>
+				<h2 class="section-title card-title">Latest upload notifications</h2>
 				<ul class="space-y-1 text-sm">
 					{#each incoming as evt (evt.notifySeq)}
 						<li class="flex items-center gap-2" data-testid="incoming-item">
@@ -327,7 +327,7 @@
 
 	<section class="card bg-base-100 border border-base-300" data-testid="files-list">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Recent files ({files.length})</h2>
+			<h2 class="section-title card-title">Recent files ({files.length})</h2>
 			{#if sortedFiles.length === 0}
 				<p class="text-base-content/70 text-xs" data-testid="files-list-empty">
 					No files yet. Pick one above.

@@ -138,7 +138,7 @@
 <div class="max-w-2xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Optimistic mutate with rollback</h1>
+		<h1 class="page-title mt-2">Optimistic mutate with rollback</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Each add, toggle, and remove applies optimistically and rolls
 			back independently when the server says no. Flip
@@ -200,7 +200,7 @@
 	<div class="card bg-base-100 border border-base-300 min-h-[16rem]">
 		<div class="card-body py-3">
 			<div class="flex justify-between items-center">
-				<h2 class="card-title text-sm">Todos ({todos.length})</h2>
+				<h2 class="section-title card-title">Todos ({todos.length})</h2>
 				{#if todos.length > 0}
 					<button class="btn btn-outline btn-error btn-xs" onclick={handleClear} data-testid="clear-button">
 						Clear all

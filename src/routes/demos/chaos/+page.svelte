@@ -107,7 +107,7 @@
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Deterministic chaos</h1>
+		<h1 class="page-title mt-2">Deterministic chaos</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Seed + drop rate fully determines the decision sequence.
 			Same inputs, same green/red pattern. Use it in tests

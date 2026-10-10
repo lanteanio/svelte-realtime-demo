@@ -106,7 +106,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Durable alarms: one-shot timers that survive restarts</h1>
+		<h1 class="page-title mt-2">Durable alarms: one-shot timers that survive restarts</h1>
 		<p class="text-sm opacity-70 mt-1">
 			One shared room, one pending alarm. <code>ctx.setAlarm(at)</code> arms it;
 			<code>onAlarm</code> runs at the deadline with a fresh server ctx even if every
@@ -127,7 +127,7 @@
 	<!-- Schedule controls -->
 	<section class="card bg-base-200" data-testid="al-schedule-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Schedule (one pending alarm per room - scheduling replaces it)</h2>
+			<h2 class="section-title card-title">Schedule (one pending alarm per room - scheduling replaces it)</h2>
 			<div class="flex flex-wrap gap-2 items-end">
 				<!-- Compact on fine pointers; a 44px floor keeps adjacent presets apart under a thumb. -->
 				<button class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={() => handleSchedule(10)} disabled={busy} data-testid="al-schedule-10">+10s</button>
@@ -158,7 +158,7 @@
 	<!-- Pending alarm -->
 	<section class="card bg-base-100 border border-base-300" data-testid="al-pending">
 		<div class="card-body py-3 space-y-1">
-			<h2 class="card-title text-sm">Pending alarm</h2>
+			<h2 class="section-title card-title">Pending alarm</h2>
 			{#if pendingAt !== null}
 				<p class="text-sm" data-testid="al-pending-at">
 					Fires at <span class="font-mono">{fmtTime(pendingAt)}</span>
@@ -181,7 +181,7 @@
 		<div class="card-body py-3 space-y-2">
 			<!-- One span for the whole parenthetical, so the gapped card-title flex
 			     cannot split "( N ," into fragments or wrap them separately. -->
-			<h2 class="card-title text-sm">Fired alarms <span class="font-normal">(<span data-testid="al-log-count">{entries.length}</span>, newest first)</span></h2>
+			<h2 class="section-title card-title">Fired alarms <span class="font-normal">(<span data-testid="al-log-count">{entries.length}</span>, newest first)</span></h2>
 			{#if entries.length === 0}
 				<p class="opacity-40 text-sm" data-testid="al-log-empty">Nothing has fired yet. Schedule one above.</p>
 			{:else}

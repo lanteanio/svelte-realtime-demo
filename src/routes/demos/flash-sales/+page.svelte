@@ -251,7 +251,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Flash sales: atomic inventory under contention</h1>
+		<h1 class="page-title mt-2">Flash sales: atomic inventory under contention</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Three products with limited stock. Click Buy and watch the count
 			tick down in real time. Server runs
@@ -274,7 +274,7 @@
 	<!-- Coupon -->
 	<section class="card bg-base-200" data-testid="coupon-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Coupon: {state.couponCode} (one per user)</h2>
+			<h2 class="section-title card-title">Coupon: {state.couponCode} (one per user)</h2>
 			<div class="flex items-center gap-2 flex-wrap">
 				<button
 					class="btn btn-sm btn-secondary"
@@ -367,7 +367,7 @@
 	<!-- Stress test -->
 	<section class="card bg-base-200" data-testid="stress-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Stress: spam buys at one product</h2>
+			<h2 class="section-title card-title">Stress: spam buys at one product</h2>
 			<p class="text-xs opacity-60">
 				Drives concurrent buys at the chosen product. Lock serializes
 				them; bursts past <code>maxWaitMs</code> ({state.productLockMaxWaitMs}ms)
@@ -411,7 +411,7 @@
 	<!-- Sales feed -->
 	<section class="card bg-base-100 border border-base-300" data-testid="sales-section">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Recent sales ({salesList.length})</h2>
+			<h2 class="section-title card-title">Recent sales ({salesList.length})</h2>
 			{#if salesList.length === 0}
 				<p class="opacity-40 text-sm" data-testid="sales-empty">Nothing yet.</p>
 			{:else}

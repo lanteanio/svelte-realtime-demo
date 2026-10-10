@@ -85,7 +85,7 @@
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Cluster cron: one leader, one tick</h1>
+		<h1 class="page-title mt-2">Cluster cron: one leader, one tick</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Redis-backed leader election visualised. <code>createLeader</code> elects exactly one worker
 			across the cluster; <code>configureCron(&#123; leader &#125;)</code> gates every cron tick
@@ -135,7 +135,7 @@
 		<div class="card bg-base-100 border border-base-300 @5xl:col-span-2" data-testid="cluster-cron-ticks">
 			<div class="card-body py-3 space-y-2">
 				<div class="flex justify-between items-baseline">
-					<h2 class="card-title text-sm">Recent ticks (newest first)</h2>
+					<h2 class="section-title card-title">Recent ticks (newest first)</h2>
 					<span class="text-xs opacity-50">cap {tickCap}</span>
 				</div>
 				{#if sortedTicks.length === 0}
@@ -169,7 +169,7 @@
 
 		<div class="card bg-base-100 border border-base-300" data-testid="cluster-cron-instances">
 			<div class="card-body py-3 space-y-2">
-				<h2 class="card-title text-sm">Instances seen in the tick log</h2>
+				<h2 class="section-title card-title">Instances seen in the tick log</h2>
 				{#if seenInstanceIds.length === 0}
 					<p class="opacity-40 text-xs">Waiting...</p>
 				{:else}
@@ -205,7 +205,7 @@
 
 	<div class="card bg-base-100 border border-base-300" data-testid="cluster-cron-usage">
 		<div class="card-body py-3 space-y-2 text-xs">
-			<h2 class="card-title text-sm">The wiring</h2>
+			<h2 class="section-title card-title">The wiring</h2>
 			<pre class="bg-base-300 p-2 rounded text-xs overflow-x-auto"><code>import &#123; createLeader &#125; from 'svelte-adapter-uws-extensions/redis/leader'
 import &#123; live, configureCron &#125; from 'svelte-realtime/server'
 
@@ -226,7 +226,7 @@ live.cron('* * * * * *', topic, async (ctx) => &#123;
 	     strongest center on the page. -->
 	<div class="card bg-base-200 border border-base-300" data-testid="cluster-cron-instructions">
 		<div class="card-body py-3 space-y-2 text-xs">
-			<h2 class="card-title text-sm">See the takeover</h2>
+			<h2 class="section-title card-title">See the takeover</h2>
 			<p class="opacity-80 leading-snug">
 				Single-instance dev shows one steady leader (this worker is always elected). To watch a real
 				cluster transition, start a second prod server on a different port pointing at the same Redis:

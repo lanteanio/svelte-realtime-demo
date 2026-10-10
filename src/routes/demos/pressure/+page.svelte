@@ -83,7 +83,7 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="text-2xl font-bold mt-2">Admission-shedding control panel</h1>
+		<h1 class="page-title mt-2">Admission-shedding control panel</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Live <code>platform.pressure</code> readout + in-page load
 			generator. When pressure crosses the admission threshold,
@@ -98,7 +98,7 @@
 	<div class="grid @2xl:grid-cols-2 gap-4" data-testid="pressure-columns">
 		<div class="card bg-base-200">
 			<div class="card-body py-3">
-				<h2 class="card-title text-sm">Current pressure</h2>
+				<h2 class="section-title card-title">Current pressure</h2>
 				<div class="flex items-center gap-3 flex-wrap">
 					<span class="badge {snap ? reasonClass(snap.reason) : 'badge-ghost'}" data-testid="reason">
 						{snap?.reason ?? '...'}
@@ -176,7 +176,7 @@
 
 		<div class="card bg-base-200">
 			<div class="card-body py-3">
-				<h2 class="card-title text-sm">
+				<h2 class="section-title card-title">
 					{snap?.publishRateSource === 'generated-load-dev' ? 'generatedRate (dev)' : 'publishRate'}
 					(last {SPARK_WINDOW * 0.5}s)
 				</h2>
@@ -201,7 +201,7 @@
 
 	<div class="card bg-base-100 border border-base-300">
 		<div class="card-body py-3">
-			<h2 class="card-title text-sm">Load generator</h2>
+			<h2 class="section-title card-title">Load generator</h2>
 			<div class="flex flex-wrap gap-2 items-center">
 				<!-- One action family, one hue - magnitude rides on the label; the
 				     warning color stays reserved for Simulate shed. -->
@@ -245,7 +245,7 @@
 		<div class="card-body py-3">
 			<!-- The clear control lives with the log it clears. -->
 			<div class="flex items-center justify-between gap-2">
-				<h2 class="card-title text-sm">Shed log ({shedRows.length})</h2>
+				<h2 class="section-title card-title">Shed log ({shedRows.length})</h2>
 				<button class="btn btn-sm btn-outline btn-error pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={shedRows.length === 0} data-testid="clear-shed">
 					Clear shed log
 				</button>

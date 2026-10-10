@@ -31,7 +31,7 @@
 	{:else}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<h1
-			class="text-sm font-bold cursor-pointer hover:underline truncate max-w-24 sm:max-w-none"
+			class="page-title cursor-pointer hover:underline truncate max-w-24 sm:max-w-none"
 			ondblclick={() => editingTitle = true}
 		>{settings?.title ?? 'Untitled Board'}</h1>
 	{/if}

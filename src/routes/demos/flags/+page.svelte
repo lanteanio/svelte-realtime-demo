@@ -98,7 +98,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Feature flags: flip once, everywhere</h1>
+		<h1 class="page-title mt-2">Feature flags: flip once, everywhere</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Two <code>live.flag</code> declarations on the server. The
 			operator card calls a <code>setFlag</code> RPC that validates
@@ -112,7 +112,7 @@
 	<!-- Operator card -->
 	<section class="card bg-base-200" data-testid="fl-operator-card">
 		<div class="card-body py-3 space-y-3">
-			<h2 class="card-title text-sm">You are the operator</h2>
+			<h2 class="section-title card-title">You are the operator</h2>
 
 			<div class="flex flex-wrap items-end gap-4">
 				<!-- Compact dress on fine pointers, 44px floor where taps land; the
@@ -207,7 +207,7 @@
 	<!-- User card -->
 	<section class="card bg-base-100 border border-base-300" data-testid="fl-user-card">
 		<div class="card-body py-3 space-y-3">
-			<h2 class="card-title text-sm">You are the user</h2>
+			<h2 class="section-title card-title">You are the user</h2>
 
 			{#if $banner?.enabled}
 				<div class="alert alert-info py-2" data-testid="fl-promo-banner">

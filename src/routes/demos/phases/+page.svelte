@@ -134,7 +134,7 @@
 
 <div class="max-w-3xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Phases: attach lifecycle + atomic publish batch</h1>
+		<h1 class="page-title mt-2">Phases: attach lifecycle + atomic publish batch</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Every stream store exposes its attach machine as a read-only
 			<code>phase</code> store
@@ -158,7 +158,7 @@
 	<section class="card bg-base-200" data-testid="ph-lifecycle-card">
 		<div class="card-body py-3 space-y-2">
 			<div class="flex items-center gap-3 flex-wrap">
-				<h2 class="card-title text-sm">Subscription lifecycle</h2>
+				<h2 class="section-title card-title">Subscription lifecycle</h2>
 				<span class="badge {phaseClass($phase)}" data-testid="ph-phase">{$phase}</span>
 				<div class="ml-auto flex gap-2">
 					<button class="btn btn-sm btn-primary" onclick={handleAttach} disabled={$phase === 'attached' || $phase === 'attaching'} data-testid="ph-attach">
@@ -226,7 +226,7 @@
 	<!-- Card 2: atomic batch -->
 	<section class="card bg-base-100 border border-base-300" data-testid="ph-batch-card">
 		<div class="card-body py-3 space-y-2">
-			<h2 class="card-title text-sm">Atomic publish batch</h2>
+			<h2 class="section-title card-title">Atomic publish batch</h2>
 			<div class="flex flex-wrap gap-2 items-center">
 				<button class="btn btn-sm btn-primary" onclick={() => handlePublish(false)} disabled={publishing} data-testid="ph-publish-pair">
 					Publish pair

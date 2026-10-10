@@ -219,7 +219,7 @@
 
 <div class="max-w-5xl mx-auto p-8 space-y-4">
 	<header>
-		<h1 class="text-2xl font-bold mt-2">Shooter: lag-compensated hits</h1>
+		<h1 class="page-title mt-2">Shooter: lag-compensated hits</h1>
 		<p class="text-sm opacity-70 mt-1">
 			Click inside the arena to shoot. The server rewinds every candidate to
 			the instant you rendered it and tests the ray there
@@ -306,7 +306,7 @@
 		<div class="space-y-4" data-testid="sh-side-column">
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
-					<h2 class="card-title text-sm">Score</h2>
+					<h2 class="section-title card-title">Score</h2>
 					<p class="font-mono text-2xl" data-testid="sh-score">{view.local.score ?? 0}</p>
 					<p class="text-xs opacity-60">
 						Authoritative: <code>onHit</code> credits the shooter through
@@ -326,7 +326,7 @@
 
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
-					<h2 class="card-title text-sm">Extra latency: {lagMs}ms</h2>
+					<h2 class="section-title card-title">Extra latency: {lagMs}ms</h2>
 					<!-- The mark labels what maxRewindMs IS; it is not a threshold in
 					     this slider's behaviour, and the caption must not imply one.
 					     The transport stamps a shot's render-time inside shoot(), at
