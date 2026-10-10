@@ -61,13 +61,15 @@ test('the cron registration check reads a checkout whose path needs percent-enco
 })
 
 test('the cron registration check flags a live.cron() in any file outside src/live/', { timeout: 60_000 }, () => {
-	// What is checked: one checkout holding all of these offenders and a
-	// live.cron() under src/live/ fails the check, the output names every
-	// offender, and it does not name the file under src/live/. The offenders: a
-	// sibling directory sharing the stem (src/live-extra/), a directory named
-	// live elsewhere (src/lib/live/), an .mjs file, a .ts file, a call that is
-	// not an exported const, a file under src/routes/, and a file directly in
-	// src/ whose call has spaces around the dot and before the paren. Not looked
+	// What is checked: one checkout holding these offending files and a
+	// live.cron() under src/live/ fails the check, the output names each
+	// offending file, and it does not name the file under src/live/. The
+	// offending files: src/live-extra/jobs.js (a sibling directory sharing the
+	// stem); src/lib/live/schedule.mjs (a directory named live elsewhere, an
+	// .mjs file, and a call that is not an exported const); src/lib/jobs.ts (a
+	// .ts file); src/routes/api/jobs/+server.js (under src/routes/); and
+	// src/hooks.server.js (directly in src/, its call spelled with a tab before
+	// the dot, two spaces after it and a space before the paren). Not looked
 	// at: .d.ts files, which the check skips on purpose, and calls spelled
 	// across lines.
 	const failing = runCopyOf('check-cron-registration.mjs', {
@@ -76,7 +78,7 @@ test('the cron registration check flags a live.cron() in any file outside src/li
 		'src/lib/live/schedule.mjs': 'const tick = enabled ? live.cron(\'* * * * *\', () => {}) : null\n',
 		'src/lib/jobs.ts': CRON,
 		'src/routes/api/jobs/+server.js': CRON,
-		'src/hooks.server.js': 'export const tick = live . cron (\'* * * * *\', () => {})\n'
+		'src/hooks.server.js': 'export const tick = live\t.  cron (\'* * * * *\', () => {})\n'
 	})
 	assert.notEqual(failing.status, 0, failing.output)
 	assert.match(failing.output, /src[\\/]live-extra[\\/]jobs\.js/)
