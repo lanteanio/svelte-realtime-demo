@@ -474,8 +474,43 @@ with the other; the time of day is not enough. If traffic is flat or absent, say
 so and extend the observation period; do not generate load to create a peak.
 Once a baseline exists, repeat the paired windows weekly and after a deployment
 or capacity change. Review patch, access and exposure state monthly and after a
-security or network change. This is an operator schedule, not an installed
-timer.
+security or network change. Schedule each review as a dated task with an owner,
+and schedule the next one when a review is finished. A running collection timer
+only means samples exist, not that anyone has read them.
+
+When sysstat already collects periodic history, retain that history and use the
+same instrument for later comparisons. On the host, extract the available daily
+files with the original sample intervals into a private directory:
+
+```bash
+set -o pipefail
+umask 077
+report=$(mktemp -d "${TMPDIR:-/tmp}/host-sysstat.XXXXXXXX") || exit
+failed=0
+for file in /var/log/sysstat/sa[0-9][0-9]; do
+  test -f "$file" || continue
+  name=$(basename "$file")
+  if sadf -j "$file" -- -u -r -q -d -n DEV,EDEV,TCP,ETCP > "$report/$name.json"; then
+    printf '%s exit=0\n' "$name"
+  else
+    status=$?
+    failed=1
+    printf '%s exit=%s incomplete=%s\n' "$name" "$status" "$report/$name.json"
+  fi
+done
+printf 'private_capture=%s\n' "$report"
+test "$failed" -eq 0
+```
+
+Check the date inside each file before selecting the review period; daily file
+names are reused each month. Leave out the current day when comparing completed
+days. Reject incomplete files, keep the interval durations and weight aggregate
+means by them. Compare matching interfaces and devices, and treat restarts and
+counter resets separately. Take each day's traffic high and low from the
+physical interface and keep every tied timestamp. A high sample in a quiet week
+is not representative peak demand; if the traffic never shows a real peak, write
+that down. Ten-minute history and five-minute live windows are separate series:
+keep both and do not compare one against the other.
 
 On the Linux host, from the deployment checkout, record this compact inventory
 at the start and end of each window. Execute the commands individually in a
@@ -574,9 +609,9 @@ and the public TLS path are separate observations.
 
 Keep the private report structured as: window metadata and traffic context;
 per-resource utilization, saturation and errors; service/patch/access/exposure
-state; external readiness; comparison with the paired window; missing data;
-and the next scheduled observation with its operator. Store raw numeric samples
-alongside the summary so another operator can reproduce the comparisons.
+state; external readiness; comparison with the paired window; missing data; and
+the date and owner of the next review. Store raw numeric samples alongside the
+summary so another operator can reproduce the comparisons.
 
 ---
 

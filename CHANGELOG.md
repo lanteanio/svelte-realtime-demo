@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Note deletion and undo acquire the board lock before child rows, preventing deadlocks with stale-board cleanup.
 
 - Board names wrap without clipping, with a keyboard-accessible rename control. The canvas fits below the header and above the activity bar, and section headings preserve whole words beside supporting text.
+- Host sampling explains how to extract sysstat history, compare intervals and schedule dated reviews.
 
 - Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
 - Legacy identity cookies retain display-profile hints but receive a fresh server-generated visitor ID, preventing impersonation through a forged cookie.
