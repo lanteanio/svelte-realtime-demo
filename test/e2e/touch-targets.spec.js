@@ -8,7 +8,8 @@ import { openTouchPage } from './helpers.js'
 //
 // The per-page touch assertions each pin ONE control on ONE page, which is why
 // a hundred controls could sit below the floor while every one of those tests
-// passed. This measures every control the app actually renders, so the policy
+// passed. This measures every control the app's server-rendered markup draws on
+// every route (see RENDERED_AT_LOAD for what that leaves out), so the policy
 // is checked where it is stated - once, globally - and a page that regresses is
 // named with the offending control rather than the suite going quietly green.
 //
@@ -66,16 +67,17 @@ const DESIGNED_SIZE = {
 	'toggle-lg': { w: 47, h: 28 },
 	'toggle-xl': { w: 54, h: 32 }
 }
-// The selector controls each route draws at domcontentloaded, the sweep's
-// deliberate stopping point. Most checkboxes and toggles in this app appear
-// only after data lands and are simply not measured here; the one
-// data-dependent control with full geometry coverage is pinned in its own
-// spec. A route not listed renders none at load, and a control appearing on
-// an unlisted route fails the sweep until its variant is stated here. This
-// census is also the sweep's proof it measured anything at all: if the
-// selector drifts or these pages stop rendering, the routes below come up
-// empty and the comparison goes red instead of the sweep vouching for
-// controls it never saw.
+// The selector controls each route's server-rendered markup draws, which is
+// all the sweep measures: its context runs no page script, so a control that
+// appears only after hydration or after data lands never enters it, however
+// fast that data arrives. Of the app's checkboxes and toggles, only the todo
+// row checkbox on /demos/todos-rollback is of that kind, and its geometry is
+// pinned in that demo's own spec. A route not listed renders none at load,
+// and a control appearing on an unlisted route fails the sweep until its
+// variant is stated here. This census is also the sweep's proof it measured
+// anything at all: if the selector drifts or these pages stop rendering, the
+// routes below come up empty and the comparison goes red instead of the sweep
+// vouching for controls it never saw.
 const RENDERED_AT_LOAD = {
 	'/demos/arena': ['toggle-sm'],
 	'/demos/flags': ['toggle-sm', 'toggle-sm'],
@@ -83,20 +85,32 @@ const RENDERED_AT_LOAD = {
 }
 
 test.describe('coarse-pointer control floor', () => {
-	test('every rendered control meets the 44px floor on a touch device', async ({ browser }) => {
+	test('every server-rendered control meets the 44px floor on a touch device', async ({ browser }) => {
 		test.setTimeout(180_000)
-		const { context, page } = await openTouchPage(browser)
+		// Page scripts off: the sweep measures server-rendered markup. With
+		// scripts on, a page that hydrates and receives data before the
+		// measurement draws controls the census does not state, such as a
+		// leftover todo's checkbox on /demos/todos-rollback.
+		const { context, page } = await openTouchPage(browser, { javaScriptEnabled: false })
 		const offenders = []
 		const routeDrawn = {}
 		let measured = 0
 		try {
 			for (const route of routes) {
-				// No connection gate on purpose. This measures geometry, which the
-				// server-rendered markup already determines, and waiting for every
-				// page's socket would trade a fast geometric sweep for the slowest
-				// and least reliable part of the suite. Controls that appear only
-				// after data lands are simply not measured here.
-				await page.goto(route, { waitUntil: 'domcontentloaded' })
+				// `load`, not domcontentloaded: with scripts on, the inline boot
+				// script waits for the stylesheets above it and holds
+				// domcontentloaded back until they apply; with scripts off nothing
+				// does, so domcontentloaded can fire before they have.
+				await page.goto(route, { waitUntil: 'load' })
+				// A script element added to the page runs at once wherever page
+				// scripts run, so this fails on every route if the context ever runs
+				// them again.
+				expect(await page.evaluate(() => {
+					const script = document.createElement('script')
+					script.textContent = 'window.__sweepScriptRan = true'
+					document.head.append(script)
+					return window.__sweepScriptRan === true
+				}), `${route}: the sweep must measure server-rendered markup, with no page script running`).toBe(false)
 				const found = await page.evaluate(({ selector, labelActivated, floor }) => {
 					const visible = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length > 0)
 					const measurements = visible.map((el) => {
@@ -161,7 +175,7 @@ test.describe('coarse-pointer control floor', () => {
 		// policy, or the routes stop resolving, this test would find nothing and
 		// report success - a green that means "measured nothing" is worse than a
 		// red, because the floor it claims to defend would be gone silently. The
-		// bound is deliberately far below the ~230 controls actually rendered, so
+		// bound is deliberately far below the ~240 controls actually rendered, so
 		// it catches collapse rather than tracking the design.
 		expect(measured, 'the sweep must measure real controls or it proves nothing').toBeGreaterThan(100)
 		expect(routes.length, 'every demo route must be swept').toBeGreaterThan(30)

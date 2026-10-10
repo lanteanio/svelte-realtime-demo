@@ -844,13 +844,16 @@ export async function waitForBoardReady(page) {
  * helper asserts `(pointer: coarse)` matches before handing the page
  * back - without that gate a fine-pointer context measures the compact
  * desktop sizes and the assertion is vacuous in whichever direction.
- * Caller closes the returned context.
+ * `javaScriptEnabled: false` gives a context that runs no page script, so
+ * the page shows only its server-rendered markup. Caller closes the returned
+ * context.
  */
-export async function openTouchPage(browser, { width = 390, height = 844 } = {}) {
+export async function openTouchPage(browser, { width = 390, height = 844, javaScriptEnabled = true } = {}) {
 const context = await browser.newContext({
 		viewport: { width, height },
 		hasTouch: true,
-		isMobile: true
+		isMobile: true,
+		javaScriptEnabled
 	});
 	const page = await context.newPage();
 	await page.goto('about:blank');
