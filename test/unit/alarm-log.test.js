@@ -461,7 +461,8 @@ test('scheduling records the intent with a TTL a full retention window past its 
 
 test('an intent without a usable fire time reads as none', async () => {
 	const redis = memoryRedis()
-	for (const raw of ['{not json', '{"at":"soon"}', '{"at":null}', '{"at":1e999}', '{}']) {
+	// The numeric string is a fire time only to code that coerces it.
+	for (const raw of ['{not json', '{"at":"soon"}', `{"at":"${NOW}"}`, '{"at":null}', '{"at":1e999}', '{}']) {
 		redis.strings.set(PENDING_KEY, raw)
 		assert.equal(await readPending(client(redis)), null, raw)
 	}
