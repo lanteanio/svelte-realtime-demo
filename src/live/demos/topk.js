@@ -43,6 +43,7 @@
 import { live, LiveError, combineCounts } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 import { redis } from '$lib/server/redis'
+import { readControl, writeControl } from '$lib/server/versioned-control'
 
 /** Pool of 12 visually distinct items competing for the leaderboards. */
 const ITEMS = [
@@ -73,16 +74,26 @@ const DEFAULT_BIAS = 'uniform'
 const SPEED_KEY = 'demos:topk:speed'
 const BIAS_KEY = 'demos:topk:bias'
 
+async function readSpeed() {
+	const { value, revision } = await readControl(redis.redis, SPEED_KEY)
+	const n = value === null ? DEFAULT_SPEED : Number(value)
+	return { speed: Number.isFinite(n) ? n : DEFAULT_SPEED, revision }
+}
+
 async function getSpeed() {
-	const v = await redis.redis.get(SPEED_KEY)
-	if (v === null) return DEFAULT_SPEED
-	const n = Number(v)
+	const value = await redis.redis.get(SPEED_KEY)
+	const n = value === null ? DEFAULT_SPEED : Number(value)
 	return Number.isFinite(n) ? n : DEFAULT_SPEED
 }
 
+async function readBias() {
+	const { value, revision } = await readControl(redis.redis, BIAS_KEY)
+	return { bias: typeof value === 'string' && VALID_BIAS.has(value) ? value : DEFAULT_BIAS, revision }
+}
+
 async function getBias() {
-	const v = await redis.redis.get(BIAS_KEY)
-	return typeof v === 'string' && VALID_BIAS.has(v) ? v : DEFAULT_BIAS
+	const value = await redis.redis.get(BIAS_KEY)
+	return typeof value === 'string' && VALID_BIAS.has(value) ? value : DEFAULT_BIAS
 }
 
 /**
@@ -119,11 +130,9 @@ function pickItem(bias) {
  */
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
-	await redis.redis.set(SPEED_KEY, num)
-	// Published after the write, so a subscriber that reacts by re-reading
-	// cannot observe the old value.
-	ctx.publish(TOPICS.demoTopkSpeed, 'set', { speed: num })
-	return { ok: true, speed: num }
+	const revision = await writeControl(redis.redis, SPEED_KEY, num)
+	ctx.publish(TOPICS.demoTopkSpeed, 'set', { speed: num, revision })
+	return { ok: true, speed: num, revision }
 })
 
 /**
@@ -135,40 +144,28 @@ export const setBias = live(async (ctx, b) => {
 	if (typeof b !== 'string' || !VALID_BIAS.has(b)) {
 		throw new LiveError('VALIDATION', 'invalid bias')
 	}
-	await redis.redis.set(BIAS_KEY, b)
-	ctx.publish(TOPICS.demoTopkBias, 'set', { bias: b })
-	return { ok: true, bias: b }
+	const revision = await writeControl(redis.redis, BIAS_KEY, b)
+	ctx.publish(TOPICS.demoTopkBias, 'set', { bias: b, revision })
+	return { ok: true, bias: b, revision }
 })
 
 /**
- * The firehose controls as live shared state, rather than values each page
- * sampled once on the way in.
- *
- * The simulation was already shared: the setters write to Redis and the cron
- * reads from there, so every browser's stream really did change together.
- * Only the READOUT disagreed - a page learned speed and bias at load and was
- * never told they changed, so two browsers sat at different settings above an
- * identical firehose and reloading looked like the fix.
- *
- * One stream per control, and each setter publishes only the value it wrote.
- * A payload carrying both would need the other value read back first, and on
- * a cluster, publishes from different replicas can reach a page in another
- * order than Redis applied the writes: a copy read before a concurrent write
- * could land after that write's own publish and put the old value back on
- * every page. One `merge: 'set'` stream with one field per payload is not an
- * alternative either. The client applies the events that arrive within one
- * animation frame and then notifies once, with the last value, so a speed
- * and a bias change landing together would lose one of them.
+ * Each control has a cluster-shared revision paired with its Redis value.
+ * Streams deliver changes promptly; the snapshot RPC reconciles notifications
+ * that set-merge batches into one browser frame.
  */
+export const readTopkSpeed = live(readSpeed)
+export const readTopkBias = live(readBias)
+
 export const topkSpeed = live.stream(
 	TOPICS.demoTopkSpeed,
-	async () => ({ speed: await getSpeed() }),
+	readSpeed,
 	{ merge: 'set' }
 )
 
 export const topkBias = live.stream(
 	TOPICS.demoTopkBias,
-	async () => ({ bias: await getBias() }),
+	readBias,
 	{ merge: 'set' }
 )
 

@@ -16,11 +16,13 @@
 -->
 <script>
 	import { onMount } from 'svelte'
+	import { subscribeControl } from '$lib/versioned-control'
 	import {
 		newsStories,
 		trending,
 		newsStats,
 		newsControls,
+		readNewsSpeed,
 		signPublish,
 		setSpeed,
 		myNewsState
@@ -49,10 +51,9 @@
 			trending.thisMinute.subscribe((v) => { thisMinute = v ?? { counts: {}, top: [] } }),
 			trending.lifetime.subscribe((v) => { lifetime = v ?? { counts: {}, top: [] } }),
 			newsStats.subscribe((v) => { stats = v ?? stats }),
-			// The rate is shared state, so it is read from the stream rather
-			// than sampled once: another browser moving the slider moves this
-			// one, instead of leaving the two disagreeing until a reload.
-			newsControls.subscribe((v) => { if (typeof v?.speed === 'number') speedVal = v.speed })
+			// Streams carry prompt updates; authoritative reads reconcile any
+			// notifications batched together before this page receives them.
+			subscribeControl(newsControls, readNewsSpeed, (v) => { if (typeof v?.speed === 'number') speedVal = v.speed })
 		]
 		return () => { for (const off of offs) off() }
 	})

@@ -261,6 +261,7 @@ declare module "$live/demos/news" {
   import type { Readable } from 'svelte/store';
 
   export const myNewsState: (...args: any[]) => Promise<any>;
+  export const readNewsSpeed: (...args: any[]) => Promise<any>;
   export const setSpeed: (...args: any[]) => Promise<any>;
   export const signPublish: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
@@ -410,6 +411,8 @@ declare module "$live/demos/topk" {
 
   export const setSpeed: (...args: any[]) => Promise<any>;
   export const setBias: (...args: any[]) => Promise<any>;
+  export const readTopkSpeed: (...args: any[]) => Promise<any>;
+  export const readTopkBias: (...args: any[]) => Promise<any>;
   export const myTopkState: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
   export const topkSpeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };

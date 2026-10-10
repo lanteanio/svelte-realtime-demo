@@ -52,6 +52,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { live, LiveError, combineCounts } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 import { redis } from '$lib/server/redis'
+import { readControl, writeControl } from '$lib/server/versioned-control'
 
 const STORY_CAP = 24
 const MAX_HEADLINE_LEN = 80
@@ -125,10 +126,15 @@ async function seedIfNeeded() {
 }
 seedIfNeeded()
 
+async function readSpeed() {
+	const { value, revision } = await readControl(redis.redis, SPEED_KEY)
+	const n = value === null ? DEFAULT_SPEED : Number(value)
+	return { speed: Number.isFinite(n) ? n : DEFAULT_SPEED, revision }
+}
+
 async function getSpeed() {
-	const v = await redis.redis.get(SPEED_KEY)
-	if (v === null) return DEFAULT_SPEED
-	const n = Number(v)
+	const value = await redis.redis.get(SPEED_KEY)
+	const n = value === null ? DEFAULT_SPEED : Number(value)
 	return Number.isFinite(n) ? n : DEFAULT_SPEED
 }
 
@@ -250,22 +256,15 @@ export async function purge(ctx) {
 }
 
 /**
- * The firehose rate as live shared state, rather than a number each page
- * sampled once on the way in.
- *
- * The simulation was already shared: `setSpeed` writes the rate to Redis and
- * the cron reads it from there, so every browser's feed really did speed up
- * together. Only the READOUT disagreed - a page learned the rate at load and
- * was never told it changed, so two browsers sat at different numbers above
- * an identical stream and reloading looked like the fix. The rate now travels
- * the way every other shared value in these demos does.
- *
- * The loader returns the same shape the setter publishes, so a subscriber
- * cannot tell the initial read from a later change.
+ * Each control has a cluster-shared revision paired with its Redis value.
+ * Streams deliver changes promptly; the snapshot RPC reconciles notifications
+ * that set-merge batches into one browser frame.
  */
+export const readNewsSpeed = live(readSpeed)
+
 export const newsControls = live.stream(
 	TOPICS.demoNewsControl,
-	async () => ({ speed: await getSpeed() }),
+	readSpeed,
 	{ merge: 'set' }
 )
 
@@ -275,11 +274,9 @@ export const newsControls = live.stream(
  */
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
-	await redis.redis.set(SPEED_KEY, num)
-	// Published after the write, so a subscriber that reacts by re-reading
-	// cannot observe the old value.
-	ctx.publish(TOPICS.demoNewsControl, 'set', { speed: num })
-	return { ok: true, speed: num }
+	const revision = await writeControl(redis.redis, SPEED_KEY, num)
+	ctx.publish(TOPICS.demoNewsControl, 'set', { speed: num, revision })
+	return { ok: true, speed: num, revision }
 })
 
 /**

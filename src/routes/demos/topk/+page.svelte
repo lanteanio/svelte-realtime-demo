@@ -16,7 +16,8 @@
 -->
 <script>
 	import { onMount } from 'svelte'
-	import { trending, topkSpeed, topkBias, setSpeed, setBias, myTopkState } from '$live/demos/topk'
+	import { subscribeControl } from '$lib/versioned-control'
+	import { trending, topkSpeed, topkBias, readTopkSpeed, readTopkBias, setSpeed, setBias, myTopkState } from '$live/demos/topk'
 
 	let items = $state([])
 	let speedVal = $state(5)
@@ -33,12 +34,10 @@
 			trending.last1min.subscribe((v) => { last1min = v ?? { counts: {}, top: [] } }),
 			trending.thisMinute.subscribe((v) => { thisMinute = v ?? { counts: {}, top: [] } }),
 			trending.lifetime.subscribe((v) => { lifetime = v ?? { counts: {}, top: [] } }),
-			// Speed and bias are shared state, so they are read from their
-			// streams rather than sampled once: another browser changing either
-			// moves this one, instead of leaving the two disagreeing until a
-			// reload.
-			topkSpeed.subscribe((v) => { if (typeof v?.speed === 'number') speedVal = v.speed }),
-			topkBias.subscribe((v) => { if (typeof v?.bias === 'string') biasVal = v.bias })
+			// Streams carry prompt updates; authoritative reads reconcile any
+			// notifications batched together before this page receives them.
+			subscribeControl(topkSpeed, readTopkSpeed, (v) => { if (typeof v?.speed === 'number') speedVal = v.speed }),
+			subscribeControl(topkBias, readTopkBias, (v) => { if (typeof v?.bias === 'string') biasVal = v.bias })
 		]
 		return () => { for (const off of offs) off() }
 	})

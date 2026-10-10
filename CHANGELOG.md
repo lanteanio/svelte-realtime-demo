@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- News and Top-K controls retain the latest Redis write when replica publishes arrive out of order. Revisions pair atomically with values, and a serialized snapshot read reconciles each notification burst, including changes batched into one browser frame.
+
 ### Added
 
 - Touch-target coverage measures hydrated controls as well as server-rendered controls, waits for delayed stylesheets, and verifies the scripts-off context independently of the application CSP.

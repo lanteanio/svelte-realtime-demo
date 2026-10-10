@@ -85,6 +85,11 @@ Every page lives at `/demos/<slug>`, backed by one module in
 | `outbound-webhooks` | Sign, retry, dead-letter, replay |
 | `phases` | Attach lifecycle + atomic publish batch |
 
+News and Top-K controls pair each Redis write with an atomic revision. Their
+pages ignore older revisions and reconcile each stream notification burst with
+a serialized snapshot RPC. This adds a read round trip per burst so two updates
+batched into one browser frame still converge on the current shared value.
+
 ---
 
 ## Board lifecycle
