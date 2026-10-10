@@ -58,14 +58,29 @@ test('receipt insert failure rolls the note deletion back', async () => {
 	assert.deepEqual(await store.list(f.boardId, f.actorId), [])
 })
 
+test('deletion through another existing board preserves both notes and mints no receipt', async () => {
+	const f = await fixture()
+	const other = await fixture()
+	assert.equal(await store.remove(other.boardId, f.note.note_id, f.actorId), null)
+	assert.deepEqual((await pool.query('SELECT * FROM note WHERE note_id=$1', [f.note.note_id])).rows[0], f.note)
+	assert.deepEqual((await pool.query('SELECT * FROM note WHERE note_id=$1', [other.note.note_id])).rows[0], other.note)
+	assert.deepEqual(await store.list(other.boardId, f.actorId), [])
+	assert.deepEqual(await store.list(f.boardId, f.actorId), [])
+})
+
 test('expired receipts cannot restore or list a note and cleanup removes them', async () => {
 	const f = await fixture()
 	const { token } = await store.remove(f.boardId, f.note.note_id, f.actorId)
+	const live = await fixture()
+	const liveReceipt = await store.remove(live.boardId, live.note.note_id, live.actorId)
 	await pool.query("UPDATE note_deletion SET expires_at=clock_timestamp()-interval '1 second' WHERE receipt_id=$1", [token])
 	assert.deepEqual(await store.list(f.boardId, f.actorId), [])
 	assert.equal(await store.restore(f.boardId, token, f.actorId), null)
+	assert.equal((await pool.query('SELECT * FROM note_deletion WHERE receipt_id=$1', [token])).rowCount, 1)
 	await store.prune()
 	assert.equal((await pool.query('SELECT * FROM note_deletion WHERE receipt_id=$1', [token])).rowCount, 0)
+	assert.equal((await pool.query('SELECT * FROM note_deletion WHERE receipt_id=$1', [liveReceipt.token])).rowCount, 1)
+	assert.equal((await store.restore(live.boardId, liveReceipt.token, live.actorId)).note_id, live.note.note_id)
 })
 
 test('a concurrent replacement survives and consumes the obsolete receipt', async () => {

@@ -64,13 +64,37 @@ test('a deleted board cannot be restored through a receipt', () => {
 	assert.equal(f.notes.size, 0)
 })
 
-test('wrong-board and repeated deletion do not mint receipts', () => {
+test('missing-board and repeated deletion do not mint receipts', () => {
 	const f = fixture()
 	assert.equal(f.store.remove(crypto.randomUUID(), f.note.note_id, f.actorId), null)
 	assert.ok(f.notes.has(f.note.note_id))
 	assert.ok(f.store.remove(f.boardId, f.note.note_id, f.actorId))
 	assert.equal(f.store.remove(f.boardId, f.note.note_id, f.actorId), null)
 	assert.equal(f.store.list(f.boardId, f.actorId).length, 1)
+})
+
+test('deletion through another existing board preserves the note and mints no receipt', () => {
+	const f = fixture()
+	const otherBoardId = crypto.randomUUID()
+	f.boards.set(otherBoardId, {})
+	assert.equal(f.store.remove(otherBoardId, f.note.note_id, f.actorId), null)
+	assert.deepEqual(f.notes.get(f.note.note_id), f.note)
+	assert.deepEqual(f.store.list(otherBoardId, f.actorId), [])
+	assert.deepEqual(f.store.list(f.boardId, f.actorId), [])
+})
+
+test('pruning preserves an unexpired receipt at the expiry boundary', () => {
+	const f = fixture()
+	const expired = f.store.remove(f.boardId, f.note.note_id, f.actorId)
+	f.advance(1)
+	const next = { ...f.note, note_id: crypto.randomUUID() }
+	f.notes.set(next.note_id, next)
+	const live = f.store.remove(f.boardId, next.note_id, f.actorId)
+	f.advance(NOTE_UNDO_MS - 1)
+	f.store.prune()
+	assert.deepEqual(f.store.list(f.boardId, f.actorId).map(({ token }) => token), [live.token])
+	assert.equal(f.store.restore(f.boardId, expired.token, f.actorId), null)
+	assert.equal(f.store.restore(f.boardId, live.token, f.actorId).note_id, next.note_id)
 })
 
 test('board undo shortcut excludes editing, redo and handled keys', () => {

@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
+
 - Cluster tests cover every configured cron replica and wait for auction push delivery.
 
 - Maintenance readiness capture continues through postflight failures until the external smoke and readiness checks recover; the runbook checks dependency health, unchanged images and that no service has failed.
