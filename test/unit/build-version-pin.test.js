@@ -1128,6 +1128,7 @@ function adapterOutUnder(env) {
 			+ 'process.execArgv.length = 0\n'
 			+ `const config = (await import(${JSON.stringify(configHref)})).default\n`
 			+ 'console.log(JSON.stringify({ stub: config.kit.adapter?.name === \'stub-adapter\', out: config.kit.adapter?.out ?? null }))'
+		/** @type {NodeJS.ProcessEnv} */
 		const childEnv = buildEnvironment({ ...parentEnv, ...env, npm_lifecycle_event: 'build' })
 		childEnv.NODE_ENV ||= 'production'
 		const result = spawnSync(process.execPath, ['--import', pathToFileURL(register).href, '--input-type=module', '-e', probe], {
