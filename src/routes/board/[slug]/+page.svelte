@@ -215,6 +215,7 @@
 	<div class="alert alert-error m-4">{$notesStore.error.message}</div>
 <!-- Normal state: board is loaded -->
 {:else}
+	<div class="flex min-h-0 flex-1 flex-col" data-testid="board-workspace">
 	<BoardHeader
 		settings={$settingsStore}
 		onUpdate={(fields) => updateSettings(boardId, fields)}
@@ -248,6 +249,7 @@
 	</Canvas>
 
 	<ActivityTicker items={$activityStore} />
+	</div>
 
 	<!--
 		FAB (Floating Action Button) menu for board arrangement actions.

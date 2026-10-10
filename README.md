@@ -99,6 +99,8 @@ and rebases the page's revision baseline after Redis resets, without reloading.
 
 ## Board lifecycle
 
+Board names wrap visibly at narrow widths. Use the Rename board button or double-click the title to edit it; Enter saves. The canvas fills the space between the board header and activity bar, so wrapping controls do not push its bottom below the viewport.
+
 Undo restores notes you deleted within the last 30 seconds, for every visitor. Use the deletion toast or Ctrl/Cmd+Z outside text fields; recent deletions are available again after reload. Each restore is accepted once and never replaces an existing note. Creating, editing, moving and arranging notes are excluded, and there is no redo. Deletion snapshots expire after 30 seconds and are removed by a minute cleanup task. PostgreSQL deployments require migration `004_note_deletion_undo.sql` before starting the new app.
 
 Boards are ephemeral by design. Every board starts with a 1-hour countdown. Any meaningful action (create/edit/delete a note, change settings, run an arrangement) resets the timer. Boards with no activity for 1 hour are deleted automatically by a server-side cron job.

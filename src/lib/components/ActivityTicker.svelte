@@ -1,5 +1,5 @@
 <!--
-	ActivityTicker - fixed bar at the bottom showing recent board activity.
+	ActivityTicker - bottom bar showing recent board activity.
 
 	Shows the 5 most recent actions (note created, edited, deleted, etc).
 	Items are ephemeral - they come from the activity live stream, not
@@ -14,7 +14,7 @@
 	const latest = $derived(items.slice(-5).toReversed())
 </script>
 
-<div class="fixed bottom-0 left-0 right-0 bg-base-200/80 backdrop-blur-sm
+<div data-testid="board-activity" class="shrink-0 bg-base-200/80 backdrop-blur-sm
 						border-t border-base-300 px-4 py-1.5 flex gap-6 overflow-hidden text-xs">
 	{#each latest as item (item.id)}
 		<span class="whitespace-nowrap flex items-center gap-1">

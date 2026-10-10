@@ -50,9 +50,8 @@
      note instead of zooming the page (and drops the legacy tap delay). -->
 <div
 	bind:this={canvasEl}
-	class="relative w-full overflow-auto touch-manipulation"
+	class="relative w-full min-h-0 flex-1 overflow-auto touch-manipulation"
 	style:background
-	style:height="calc(100dvh - 7rem)"
 	onpointermove={onPointerMove}
 	{ondblclick}
 >

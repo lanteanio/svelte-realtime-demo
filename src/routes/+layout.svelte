@@ -99,8 +99,8 @@
 	)
 </script>
 
-<div class="min-h-screen bg-base-100">
-	<div class="navbar bg-base-100 border-b border-base-300 px-2 sm:px-4 min-h-0 h-12">
+<div class="min-h-dvh flex flex-col bg-base-100">
+	<div class="navbar bg-base-100 border-b border-base-300 px-2 sm:px-4 min-h-0 h-12 shrink-0">
 		<!-- Between 640 and 1023 the end cluster outgrows its navbar half
 		     and paints over the wordmark; the count and color picker wait
 		     for lg, and the wordmark truncates instead of being covered.

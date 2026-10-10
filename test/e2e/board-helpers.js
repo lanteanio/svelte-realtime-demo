@@ -124,7 +124,7 @@ export async function clickFabAction(page, label) {
 }
 
 export function activityTicker(page) {
-	return page.locator('.fixed.bottom-0')
+	return page.getByTestId('board-activity')
 }
 
 export function boardCard(page, path) {

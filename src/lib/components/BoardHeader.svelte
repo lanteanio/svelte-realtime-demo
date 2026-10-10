@@ -2,39 +2,56 @@
 	BoardHeader - board title, background picker, TTL timer, presence.
 
 	On mobile:
-	- Title truncates to prevent overflow
+	- The full title wraps on its own row
 	- Background colors use smaller circles
 	- Presence bar shows max 3 avatars
-	- Everything fits in one or two rows via flex-wrap
+	- Controls wrap below the title when they need more room
 -->
 <script>
 	import CountdownTimer from './CountdownTimer.svelte'
-	import { Clock, Plus } from 'lucide-svelte'
+	import { Clock, Pencil, Plus } from 'lucide-svelte'
 
 	let { settings, onUpdate, children, onAddNote } = $props()
 	let editingTitle = $state(false)
+	let renameButton = $state()
+	function focusTitle(node) {
+		node.focus()
+		node.select()
+	}
 
 	const BACKGROUNDS = ['#f5f5f4', '#fefce8', '#ecfdf5', '#eff6ff', '#fdf4ff', '#1e1e2e']
 
 	const isProtected = $derived(settings?.slug === 'stress-me-out')
 </script>
 
-<div class="flex flex-wrap items-center gap-x-2 sm:gap-x-4 gap-y-1 bg-base-100/80 backdrop-blur-sm border-b border-base-300 px-2 sm:px-4 py-1 min-h-8">
+<div class="flex shrink-0 flex-wrap items-center gap-x-2 sm:gap-x-4 gap-y-1 bg-base-100/80 backdrop-blur-sm border-b border-base-300 px-2 sm:px-4 py-1 min-h-8">
 	<!-- Title -->
-	{#if editingTitle}
-		<input
-			class="input input-sm w-36 sm:w-48"
-			value={settings?.title ?? ''}
-			onblur={(e) => { editingTitle = false; onUpdate({ title: e.target.value }) }}
-			onkeydown={(e) => { if (e.key === 'Enter') e.target.blur() }}
-		/>
-	{:else}
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<h1
-			class="page-title cursor-pointer hover:underline truncate max-w-24 sm:max-w-none"
-			ondblclick={() => editingTitle = true}
-		>{settings?.title ?? 'Untitled Board'}</h1>
-	{/if}
+	<div class="w-full min-w-0 lg:w-auto lg:flex-1">
+		{#if editingTitle}
+			<input
+				class="input input-sm w-full"
+				aria-label="Board name"
+				use:focusTitle
+				value={settings?.title ?? ''}
+				onblur={(e) => { editingTitle = false; onUpdate({ title: e.target.value }) }}
+				onkeydown={(event) => {
+					if (event.key !== 'Enter') return
+					event.preventDefault()
+					event.currentTarget.blur()
+					renameButton?.focus()
+				}}
+			/>
+		{:else}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
+			<h1
+				class="page-title cursor-pointer hover:underline"
+				ondblclick={() => editingTitle = true}
+			>{settings?.title ?? 'Untitled Board'}</h1>
+		{/if}
+	</div>
+	<button bind:this={renameButton} class="btn btn-ghost btn-xs btn-square" aria-label="Rename board" onclick={() => editingTitle = true}>
+		<Pencil size={14} />
+	</button>
 
 	<!-- Keyboard- and touch-reachable note creation; dblclick stays the pointer fast path. -->
 	{#if onAddNote}

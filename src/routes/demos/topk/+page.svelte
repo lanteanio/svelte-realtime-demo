@@ -151,7 +151,7 @@
 		] as panel (panel.key)}
 			<div class="card bg-base-100 border border-base-300" data-testid={panel.testid}>
 				<div class="card-body py-3 space-y-2">
-					<div class="flex justify-between items-baseline">
+					<div class="flex flex-wrap justify-between items-baseline gap-x-3 gap-y-1">
 						<h2 class="section-title card-title">{panel.title}</h2>
 						<span class="text-xs opacity-50">{panel.subtitle} &middot; bars: share of shown</span>
 					</div>

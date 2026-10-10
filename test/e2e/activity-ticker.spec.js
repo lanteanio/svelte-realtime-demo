@@ -18,13 +18,15 @@ test.describe.serial('Activity Ticker', () => {
 		await expect(page.getByText('No activity yet - double-click the canvas to add a note')).toBeVisible();
 	});
 
-	test('activity ticker is fixed at bottom of page', async ({ page }) => {
+	test('activity ticker stays at the bottom of the viewport', async ({ page }) => {
 		await page.goto(boardUrl);
 		await waitForWS(page);
 		await waitForBoardReady(page);
 
-		const ticker = page.locator('.fixed.bottom-0');
+		const ticker = page.getByTestId('board-activity');
 		await expect(ticker).toBeVisible();
+		const gap = await ticker.evaluate((el) => Math.abs(el.getBoundingClientRect().bottom - window.innerHeight));
+		expect(gap).toBeLessThanOrEqual(1);
 	});
 
 	test('creating a note produces an activity entry', async ({ page }) => {
@@ -47,7 +49,7 @@ test.describe.serial('Activity Ticker', () => {
 		await page.waitForTimeout(1500);
 
 		// The ticker should contain entries with user name (font-semibold) and action text
-		const entries = page.locator('.fixed.bottom-0 span.whitespace-nowrap');
+		const entries = page.getByTestId('board-activity').locator('span.whitespace-nowrap');
 		if (await entries.count() > 0) {
 			const entry = entries.first();
 			const userName = entry.locator('.font-semibold');
@@ -61,7 +63,7 @@ test.describe.serial('Activity Ticker', () => {
 		await waitForBoardReady(page);
 		await page.waitForTimeout(1500);
 
-		const dots = page.locator('.fixed.bottom-0 .w-2.h-2.rounded-full');
+		const dots = page.getByTestId('board-activity').locator('.w-2.h-2.rounded-full');
 		if (await dots.count() > 0) {
 			const bg = await dots.first().evaluate((el) => el.style.background);
 			expect(bg).toBeTruthy();
@@ -74,7 +76,7 @@ test.describe.serial('Activity Ticker', () => {
 		await waitForBoardReady(page);
 
 		// Count existing activity entries
-		const ticker = page.locator('.fixed.bottom-0');
+		const ticker = page.getByTestId('board-activity');
 		const entriesBefore = await ticker.locator('span.whitespace-nowrap').count();
 
 		if (await getNotes(page).count() > 0) {

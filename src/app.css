@@ -4,12 +4,13 @@
 }
 
 /* Page, section and subsection titles share one scale across the landing
- * page, demos and board. Text and badges within a title keep their own styles. */
+ * page, demos and board. Text and badges within a title keep their own styles.
+ * Unlayered on purpose so component utilities cannot silently replace the scale. */
 .page-title {
 	font-size: 1.5rem;
 	line-height: 2rem;
 	font-weight: 700;
-	overflow-wrap: anywhere;
+	overflow-wrap: break-word;
 }
 
 .section-title {
@@ -17,7 +18,7 @@
 	line-height: 1.75rem;
 	font-weight: 600;
 	flex-wrap: wrap;
-	overflow-wrap: anywhere;
+	overflow-wrap: break-word;
 }
 
 .subsection-title {
