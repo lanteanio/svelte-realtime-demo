@@ -8,10 +8,11 @@ import { fileURLToPath } from 'node:url'
 
 // Each check script walks the tree above its own directory, so a copy of it
 // placed at <fixture>/scripts/ checks <fixture> and nothing else. The fixture's
-// directory name holds a space, a non-ASCII letter and a percent sign, which a
-// file URL's pathname spells percent-encoded.
+// directory name holds a space, a non-ASCII letter, a percent sign and a #,
+// which a file URL's pathname spells percent-encoded; decodeURI leaves the #
+// encoded.
 function runCopyOf(name, files) {
-	const dir = mkdtempSync(join(tmpdir(), `srd check ${String.fromCharCode(0xfc)}%41-`))
+	const dir = mkdtempSync(join(tmpdir(), `srd check ${String.fromCharCode(0xfc)}%41#-`))
 	try {
 		mkdirSync(join(dir, 'scripts'))
 		copyFileSync(fileURLToPath(new URL(`../../scripts/${name}`, import.meta.url)), join(dir, 'scripts', name))
@@ -27,6 +28,10 @@ function runCopyOf(name, files) {
 }
 
 const BROKEN = 'const = ;\n'
+const CRON = 'export const tick = live.cron(\'* * * * *\', () => {})\n'
+// Files with no live.cron() in them, inside src/live/ and outside it: neither
+// is counted nor flagged.
+const NO_CRON = { 'src/live/plain.js': 'export const value = 1\n', 'src/lib/util.js': 'export const value = 1\n' }
 
 test('the syntax check does not read the harness\'s per-run build directories', { timeout: 60_000 }, () => {
 	// What is checked: a file that fails node --check at
@@ -43,13 +48,34 @@ test('the syntax check does not read the harness\'s per-run build directories', 
 })
 
 test('the cron registration check reads a checkout whose path needs percent-encoding in a URL', { timeout: 60_000 }, () => {
-	// What is checked: in such a checkout, a live.cron() under src/live/ is
-	// counted and passes, and one under src/lib/ fails the check, naming it.
-	const cron = 'export const tick = live.cron(\'* * * * *\', () => {})\n'
-	const passing = runCopyOf('check-cron-registration.mjs', { 'src/live/jobs.js': cron })
+	// What is checked: in such a checkout, with a live.cron() under src/live/
+	// and a file without one both inside src/live/ and outside it, the check
+	// passes and counts 1 file; adding a live.cron() under src/lib/ fails the
+	// check, naming that file.
+	const passing = runCopyOf('check-cron-registration.mjs', { 'src/live/jobs.js': CRON, ...NO_CRON })
 	assert.equal(passing.status, 0, passing.output)
 	assert.match(passing.output, /cron registration: 1 file\(s\) with live\.cron\(\), all under src\/live\//)
-	const failing = runCopyOf('check-cron-registration.mjs', { 'src/live/jobs.js': cron, 'src/lib/server/jobs.js': cron })
+	const failing = runCopyOf('check-cron-registration.mjs', { 'src/live/jobs.js': CRON, ...NO_CRON, 'src/lib/server/jobs.js': CRON })
 	assert.notEqual(failing.status, 0, failing.output)
 	assert.match(failing.output, /src[\\/]lib[\\/]server[\\/]jobs\.js/)
+})
+
+test('the cron registration check flags a live.cron() in any file outside src/live/', { timeout: 60_000 }, () => {
+	// What is checked: each of these fails the check and is named, while the
+	// one under src/live/ is not: a sibling directory sharing the stem
+	// (src/live-extra/), a directory named live elsewhere (src/lib/live/), an
+	// .mjs file, a .ts file, and a call that is not an exported const. Not
+	// looked at: .d.ts files, which the check skips on purpose, and calls
+	// spelled across lines.
+	const failing = runCopyOf('check-cron-registration.mjs', {
+		'src/live/jobs.js': CRON,
+		'src/live-extra/jobs.js': CRON,
+		'src/lib/live/schedule.mjs': 'const tick = enabled ? live.cron(\'* * * * *\', () => {}) : null\n',
+		'src/lib/jobs.ts': CRON
+	})
+	assert.notEqual(failing.status, 0, failing.output)
+	assert.match(failing.output, /src[\\/]live-extra[\\/]jobs\.js/)
+	assert.match(failing.output, /src[\\/]lib[\\/]live[\\/]schedule\.mjs/)
+	assert.match(failing.output, /src[\\/]lib[\\/]jobs\.ts/)
+	assert.doesNotMatch(failing.output, /src[\\/]live[\\/]jobs\.js/)
 })
