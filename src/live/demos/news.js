@@ -258,7 +258,8 @@ export async function purge(ctx) {
 /**
  * Each control has a cluster-shared revision paired with its Redis value.
  * Streams deliver changes promptly; the snapshot RPC reconciles notifications
- * that set-merge batches into one browser frame.
+ * that set-merge batches into one browser frame. The loader returns the same
+ * speed/revision shape as the setter publishes.
  */
 export const readNewsSpeed = live(readSpeed)
 
@@ -275,6 +276,8 @@ export const newsControls = live.stream(
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
 	const revision = await writeControl(redis.redis, SPEED_KEY, num)
+	// Publish after the atomic write: a reacting snapshot read must observe
+	// this write or a later one, never the value from before this commit.
 	ctx.publish(TOPICS.demoNewsControl, 'set', { speed: num, revision })
 	return { ok: true, speed: num, revision }
 })

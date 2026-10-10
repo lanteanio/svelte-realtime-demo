@@ -2,8 +2,9 @@
  * Subscribe to a versioned control and reconcile each notification with its
  * authoritative snapshot. A set-merge stream notifies once per animation
  * frame, so a newer publish followed by an older one can hide the newer value.
- * One serialized read per notification burst recovers it; a dirty read loops
- * once more so changes arriving during the round trip cannot be lost.
+ * Serialized reads recover it, including on initial load and reconnect. A
+ * notification during a read discards that reply and requests a fresh snapshot.
+ * A settled snapshot rebases the revision even after Redis resets its counter.
  */
 export function subscribeControl(stream, read, receive) {
 	let active = true
@@ -11,10 +12,10 @@ export function subscribeControl(stream, read, receive) {
 	let dirty = false
 	let revision = -1n
 
-	function accept(value) {
+	function accept(value, authoritative = false) {
 		if (!active || typeof value?.revision !== 'string' || !/^\d+$/.test(value.revision)) return
 		const next = BigInt(value.revision)
-		if (next < revision) return
+		if (!authoritative && next < revision) return
 		revision = next
 		receive(value)
 	}
@@ -25,9 +26,14 @@ export function subscribeControl(stream, read, receive) {
 		try {
 			do {
 				dirty = false
-				try { accept(await read()) } catch {
-					// A disconnected RPC cannot refresh state. The next stream
-					// notification, including its reconnect snapshot, retries.
+				try {
+					const snapshot = await read()
+					// A notification during this read may follow the Redis read.
+					// Discard the reply and repeat before treating it as authoritative.
+					if (!dirty) accept(snapshot, true)
+				} catch {
+					// Failed reconciliation retries on the next notification,
+					// including the initial snapshot after reconnect.
 				}
 			} while (active && dirty)
 		} finally {

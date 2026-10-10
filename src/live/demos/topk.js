@@ -131,6 +131,8 @@ function pickItem(bias) {
 export const setSpeed = live(async (ctx, n) => {
 	const num = Math.max(0, Math.min(50, Math.round(Number(n) || 0)))
 	const revision = await writeControl(redis.redis, SPEED_KEY, num)
+	// Publish only after the atomic write, so a reacting snapshot read sees
+	// this write or a later one, never the value from before this commit.
 	ctx.publish(TOPICS.demoTopkSpeed, 'set', { speed: num, revision })
 	return { ok: true, speed: num, revision }
 })
@@ -145,14 +147,18 @@ export const setBias = live(async (ctx, b) => {
 		throw new LiveError('VALIDATION', 'invalid bias')
 	}
 	const revision = await writeControl(redis.redis, BIAS_KEY, b)
+	// The write must commit before notifying subscribers that re-read Redis.
 	ctx.publish(TOPICS.demoTopkBias, 'set', { bias: b, revision })
 	return { ok: true, bias: b, revision }
 })
 
 /**
+ * Keep one stream per control: a combined payload could carry stale speed
+ * alongside a fresh bias (or vice versa) when replicas write concurrently.
  * Each control has a cluster-shared revision paired with its Redis value.
  * Streams deliver changes promptly; the snapshot RPC reconciles notifications
- * that set-merge batches into one browser frame.
+ * that set-merge batches into one browser frame. Loaders return the same
+ * value/revision shape as the corresponding setter publishes.
  */
 export const readTopkSpeed = live(readSpeed)
 export const readTopkBias = live(readBias)

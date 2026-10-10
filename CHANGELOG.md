@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The local cluster harness can run four replicas, with arena coverage that follows individual visitors through interest entry, removal and re-entry on every process.
 
-- News and Top-K controls retain the latest Redis write when replica publishes arrive out of order. Revisions pair atomically with values, and a serialized snapshot read reconciles each notification burst, including changes batched into one browser frame.
+- News and Top-K controls retain the latest Redis write when replica publishes arrive out of order and recover after Redis revision counters reset. Each subscribed page reconciles every notified control with serialized snapshot reads, including initial load and reconnect; notifications arriving during a read trigger another read.
 
 - The touch sweep checks the width of checkbox and toggle labels as well as their height, removes its temporary todo even when an assertion fails, and only empties the shared kanban fixture inside the isolated local test harness. Remote runs explicitly report omitted seed-button coverage.
 

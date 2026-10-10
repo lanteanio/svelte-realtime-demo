@@ -86,9 +86,12 @@ Every page lives at `/demos/<slug>`, backed by one module in
 | `phases` | Attach lifecycle + atomic publish batch |
 
 News and Top-K controls pair each Redis write with an atomic revision. Their
-pages ignore older revisions and reconcile each stream notification burst with
-a serialized snapshot RPC. This adds a read round trip per burst so two updates
-batched into one browser frame still converge on the current shared value.
+pages ignore older stream revisions and reconcile notifications with serialized
+snapshot RPCs. Each subscribed page reads on initial load, reconnect and every
+notification burst: two control reads for Top-K, one for News on load/reconnect,
+and one per notified control otherwise. A notification during a read triggers
+another read after it finishes. This recovers writes hidden by browser frame
+batching and rebases counters after Redis resets, without reloading the page.
 
 ---
 
