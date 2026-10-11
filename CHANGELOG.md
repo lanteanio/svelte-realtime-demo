@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `scripts/host/check-disk-capacity.sh` reports when disk usage crosses the planning or urgent threshold, and the README lists read-only commands for finding what uses the space before any cleanup is approved.
+
 - The README documents the host firewall for IPv4 and IPv6, Docker ingress and SSH settings, with the canonical rules in `scripts/host/` and checks to run after a restart.
 
 - CI runs the PostgreSQL undo integration suite with migrations in a disposable database.
