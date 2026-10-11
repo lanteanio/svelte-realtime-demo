@@ -2,14 +2,16 @@
 
 # Shared bounded readiness wait for deploy.sh and reset-all.sh. The caller may
 # set APP_IMAGE so Compose resolves the same immutable image used for rollout.
+# Arguments after timeout and replica count select the health check Compose files.
 wait_for_app_health() {
 	local timeout_seconds=${1:-180}
 	local expected_replicas=${2:-1}
+	local compose_options=("${@:3}")
 	local deadline=$((SECONDS + timeout_seconds))
 	local ids id running health all_healthy
 
 	while [ "$SECONDS" -lt "$deadline" ]; do
-		mapfile -t ids < <(docker compose ps -a -q app)
+		mapfile -t ids < <(docker compose "${compose_options[@]}" ps -a -q app)
 		all_healthy=1
 
 		if [ "${#ids[@]}" -lt "$expected_replicas" ]; then
@@ -33,7 +35,7 @@ wait_for_app_health() {
 	done
 
 	echo "ERROR: expected $expected_replicas healthy app replica(s) within ${timeout_seconds}s." >&2
-	docker compose ps app >&2 || true
+	docker compose "${compose_options[@]}" ps app >&2 || true
 	return 1
 }
 

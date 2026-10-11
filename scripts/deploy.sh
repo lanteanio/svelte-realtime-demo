@@ -34,7 +34,7 @@ fi
 # `compose run`, or a stopped old replica) must not be read as a live replica on
 # a different image and block the deploy behind the ambiguity guard below.
 mapfile -t previous_images < <(
-	docker compose ps -q app \
+	docker compose -f docker-compose.yml ps -q app \
 		| xargs -r docker inspect --format '{{.Config.Image}}' \
 		| sort -u
 )
@@ -104,26 +104,26 @@ revision=$(git rev-parse HEAD)
 new_image="svelte-realtime-demo-app:$revision"
 
 echo "Building immutable app image $new_image..."
-APP_IMAGE="$new_image" APP_REPLICAS="$APP_REPLICAS" docker compose build --pull app
+APP_IMAGE="$new_image" APP_REPLICAS="$APP_REPLICAS" docker compose -f docker-compose.yml build --pull app
 
 echo "Smoke-checking the Linux entrypoint bytes..."
 docker run --rm --entrypoint /app/entrypoint.sh "$new_image" true
 
 echo "Applying versioned database migrations..."
 APP_IMAGE="$new_image" APP_REPLICAS="$APP_REPLICAS" \
-	docker compose run --rm --no-deps app npm run migrate
+	docker compose -f docker-compose.yml run --rm --no-deps app npm run migrate
 
 echo "Starting $APP_REPLICAS app replicas..."
 rolled_out=1
 APP_IMAGE="$new_image" APP_REPLICAS="$APP_REPLICAS" \
-	docker compose up -d --no-deps --force-recreate --scale "app=$APP_REPLICAS" app
+	docker compose -f docker-compose.yml up -d --no-deps --force-recreate --scale "app=$APP_REPLICAS" app
 
 echo "Waiting up to ${DEPLOY_TIMEOUT_SECONDS}s for every replica to report healthy..."
-APP_IMAGE="$new_image" wait_for_app_health "$DEPLOY_TIMEOUT_SECONDS" "$APP_REPLICAS"
+APP_IMAGE="$new_image" wait_for_app_health "$DEPLOY_TIMEOUT_SECONDS" "$APP_REPLICAS" -f docker-compose.yml
 
 echo "Running external HTTP and WebSocket smoke checks against $DEPLOY_BASE_URL..."
 run_deployment_smoke
 
 trap - EXIT
 echo "Deployed successfully!"
-APP_IMAGE="$new_image" docker compose logs --tail 20 app || true
+APP_IMAGE="$new_image" docker compose -f docker-compose.yml logs --tail 20 app || true
