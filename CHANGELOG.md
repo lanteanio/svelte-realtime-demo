@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Undo restore tests reject a second existing board without consuming the original receipt.
 
 - Compose build-context tests reject continued short-form paths and drive-qualified Dockerfiles.
+- Maintenance readiness capture handles terminal Ctrl+C and preserves error-based outage windows and completed outcomes.
 
 - Board rename tests locate the labelled editor independently of its responsive width.
 - Startup diagnostics retain early arena loading failures and name failed entry modules before delivered siblings.

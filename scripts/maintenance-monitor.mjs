@@ -107,6 +107,19 @@ export function startMaintenanceMonitor({ origin, persist, probe = readinessProb
 	}
 }
 
+export function bindMaintenanceInput(input, monitor, report = console.log) {
+	let checking = false
+	input.on('SIGINT', () => { void monitor.stop('aborted').catch(() => {}) })
+	input.on('line', () => {
+		if (checking) { report('Completion checks are already running.'); return }
+		checking = true
+		void monitor.complete().then(passed => report(passed ? 'External smoke and readiness passed; capture completed.' : 'Completion checks did not pass; sampling continues.')).catch(error => {
+			report(error.name)
+			void monitor.stop('error').catch(() => {})
+		}).finally(() => { checking = false })
+	})
+}
+
 async function main() {
 	if (process.argv.length !== 4) throw new Error('usage: node scripts/maintenance-monitor.mjs https://your-domain.example private-readiness.json')
 	const origin = maintenanceOrigin(process.argv[2])
@@ -127,15 +140,13 @@ async function main() {
 	})
 	const monitor = startMaintenanceMonitor({ origin, persist, smoke })
 	const input = createInterface({ input: process.stdin, output: process.stdout })
-	const abort = () => { void monitor.stop('aborted') }
+	const abort = () => { void monitor.stop('aborted').catch(() => {}) }
 	process.once('SIGINT', abort)
 	process.once('SIGTERM', abort)
-	const deadline = setTimeout(() => { void monitor.stop('deadline') }, 30 * 60 * 1000)
+	const deadline = setTimeout(() => { void monitor.stop('deadline').catch(() => {}) }, 30 * 60 * 1000)
 	console.log('Sampling /readyz. Keep this process running through host postflight failures.')
 	console.log('After host postflight passes, press Enter to run the external smoke. A failed smoke keeps sampling; Enter retries it. Ctrl+C aborts without marking completion.')
-	input.on('line', () => {
-		void monitor.complete().then(passed => console.log(passed ? 'External smoke and readiness passed; capture completed.' : 'Completion checks did not pass; sampling continues.')).catch(error => { console.error(error.name); void monitor.stop('error') })
-	})
+	bindMaintenanceInput(input, monitor)
 	try {
 		const result = await monitor.done
 		console.log(`Capture ${result.outcome}: ${output}`)

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import { setTimeout as delay } from 'node:timers/promises'
 import { test } from 'node:test'
-import { failureWindows, maintenanceOrigin, startMaintenanceMonitor } from '../../scripts/maintenance-monitor.mjs'
+import { PassThrough } from 'node:stream'
+import { createInterface } from 'node:readline'
+import { bindMaintenanceInput, failureWindows, maintenanceOrigin, startMaintenanceMonitor } from '../../scripts/maintenance-monitor.mjs'
 
 async function waitFor(condition) {
 	for (let attempt = 0; attempt < 100; attempt++) {
@@ -126,4 +128,41 @@ test('remote cleartext targets and credential-bearing URLs are refused', () => {
 	for (const url of ['http://example.test', 'https://user:secret@example.test', 'https://example.test/board', 'https://example.test/?token=value']) assert.throws(() => maintenanceOrigin(url))
 	assert.equal(maintenanceOrigin('https://example.test'), 'https://example.test')
 	assert.equal(maintenanceOrigin('http://127.0.0.1:3000'), 'http://127.0.0.1:3000')
+})
+
+test('terminal Ctrl+C aborts and records a non-success outcome', async () => {
+	const stream = new PassThrough()
+	const input = createInterface({ input: stream, output: new PassThrough(), terminal: true })
+	const written = []
+	const monitor = startMaintenanceMonitor({ origin: 'https://example.test', intervalMs: 2, persist: record => { written.push(record) }, probe: async () => 503, smoke: async () => true })
+	bindMaintenanceInput(input, monitor, () => {})
+	try {
+		await waitFor(() => written.at(-1)?.samples.length >= 1)
+		stream.write('\x03')
+		await waitFor(() => written.at(-1)?.finishedAt !== null)
+		assert.equal((await monitor.done).outcome, 'aborted')
+		assert.equal(written.at(-1).outcome, 'aborted')
+	} finally { input.close(); stream.destroy(); await monitor.stop() }
+})
+
+test('probe errors open and extend failure windows even with a success status', () => {
+	const samples = [
+		{ status: 200, error: null },
+		{ status: null, error: 'TimeoutError' },
+		{ status: 200, error: 'Error' },
+		{ status: 200, error: null }
+	].map((sample, i) => ({ ...sample, startedAt: new Date(i * 1000).toISOString(), finishedAt: new Date(i * 1000 + 100).toISOString() }))
+	const windows = failureWindows(samples)
+	assert.equal(windows.length, 1)
+	assert.equal(windows[0].firstFailedProbe.startedAt, samples[1].startedAt)
+	assert.equal(windows[0].lastFailedProbe.startedAt, samples[2].startedAt)
+	assert.equal(windows[0].firstRecoveredProbe.startedAt, samples[3].startedAt)
+	assert.equal(windows[0].probeStartSpanMs, 2000)
+})
+
+test('a later stop cannot replace successful completion', async () => {
+	const monitor = startMaintenanceMonitor({ origin: 'https://example.test', intervalMs: 2, persist: () => {}, probe: async () => 200, smoke: async () => true })
+	assert.equal(await monitor.complete(), true)
+	assert.equal((await monitor.stop('deadline')).outcome, 'complete')
+	assert.equal((await monitor.stop('aborted')).outcome, 'complete')
 })

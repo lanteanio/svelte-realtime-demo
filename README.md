@@ -405,6 +405,7 @@ unhealthy dependency:
   test "$(docker compose ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
   for service in postgres redis; do
     maintenance_ids=$(docker compose ps -a -q "$service")
+    test -n "$maintenance_ids"
     mapfile -t maintenance_service_ids <<< "$maintenance_ids"
     test "${#maintenance_service_ids[@]}" -eq 1
     maintenance_deadline=$((SECONDS + 120))
