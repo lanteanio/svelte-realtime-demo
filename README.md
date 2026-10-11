@@ -334,7 +334,10 @@ unfamiliar dump shapes fail closed. Redis must load the RDB into an isolated
 server and account for every checked key as loaded or expired at load. Temporary
 database files, COPY payloads and role hashes stay in container tmpfs;
 containers are removed on exit. Roles are compared by SHA-256 digests produced
-inside the query pipeline, never by retained password-hash files.
+inside the query pipeline, never by retained password-hash files. Memberships
+between two PostgreSQL-owned `pg_` roles are excluded from the source comparison
+because initdb assigns their grantor to its bootstrap administrator. Every
+membership involving an application role remains in the comparison.
 
 A zero exit with `full_restore_check=passed` creates `result.json` in the private
 result directory. It records image IDs, backup file checksums, UTC times, table

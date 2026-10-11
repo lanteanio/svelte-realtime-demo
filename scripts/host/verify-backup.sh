@@ -60,8 +60,8 @@ SELECT kind, schema_name, object_name, owner_name, acl FROM (
 ) objects ORDER BY kind,schema_name,object_name;
 OWNERS
 cat > "$work/roles.sql" <<'ROLES'
-SELECT r.rolname,r.rolsuper,r.rolinherit,r.rolcreaterole,r.rolcreatedb,r.rolcanlogin,r.rolreplication,r.rolconnlimit,coalesce(r.rolvaliduntil::text,''),r.rolbypassrls,coalesce(r.rolconfig::text,''),coalesce(a.rolpassword,'') FROM pg_roles r JOIN pg_authid a USING (oid) WHERE r.rolname NOT LIKE 'pg_%' AND r.rolname <> 'restore_verifier' ORDER BY r.rolname;
-SELECT 'membership', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor), m.admin_option, coalesce(to_jsonb(m)->>'inherit_option',''), coalesce(to_jsonb(m)->>'set_option','') FROM pg_auth_members m WHERE pg_get_userbyid(m.roleid) <> 'restore_verifier' AND pg_get_userbyid(m.member) <> 'restore_verifier' ORDER BY 2,3,4;
+SELECT r.rolname,r.rolsuper,r.rolinherit,r.rolcreaterole,r.rolcreatedb,r.rolcanlogin,r.rolreplication,r.rolconnlimit,coalesce(r.rolvaliduntil::text,''),r.rolbypassrls,coalesce(r.rolconfig::text,''),coalesce(a.rolpassword,'') FROM pg_roles r JOIN pg_authid a USING (oid) WHERE left(r.rolname,3) <> 'pg_' AND r.rolname <> 'restore_verifier' ORDER BY r.rolname;
+SELECT 'membership', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor), m.admin_option, coalesce(to_jsonb(m)->>'inherit_option',''), coalesce(to_jsonb(m)->>'set_option','') FROM pg_auth_members m WHERE pg_get_userbyid(m.roleid) <> 'restore_verifier' AND pg_get_userbyid(m.member) <> 'restore_verifier' AND NOT (left(pg_get_userbyid(m.roleid),3) = 'pg_' AND left(pg_get_userbyid(m.member),3) = 'pg_') ORDER BY 2,3,4;
 ROLES
 for query in counts ownership roles; do
   docker compose exec -T postgres sh -c 'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB"' < "$work/$query.sql" | { if [ "$query" = roles ]; then sha256sum; else cat; fi; } > "$work/source-$query.tsv"
