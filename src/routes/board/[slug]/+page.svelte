@@ -16,6 +16,7 @@
 	Undo restores that snapshot through an RPC and publishes it to everyone.
 -->
 <script>
+	import { tick } from 'svelte'
 	import { notes, createNote, moveNote, editNote, deleteNote, pendingNoteDeletions, undoNoteDeletion, focusNote, tidyNotes, rearrangeNotes, shuffleNotes, groupByAuthor } from '$live/boards/notes'
 	import { Layers, LayoutGrid, Shuffle, Users, Sparkles, X } from 'lucide-svelte'
 	import { activity } from '$live/boards/activity'
@@ -78,6 +79,20 @@
 	const localDeadline = (item, requestedAt) => ({ ...item, expiresAt: requestedAt + item.remainingMs })
 	let undoBusy = $state(false)
 	let noteError = $state('')
+	let noteAnnouncement = $state('')
+	let announcementVersion = 0
+
+	async function announceNote(message) {
+		const version = ++announcementVersion
+		noteAnnouncement = ''
+		await tick()
+		if (version === announcementVersion) noteAnnouncement = message
+	}
+
+	function reportNoteError(message) {
+		noteError = message
+		void announceNote(message)
+	}
 	let clock = $state(Date.now())
 	const undoable = $derived(deletions.filter((item) => item.expiresAt > clock))
 	const latestDeletion = $derived(undoable[0])
@@ -86,11 +101,13 @@
 		const currentBoard = boardId
 		let active = true
 		deletions = []
+		noteError = ''
+		void announceNote('')
 		usedReceipts = new Set()
 		const requestedAt = Date.now()
 		pendingNoteDeletions(currentBoard).then((items) => {
 			if (active) deletions = [...deletions, ...items.filter((item) => !usedReceipts.has(item.token) && !deletions.some((own) => own.token === item.token)).map((item) => localDeadline(item, requestedAt))]
-		}).catch((error) => { if (active) noteError = error?.message ?? 'Could not load recent deletions' })
+		}).catch((error) => { if (active) reportNoteError(error?.message ?? 'Could not load recent deletions') })
 		return () => { active = false }
 	})
 
@@ -108,9 +125,13 @@
 		noteError = ''
 		try {
 			const receipt = await deleteNote(currentBoard, noteId)
-			if (currentBoard === boardId && !usedReceipts.has(receipt.token)) deletions = [localDeadline(receipt, requestedAt), ...deletions.filter((item) => item.token !== receipt.token)]
+			if (currentBoard === boardId && !usedReceipts.has(receipt.token)) {
+				deletions = [localDeadline(receipt, requestedAt), ...deletions.filter((item) => item.token !== receipt.token)]
+				const count = deletions.filter((item) => item.expiresAt > Date.now()).length
+				void announceNote(count > 1 ? `Note deleted. ${count} note deletions can be undone.` : 'Note deleted.')
+			}
 		} catch (error) {
-			if (currentBoard === boardId) noteError = error?.message ?? 'Could not delete the note'
+			if (currentBoard === boardId) reportNoteError(error?.message ?? 'Could not delete the note')
 		}
 	}
 
@@ -125,10 +146,11 @@
 			if (currentBoard === boardId) {
 				usedReceipts.add(token)
 				deletions = deletions.filter((item) => item.token !== token)
+				void announceNote('Note restored.')
 			}
 		} catch (error) {
 			if (currentBoard === boardId) {
-				noteError = error?.message ?? 'Could not undo the deletion'
+				reportNoteError(error?.message ?? 'Could not undo the deletion')
 				if (error?.code === 'CONFLICT') {
 					usedReceipts.add(token)
 					deletions = deletions.filter((item) => item.token !== token)
@@ -204,6 +226,8 @@
 </script>
 
 <svelte:window onkeydown={handleUndoKey} />
+
+<span class="sr-only" role="status" aria-atomic="true" data-testid="board-note-announcement">{noteAnnouncement}</span>
 
 <!-- Loading state: notes stream hasn't returned data yet -->
 {#if $notesStore === undefined}
@@ -333,8 +357,9 @@
 {#if latestDeletion || noteError}
 	<div class="toast toast-bottom toast-center z-50" data-testid="board-undo-toast">
 		<div class="alert shadow-lg">
-			<span role="status">{noteError || 'Note deleted.'}</span>
+			{#if noteError}<span>{noteError}</span>{/if}
 			{#if latestDeletion}
+				<span>Note deleted.</span>
 				<span>Undo available for {Math.max(0, Math.ceil((latestDeletion.expiresAt - clock) / 1000))}s.</span>
 				<button class="btn btn-sm" data-testid="board-undo" disabled={undoBusy} onclick={undoDeletion}>Undo</button>
 			{/if}

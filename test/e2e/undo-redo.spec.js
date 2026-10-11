@@ -82,7 +82,7 @@ test.describe('Collaborative deletion undo', () => {
 		await twoNotes(page)
 		await deleteFirst(page)
 		const toast = page.getByTestId('board-undo-toast')
-		const announcement = toast.getByRole('status')
+		const announcement = page.getByTestId('board-note-announcement')
 		await expect(announcement).toHaveText('Note deleted.')
 		const countdown = toast.getByText(/^Undo available for /)
 		const initialCountdown = await countdown.textContent()
@@ -97,13 +97,84 @@ test.describe('Collaborative deletion undo', () => {
 			await page.getByTestId('board-undo').click()
 			await expect(getNotes(sameVisitor)).toHaveCount(2)
 			await sameVisitor.getByTestId('board-undo').click()
-			const feedback = sameVisitor.getByTestId('board-undo-toast').getByRole('status')
+			const feedback = sameVisitor.getByTestId('board-note-announcement')
 			await expect(feedback).not.toHaveText('Note deleted.')
 			await expect(feedback).toHaveText(/\S/)
 			await expect(sameVisitor.getByTestId('board-undo')).toHaveCount(0)
 			await expect(sameVisitor.getByTestId('board-undo-toast')).toHaveCount(0, { timeout: 8000 })
 			await expect(getNotes(sameVisitor)).toHaveCount(2)
 		} finally { await sameVisitor.close() }
+	})
+
+	test('persistent announcement reports a second deletion and restoration without countdown updates', async ({ page }) => {
+		await twoNotes(page)
+		const live = page.getByTestId('board-note-announcement')
+		await expect(live).toHaveAttribute('role', 'status')
+		await expect(live).toHaveAttribute('aria-atomic', 'true')
+		await expect(live).toBeEmpty()
+		const original = await live.elementHandle()
+		await live.evaluate((node) => {
+			node.announcementEvents = []
+			new MutationObserver(() => node.announcementEvents.push(node.textContent)).observe(node, { childList: true, characterData: true, subtree: true })
+		})
+		await deleteFirst(page)
+		await expect(live).toHaveText('Note deleted.')
+		const second = getNotes(page).first()
+		await second.hover({ force: true })
+		await second.getByLabel('Delete note').click({ force: true })
+		await expect(getNotes(page)).toHaveCount(0)
+		await expect(live).toHaveText('Note deleted. 2 note deletions can be undone.')
+		const beforeCountdown = await live.evaluate((node) => [...node.announcementEvents])
+		const countdown = page.getByTestId('board-undo-toast').getByText(/^Undo available for /)
+		const initialCountdown = await countdown.textContent()
+		await expect(countdown).not.toHaveText(initialCountdown)
+		await expect(live).toHaveText('Note deleted. 2 note deletions can be undone.')
+		expect(await live.evaluate((node) => node.announcementEvents)).toEqual(beforeCountdown)
+		await page.getByTestId('board-undo').click()
+		await expect(getNotes(page)).toHaveCount(1)
+		await expect(live).toHaveText('Note restored.')
+		const restoresBefore = await live.evaluate((node) => node.announcementEvents.filter((text) => text === 'Note restored.').length)
+		await page.getByTestId('board-undo').click()
+		await expect(getNotes(page)).toHaveCount(2)
+		await expect(page.getByTestId('board-undo-toast')).toHaveCount(0)
+		await expect(live).toHaveText('Note restored.')
+		await expect.poll(() => live.evaluate((node) => node.announcementEvents.filter((text) => text === 'Note restored.').length)).toBe(restoresBefore + 1)
+		expect(await original.evaluate((node) => node === document.querySelector('[data-testid="board-note-announcement"]'))).toBe(true)
+	})
+
+	test('an error keeps live deletion context and expiry does not announce another deletion', async ({ page }) => {
+		let deleteRequests = 0
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((message) => {
+				let request
+				try { request = JSON.parse(String(message)) } catch {}
+				if (request?.rpc === 'boards/notes/deleteNote' && ++deleteRequests === 2) {
+					ws.send(JSON.stringify({ topic: '__rpc', event: request.id, data: { id: request.id, ok: false, code: 'INTERNAL_ERROR', error: 'Could not delete the note' } }))
+					return
+				}
+				server.send(message)
+			})
+			server.onMessage((message) => ws.send(message))
+		})
+		await twoNotes(page)
+		await deleteFirst(page)
+		const note = getNotes(page).first()
+		await note.hover({ force: true })
+		await note.getByLabel('Delete note').click({ force: true })
+		const toast = page.getByTestId('board-undo-toast')
+		const live = page.getByTestId('board-note-announcement')
+		await expect(toast).toContainText(/Could not delete the note[\s\S]*Note deleted\./)
+		await expect(toast.getByText('Note deleted.', { exact: true })).toBeVisible()
+		await expect(page.getByTestId('board-undo')).toBeEnabled()
+		await expect(live).toHaveText('Could not delete the note')
+		await expect(getNotes(page)).toHaveCount(1)
+		await expect(toast.getByText('Could not delete the note', { exact: true })).toHaveCount(0, { timeout: 8000 })
+		await expect(toast.getByText('Note deleted.', { exact: true })).toBeVisible()
+		await expect(live).toHaveText('Could not delete the note')
+		await page.getByTestId('board-undo').click()
+		await expect(getNotes(page)).toHaveCount(2)
+		await expect(live).toHaveText('Note restored.')
 	})
 
 	test('Ctrl+Z inside a note keeps native text undo and does not restore a deletion', async ({ page }) => {
