@@ -9,14 +9,15 @@ import { parseAst } from 'vite'
 function page() {
 	const source = readFileSync(new URL('../../src/routes/board/[slug]/+page.svelte', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1]
 	const nodes = (/** @type {any} */ (parseAst(source))).body
-	const functions = nodes.filter((node) => node.type === 'FunctionDeclaration' && ['handleDelete', 'undoDeletion'].includes(node.id.name))
+	const functions = nodes.filter((node) => node.type === 'FunctionDeclaration' && ['handleDelete', 'undoDeletion', 'announceNote', 'reportNoteError'].includes(node.id.name))
 	const deadline = nodes.find((node) => node.type === 'VariableDeclaration' && node.declarations.some((decl) => decl.id.name === 'localDeadline'))
 	const effect = nodes.find((node) => node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression' && node.expression.callee.name === '$effect' && source.slice(node.start, node.end).includes('pendingNoteDeletions'))
-	assert.ok(deadline && effect && functions.length === 2)
+	assert.ok(deadline && effect && functions.length === 4)
 	let time = 1000
 	let deliverDelete, deliverList
 	const ctx = vm.createContext({
 		boardId: 'board', deletions: [], usedReceipts: new Set(), undoBusy: false, noteError: '', clock: time,
+		noteAnnouncement: '', announcementVersion: 0, tick: async () => {},
 		Date: { now: () => time }, setInterval: () => 0, clearInterval: () => {}, $effect: (fn) => fn(),
 		deleteNote: () => new Promise((resolve) => { deliverDelete = resolve }),
 		pendingNoteDeletions: () => new Promise((resolve) => { deliverList = resolve }),
@@ -62,4 +63,19 @@ test('delayed reload receipt list does not resurrect an already restored deletio
 	p.deliverList([receipt])
 	await Promise.resolve()
 	assert.equal(p.ctx.deletions.length, 0)
+})
+
+
+test('a delayed announcement cannot replace a newer action result', async () => {
+	const p = page()
+	const ticks = []
+	p.ctx.tick = () => new Promise((resolve) => ticks.push(resolve))
+	const older = p.ctx.announceNote('Note deleted.')
+	const newer = p.ctx.announceNote('Note restored.')
+	ticks[1]()
+	await newer
+	assert.equal(p.ctx.noteAnnouncement, 'Note restored.')
+	ticks[0]()
+	await older
+	assert.equal(p.ctx.noteAnnouncement, 'Note restored.')
 })

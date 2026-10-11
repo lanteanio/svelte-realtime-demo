@@ -111,19 +111,27 @@ test('actual undo feedback effects bound errors and return timer cleanup', () =>
 	assert.equal(ctx.clock, 1234)
 })
 
-test('undo countdown text is outside every live announcement region', () => {
+test('undo countdown text stays outside the persistent announcement region', () => {
 	const ast = parse(page, { modern: true })
-	let foundToast = false, foundStatus = false, foundCountdown = false
-	function walk(node, inToast = false, live = false) {
+	let foundToast = false, foundStatus = false, foundCountdown = false, foundAnnouncementText = false
+	function walk(node, inToast = false, live = false, conditional = false, announcement = false) {
 		if (!node || typeof node !== 'object') return
 		const attrs = node.attributes ?? []
 		const attribute = (name) => attrs.find((attr) => attr.type === 'Attribute' && attr.name === name)?.value
 		const text = (value) => Array.isArray(value) ? value.map((item) => item.data ?? '').join('') : ''
+		conditional ||= ['IfBlock', 'EachBlock', 'AwaitBlock', 'KeyBlock'].includes(node.type)
 		inToast ||= text(attribute('data-testid')) === 'board-undo-toast'
+		if (text(attribute('data-testid')) === 'board-note-announcement') {
+			foundStatus = true
+			announcement = true
+			assert.equal(text(attribute('role')), 'status')
+			assert.equal(conditional, false, 'The announcement region must remain mounted outside conditional blocks')
+			assert.equal(inToast, false, 'The announcement region must outlive the toast')
+		}
+		if (announcement && node.type === 'ExpressionTag' && node.expression?.name === 'noteAnnouncement') foundAnnouncementText = true
 		live ||= ['status', 'alert', 'log'].includes(text(attribute('role'))) || ['polite', 'assertive'].includes(text(attribute('aria-live')))
 		if (inToast) {
 			foundToast = true
-			if (live) foundStatus = true
 			if (node.type === 'ExpressionTag' && page.slice(node.start, node.end).includes('latestDeletion.expiresAt - clock')) {
 				foundCountdown = true
 				assert.equal(live, false, 'The changing countdown must not be inside a live region')
@@ -131,10 +139,10 @@ test('undo countdown text is outside every live announcement region', () => {
 		}
 		for (const [key, value] of Object.entries(node)) {
 			if (key === 'parent' || key === 'loc') continue
-			if (Array.isArray(value)) value.forEach((child) => walk(child, inToast, live))
-			else if (value && typeof value === 'object') walk(value, inToast, live)
+			if (Array.isArray(value)) value.forEach((child) => walk(child, inToast, live, conditional, announcement))
+			else if (value && typeof value === 'object') walk(value, inToast, live, conditional, announcement)
 		}
 	}
 	walk(ast.fragment)
-	assert.ok(foundToast && foundStatus && foundCountdown)
+	assert.ok(foundToast && foundStatus && foundCountdown && foundAnnouncementText)
 })

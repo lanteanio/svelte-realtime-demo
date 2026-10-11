@@ -133,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
+
 - Board deletion errors retain their undo context, and a persistent live region announces deletion and restoration without repeating countdown updates.
 
 - Deployment build, migration, rollout and health checks explicitly select the checked Compose configuration, preserving the separate rollback merge.
