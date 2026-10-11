@@ -133,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- PostgreSQL note-undo integration tests apply every numbered migration to their isolated schema using the deployment runner's migration discovery.
+
 - Build-context checks reject unsupported YAML line separators in Compose files before reading comments or build declarations.
 
 - Host sampling uses available logs and counters without assuming a configured monitoring service.

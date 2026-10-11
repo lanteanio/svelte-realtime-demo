@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { before, after, test } from 'node:test'
 import pg from 'pg'
 import { postgresNoteUndo } from '../../src/lib/server/note-undo.js'
+import { loadMigrations } from '../../scripts/migration-files.mjs'
 
 const connectionString = process.env.NOTE_UNDO_TEST_DATABASE_URL
 assert.ok(connectionString, 'NOTE_UNDO_TEST_DATABASE_URL must name a disposable PostgreSQL database')
@@ -14,8 +14,8 @@ const store = postgresNoteUndo(pool)
 
 before(async () => {
 	await admin.query(`CREATE SCHEMA ${schema}`)
-	for (const file of ['001_application_schema.sql', '004_note_deletion_undo.sql']) {
-		await pool.query(await readFile(new URL(`../../migrations/${file}`, import.meta.url), 'utf8'))
+	for (const migration of await loadMigrations()) {
+		await pool.query(migration.sql)
 	}
 })
 

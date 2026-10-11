@@ -18,4 +18,4 @@ Deletion undo uses `004_note_deletion_undo.sql`. The note deletion and its visit
 
 Run `npm run test:integration` with Docker available to start a disposable PostgreSQL container, apply the migrations and check deletion/restore behavior, including concurrent board deletion. The command binds a random loopback port and removes its container on success or failure. CI runs it for every push and pull request.
 
-To use an existing disposable database instead, set `NOTE_UNDO_TEST_DATABASE_URL` and run `node --test test/integration/note-undo.postgres.test.js`. The test creates and removes its own schema.
+To use an existing disposable database instead, set `NOTE_UNDO_TEST_DATABASE_URL` and run `node --test test/integration/note-undo.postgres.test.js`. The test creates and removes its own schema, applying every numbered SQL migration in the same sorted order as the deployment runner. Both paths share migration discovery, so new migrations also affect the tested schema.

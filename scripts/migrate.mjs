@@ -1,30 +1,14 @@
-import { createHash } from 'node:crypto'
-import { readdir, readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import pg from 'pg'
+import { loadMigrations } from './migration-files.mjs'
 
 const MIGRATION_LOCK_ID = 900000
-const root = dirname(dirname(fileURLToPath(import.meta.url)))
-const migrationsDir = join(root, 'migrations')
 const connectionString = process.env.DATABASE_URL
 
 if (!connectionString) {
 	throw new Error('DATABASE_URL is required to run migrations')
 }
 
-const files = (await readdir(migrationsDir))
-	.filter((name) => /^\d{3}_[a-z0-9_]+\.sql$/.test(name))
-	.sort()
-
-if (files.length === 0) throw new Error(`No migrations found in ${migrationsDir}`)
-
-const migrations = await Promise.all(files.map(async (name) => {
-	// Checksums must be stable across Windows and Linux checkouts.
-	const sql = (await readFile(join(migrationsDir, name), 'utf8')).replace(/\r\n?/g, '\n')
-	const checksum = createHash('sha256').update(sql).digest('hex')
-	return { name, sql, checksum }
-}))
+const migrations = await loadMigrations()
 
 const client = new pg.Client({
 	connectionString,

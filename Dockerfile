@@ -69,7 +69,7 @@ RUN apt-get update \
 COPY --from=build /app/build ./build
 COPY scripts/entrypoint.sh ./
 COPY migrations ./migrations/
-COPY scripts/container-healthcheck.mjs scripts/deployment-smoke.mjs scripts/migrate.mjs ./scripts/
+COPY scripts/container-healthcheck.mjs scripts/deployment-smoke.mjs scripts/migrate.mjs scripts/migration-files.mjs ./scripts/
 RUN chmod +x entrypoint.sh
 
 # Bind directly on host:443. Host networking (see docker-compose.yml) means
