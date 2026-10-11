@@ -18,7 +18,7 @@ test('runtime image scripts can discover packaged migrations', async () => {
 		await mkdir(join(image, 'scripts'))
 		for (const source of sources) await cp(new URL(source, root), join(image, source))
 		await cp(new URL('migrations/', root), join(image, 'migrations'), { recursive: true })
-		const { loadMigrations } = await import(pathToFileURL(join(image, 'scripts/migration-files.mjs')))
+		const { loadMigrations } = await import(pathToFileURL(join(image, 'scripts/migration-files.mjs')).href)
 		const migrations = await loadMigrations()
 		assert.ok(migrations.some(({ name, sql }) => name === '004_note_deletion_undo.sql' && sql.includes('CREATE TABLE')))
 	} finally {
