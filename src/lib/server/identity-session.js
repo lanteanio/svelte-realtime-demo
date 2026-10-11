@@ -133,23 +133,32 @@ export async function lookupSession(sessionId) {
 }
 
 /**
- * Create a fresh session. The session-id is the value the caller writes
- * back to the cookie; the identity is what the page renders.
+ * Create a connection-local identity without touching the session store.
  *
  * `overrides` carries display-profile hints, including legacy cookie
  * values. Identity IDs are always generated on the server; profile
  * hints cannot select another visitor's identity.
  *
  * @param {{ name?: string, color?: string, org?: string } | null} [overrides]
- * @returns {Promise<{ sessionId: string, identity: { id: string, name: string, color: string, org: string, tenant: null } }>}
+ * @returns {{ id: string, name: string, color: string, org: string, tenant: null }}
  */
-export async function createSession(overrides) {
+export function createEphemeralIdentity(overrides) {
 	const generated = generateIdentity()
 	const id = randomUUID()
 	const name = overrides?.name ?? generated.name
 	const color = overrides?.color ?? generated.color
 	const org = VALID_ORGS.has(overrides?.org) ? overrides.org : 'acme'
+	return { id, name, color, org, tenant: null }
+}
 
+/**
+ * Persist a fresh identity for an HTTP response that can issue its cookie.
+ * @param {{ name?: string, color?: string, org?: string } | null} [overrides]
+ * @returns {Promise<{ sessionId: string, identity: { id: string, name: string, color: string, org: string, tenant: null } }>}
+ */
+export async function createSession(overrides) {
+	const identity = createEphemeralIdentity(overrides)
+	const { id, name, color, org } = identity
 	const sessionId = newSessionId()
 	// tenant is never seeded at creation; it exists only after an explicit
 	// opt-in from /demos/tenants (updateSessionField). Fresh identities are
@@ -167,7 +176,7 @@ export async function createSession(overrides) {
 		// will mint another identity, without access to the previous one's
 		// visitor-scoped state.
 	}
-	return { sessionId, identity: { id, name, color, org, tenant: null } }
+	return { sessionId, identity }
 }
 
 /**

@@ -34,7 +34,7 @@ import { activateTaskInfrastructure, destroyTaskInfrastructure, idempotencyStore
 import { forgetDraftIdempotency } from '$lib/server/forget-demo'
 import { TOPICS } from '$lib/server/topics'
 import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
-import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
+import { lookupSession, createEphemeralIdentity, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { evaluateUpgradeOrigin, upgradeOriginPolicy } from '$lib/server/origin-policy'
 import { isPerFrameRpc } from '$lib/server/rpc-limits'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
@@ -226,7 +226,7 @@ const upgradeRefusals = metrics.counter(
  *
  * In the normal flow a session exists from the page-load HTTP visit, so
  * this hook just reads it from Redis. The legacy / fresh-connection
- * fallback mints a session on the fly so WS connections that race past
+ * fallback mints a connection-local identity so WS connections that race past
  * the HTTP cookie-set (unusual, but possible for direct wss:// clients)
  * still get a usable identity.
  *
@@ -263,12 +263,10 @@ export async function upgrade({ headers, cookies, remoteAddress }) {
 	const existing = await lookupSession(raw)
 	if (existing) return existing
 
-	// Legacy cookies supply display-profile hints only. Mint a fresh
-	// server-owned identity for this connection; HTTP sets persistent cookies.
+	// An upgrade cannot issue a cookie. Keep fresh identities on this socket;
+	// only HTTP creates persistent sessions. Legacy values are profile hints.
 	const legacy = tryParseLegacyJsonCookie(raw)
-	const { sessionId, identity } = await createSession(legacy)
-	cookies.identity = sessionId
-	return identity
+	return createEphemeralIdentity(legacy)
 }
 
 /**

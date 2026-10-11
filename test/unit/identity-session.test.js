@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { registerHooks } from 'node:module'
 import { test } from 'node:test'
 import { availability, hashes } from '../fixtures/identity-redis.js'
@@ -55,4 +57,47 @@ test('an unavailable session store cannot turn a legacy hint into a victim ident
 		assert.deepEqual(result.identity, { id: result.identity.id, ...profile, tenant: null })
 		assert.equal(hashes.has(`test:identity-session:${result.sessionId}`), false)
 	} finally { availability.failed = false }
+})
+
+// Execute the upgrade export from the actual hook file with the real session
+// implementation. The rest of the hook module boots unrelated infrastructure.
+const hookSource = readFileSync(new URL('../../src/hooks.ws.js', import.meta.url), 'utf8')
+const upgradeSource = hookSource.match(/export async function upgrade\([^]*?^}/m)?.[0]
+assert.ok(upgradeSource, 'upgrade export must be present')
+const upgrade = runInNewContext(`(${upgradeSource.replace('export ', '')})`, {
+	...sessions,
+	env: {},
+	evaluateUpgradeOrigin: () => ({ allowed: true }),
+	upgradeOriginPolicy: () => ({})
+})
+
+test('cookie-less and legacy upgrades leave no stored sessions or mutated cookies', async () => {
+	const before = new Map(hashes)
+	const victim = randomUUID()
+	const legacy = JSON.stringify({ id: victim, ...profile, tenant: 'globex' })
+	const ids = new Set()
+	for (const raw of [undefined, '', 'invalid', legacy, 'A'.repeat(22)]) {
+		for (let i = 0; i < 20; i++) {
+			const cookies = raw === undefined ? {} : { identity: raw }
+			const original = { ...cookies }
+			const identity = await upgrade({ headers: {}, cookies })
+			assert.deepEqual(cookies, original)
+			assert.match(identity.id, /^[0-9a-f-]{36}$/)
+			assert.notEqual(identity.id, victim)
+			assert.equal(identity.tenant, null)
+			if (raw === legacy) assert.deepEqual(identity, { id: identity.id, ...profile, tenant: null })
+			ids.add(identity.id)
+		}
+	}
+	assert.equal(ids.size, 100)
+	assert.deepEqual(hashes, before)
+})
+
+test('an upgrade with an HTTP-issued session retains its stored identity', async () => {
+	const session = await sessions.createSession(profile)
+	const before = new Map(hashes)
+	const cookies = Object.freeze({ identity: session.sessionId })
+	assert.deepEqual(await upgrade({ headers: {}, cookies }), session.identity)
+	assert.deepEqual(await upgrade({ headers: {}, cookies }), session.identity)
+	assert.deepEqual(hashes, before)
 })
