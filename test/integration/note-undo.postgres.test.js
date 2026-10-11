@@ -59,6 +59,18 @@ test('receipt insert failure rolls the note deletion back', async () => {
 	assert.deepEqual(await store.list(f.boardId, f.actorId), [])
 })
 
+test('restoration through another existing board leaves the receipt usable on its own board', async () => {
+	const f = await fixture()
+	const other = await fixture()
+	const { token } = await store.remove(f.boardId, f.note.note_id, f.actorId)
+	assert.equal(await store.restore(other.boardId, token, f.actorId), null)
+	assert.equal((await pool.query('SELECT 1 FROM note WHERE note_id=$1', [f.note.note_id])).rowCount, 0)
+	assert.deepEqual((await pool.query('SELECT * FROM note WHERE note_id=$1', [other.note.note_id])).rows[0], other.note)
+	assert.equal((await store.list(f.boardId, f.actorId))[0].token, token)
+	assert.equal((await store.restore(f.boardId, token, f.actorId)).note_id, f.note.note_id)
+	assert.deepEqual((await pool.query('SELECT * FROM note WHERE note_id=$1', [f.note.note_id])).rows[0], f.note)
+})
+
 test('deletion through another existing board preserves both notes and mints no receipt', async () => {
 	const f = await fixture()
 	const other = await fixture()
