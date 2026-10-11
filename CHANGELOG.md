@@ -133,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Migration discovery rejects misnamed SQL files and standalone `public` or `search_path` tokens; the integration procedure documents its isolated-schema requirement.
+
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
 
 - Board deletion errors retain their undo context, and a persistent live region announces deletion and restoration without repeating countdown updates.
