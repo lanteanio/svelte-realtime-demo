@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Maintenance readiness capture handles terminal Ctrl+C and preserves error-based outage windows and completed outcomes.
 
+- Touch coverage measures hydrated board controls and the rename editor, with a nonempty measurement guard on each route.
 - Board rename tests locate the labelled editor independently of its responsive width.
 - Startup diagnostics retain early arena loading failures and name failed entry modules before delivered siblings.
 

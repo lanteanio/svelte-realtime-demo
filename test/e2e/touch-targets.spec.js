@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { openTouchPage, waitForWS } from './helpers.js'
+import { createBoard, openTouchPage, waitForBoardReady, waitForWS } from './helpers.js'
 import { openSale } from './flash-sales-helpers.js'
 import { openKanban, deleteCard } from './kanban-helpers.js'
 
@@ -10,8 +10,8 @@ import { openKanban, deleteCard } from './kanban-helpers.js'
 //
 // The per-page touch assertions each pin ONE control on ONE page, which is why
 // a hundred controls could sit below the floor while every one of those tests
-// passed. This measures every control the app's server-rendered markup draws on
-// every route (see RENDERED_AT_LOAD for what that leaves out), so the policy
+// passed. The server-rendered census covers the homepage and top-level demos.
+// The hydrated pass also creates a board and opens its rename editor, so the policy
 // is checked where it is stated - once, globally - and a page that regresses is
 // named with the offending control rather than the suite going quietly green.
 //
@@ -74,7 +74,8 @@ const DESIGNED_SIZE = {
 // appears only after hydration or after data lands never enters it, however
 // fast that data arrives. Of the app's checkboxes and toggles, only the todo
 // row checkbox on /demos/todos-rollback is of that kind. The hydrated pass
-// below measures controls after data arrives, without asserting a row census. A route not listed renders none at load,
+// below measures controls after data arrives, without asserting a row census.
+// A route not listed renders none at load,
 // and a control appearing on an unlisted route fails the sweep until its
 // variant is stated here. This census is also the sweep's proof it measured
 // anything at all: if the selector drifts or these pages stop rendering, the
@@ -89,7 +90,7 @@ const RENDERED_AT_LOAD = {
 
 async function measureControls(page) {
 	return page.evaluate(({ selector, labelActivated, floor }) => {
-		const visible = [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length > 0)
+		const visible = [...document.querySelectorAll(selector)].filter((el) => el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
 		const measurements = visible.map((el) => {
 			const parent = el.parentElement
 			const target = el.matches(labelActivated) && parent?.tagName === 'LABEL' ? parent : el
@@ -132,7 +133,7 @@ async function measureControls(page) {
 			const variant = bucket.length === 0 ? `${type}-md` : bucket.length === 1 ? bucket[0] : bucket.join('+')
 			drawn.push({ cls: m.cls, variant, w: own.width, h: own.height })
 		}
-		return { low, drawn }
+		return { low, drawn, count: measurements.length }
 	}, { selector: CONTROLS, labelActivated: LABEL_ACTIVATED, floor: FLOOR })
 }
 
@@ -246,12 +247,18 @@ test('controls rendered after hydration meet the touch floor and drawn sizes', a
 	const checked = new Set()
 	let isolatedKanban = false
 	try {
-		for (const route of routes) {
+		const boardPath = await createBoard(page, `Touch controls ${Date.now()}`)
+		for (const route of [...routes, boardPath]) {
 			await page.goto(route, { waitUntil: 'load' })
 			await waitForWS(page)
 			let todoRow
 			try {
-				if (route === '/demos/denials') {
+				if (route === boardPath) {
+					await waitForBoardReady(page)
+					await expect(page.getByRole('button', { name: 'Rename board', exact: true })).toBeVisible()
+					await expect(page.getByTestId('board-add-note')).toBeVisible()
+					checked.add('board')
+				} else if (route === '/demos/denials') {
 					await page.getByTestId('switch-acme').click()
 					await expect(page.getByTestId('append-input')).toBeVisible()
 					await expect(page.getByTestId('append-button')).toBeVisible()
@@ -285,12 +292,22 @@ test('controls rendered after hydration meet the touch floor and drawn sizes', a
 					checked.add('todos-rollback')
 				}
 				const found = await measureControls(page)
+				expect(found.count, `${route}: hydrated pass must measure visible controls`).toBeGreaterThan(0)
 				expect(found.low, `${route}: hydrated controls below the touch floor`).toEqual([])
 				for (const item of found.drawn) {
 					const designed = DESIGNED_SIZE[item.variant]
 					expect(designed, `${route}: ${item.variant} must name a designed size`).toBeDefined()
 					expect(Math.abs(item.w - designed.w), `${route}: ${item.cls} drawn width`).toBeLessThanOrEqual(0.5)
 					expect(Math.abs(item.h - designed.h), `${route}: ${item.cls} drawn height`).toBeLessThanOrEqual(0.5)
+				}
+				if (route === boardPath) {
+					await page.getByRole('button', { name: 'Rename board', exact: true }).click()
+					const editor = page.getByRole('textbox', { name: 'Board name', exact: true })
+					await expect(editor).toBeVisible()
+					const editing = await measureControls(page)
+					expect(editing.count, 'board rename state must measure visible controls').toBeGreaterThan(0)
+					expect(editing.low, 'board rename controls below the touch floor').toEqual([])
+					await editor.press('Enter')
 				}
 			} finally {
 				if (todoRow && await todoRow.count() > 0) {
@@ -299,7 +316,7 @@ test('controls rendered after hydration meet the touch floor and drawn sizes', a
 				}
 			}
 		}
-		expect([...checked].sort()).toEqual(['denials', 'flash-sales', ...(isolatedKanban ? ['kanban'] : []), 'todos-rollback'])
+		expect([...checked].sort()).toEqual(['board', 'denials', 'flash-sales', ...(isolatedKanban ? ['kanban'] : []), 'todos-rollback'])
 	} finally {
 		await context.close()
 	}
