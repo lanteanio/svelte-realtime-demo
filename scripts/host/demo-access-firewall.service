@@ -1,0 +1,13 @@
+[Unit]
+Description=Demo host inbound access policy
+After=network-pre.target ufw.service
+Before=docker.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/demo-access-firewall apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

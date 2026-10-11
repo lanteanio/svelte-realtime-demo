@@ -250,6 +250,63 @@ docker compose up -d --scale app=4
 ```
 
 
+### Host access policy
+
+Inbound filtering runs on the host with the iptables-nft backend. It does not
+rely on an unverified provider firewall. The canonical rules and systemd unit
+are [demo-access-firewall.sh](scripts/host/demo-access-firewall.sh) and
+[demo-access-firewall.service](scripts/host/demo-access-firewall.service). The
+host installs them as `/usr/local/sbin/demo-access-firewall` (root, mode 0700)
+and `/etc/systemd/system/demo-access-firewall.service` (root, mode 0644). The
+enabled `demo-access-firewall.service` applies both address families before
+Docker starts. Keep the installed copies identical to the copies in this
+repository.
+
+`INPUT` enters `DEMO-INPUT`: allow loopback, established/related traffic,
+TCP 22/80/443, ICMP and ICMPv6, and IPv4 DHCP replies from UDP 67 to 68 on
+`eth0`; drop invalid traffic and all other inbound traffic. ICMPv6 includes
+neighbor discovery required for IPv6 connectivity. Outbound policy is unchanged.
+Postgres and Redis publish only on IPv4 loopback, not public interfaces.
+
+Docker DNAT traffic traverses `DOCKER-USER` and `DEMO-FORWARD`. The policy
+returns established/related traffic and traffic arriving off `eth0` to Docker's
+own rules. New TCP ingress on `eth0` is allowed to continue only when the
+conntrack **original destination port** is 22, 80 or 443; other forwarded ingress
+is dropped. Matching the original port covers published ports even when Docker
+rewrites their destination. Docker remains responsible for its remaining
+forwarding and NAT rules. The script preserves unrelated rules and policies.
+
+SSH uses key authentication on TCP 22, including root key login, with
+`PasswordAuthentication no`, `KbdInteractiveAuthentication no`,
+`X11Forwarding no`, `AllowTcpForwarding no` and `MaxAuthTries 3`.
+Verify effective settings with `sshd -T`; do not infer them from a single file.
+
+Changes require an approved access window, a working independent SSH session,
+a tested timed rollback and a fresh login before confirmation. Validate both
+families before applying, keep rollback armed until external HTTPS/readiness
+and connection checks pass, and compare unrelated rules before/after. Never
+flush the global ruleset. Installation or replacement does not itself prove
+restart survival: verify the service and effective rules after the next approved
+host restart. From an external machine verify TCP 22 and 443, closed dependency
+ports, and TCP 80 while the certificate challenge listener is active. Verify
+IPv6 from an IPv6-capable external machine; IPv4 results do not cover IPv6.
+
+Read-only host verification:
+
+```bash
+systemctl is-enabled --quiet demo-access-firewall.service
+systemctl is-active --quiet demo-access-firewall.service
+cmp scripts/host/demo-access-firewall.sh /usr/local/sbin/demo-access-firewall
+cmp scripts/host/demo-access-firewall.service /etc/systemd/system/demo-access-firewall.service
+sudo iptables -S DEMO-INPUT
+sudo iptables -S DOCKER-USER
+sudo iptables -S DEMO-FORWARD
+sudo ip6tables -S DEMO-INPUT
+sudo ip6tables -S DOCKER-USER
+sudo ip6tables -S DEMO-FORWARD
+sudo sshd -T | grep -E '^(passwordauthentication|kbdinteractiveauthentication|x11forwarding|allowtcpforwarding|maxauthtries|pubkeyauthentication|permitrootlogin|port) '
+```
+
 ### Maintenance restart
 
 A host restart interrupts all app replicas, Postgres and Redis together. Reserve
@@ -313,6 +370,8 @@ outside temporary storage, `MAINT_EXPECTED_REPLICAS` to the healthy app count an
   test -f "/boot/vmlinuz-$MAINT_EXPECTED_KERNEL"
   test -f "/boot/initrd.img-$MAINT_EXPECTED_KERNEL"
   systemctl is-enabled --quiet docker
+  systemctl is-enabled --quiet demo-access-firewall.service
+  systemctl is-active --quiet demo-access-firewall.service
   systemctl is-active --quiet docker
   maintenance_failed=$(systemctl --failed --no-legend --plain)
   test -z "$maintenance_failed"
@@ -396,6 +455,8 @@ unhealthy dependency:
     sleep 2
   done
   systemctl is-enabled --quiet docker
+  systemctl is-enabled --quiet demo-access-firewall.service
+  systemctl is-active --quiet demo-access-firewall.service
   maintenance_failed=$(systemctl --failed --no-legend --plain)
   test -z "$maintenance_failed"
   journalctl -b -p err --no-pager

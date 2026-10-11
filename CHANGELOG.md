@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Undo restore tests reject a second existing board without consuming the original receipt.
 
 - Compose build-context tests reject continued short-form paths and drive-qualified Dockerfiles.
+- The README documents the host firewall for IPv4 and IPv6, Docker ingress and SSH settings, with the canonical rules in `scripts/host/` and checks to run after a restart.
+
 - Maintenance readiness capture handles terminal Ctrl+C and preserves error-based outage windows and completed outcomes.
 
 - Board rename tests locate the labelled editor independently of its responsive width.
