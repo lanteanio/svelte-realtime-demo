@@ -179,7 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`/demos/upload` describes `live.notify` accurately.** The page and module claimed the upload notification fanned out to "every other tab the same user has open". `live.notify({ userId }, ...)` targets the user's most recently connected socket, locally and through the cluster registry - last-write-wins, not fan-out. Copy, headings, and the closing explainer now say that. Re-uploading a file is also an upsert rather than a second logical entry, since ids are content-addressed: the record, its order-list position, and the byte counter move together in one Redis turn.
 
-- Host firewall starts before network configuration, keeps systemd units LF-only, and verifies both address families during maintenance checks.
+- The host firewall unit starts before network configuration, systemd units are checked out with LF line endings, and maintenance checks verify both address families. Installing the script and unit on the host needs operator approval, and the `cmp` checks pass only after that install.
 
 - WebSocket-first connections use ephemeral identities instead of leaving unreachable 30-day sessions in Redis.
 

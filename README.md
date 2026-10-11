@@ -260,8 +260,8 @@ host installs them as `/usr/local/sbin/demo-access-firewall` (root, mode 0700)
 and `/etc/systemd/system/demo-access-firewall.service` (root, mode 0644). The
 tracked `demo-access-firewall.service` orders application of both address
 families before network configuration, the SSH socket and Docker start.
-Installing this unit on the host requires operator approval. Once it is
-installed, keep the installed copies identical to the copies in this repository.
+Installing or replacing either file on the host requires operator approval. Once
+installed, keep both copies identical to the copies in this repository.
 
 `INPUT` enters `DEMO-INPUT`: allow loopback, established/related traffic,
 TCP 22/80/443, ICMP and ICMPv6, and IPv4 DHCP replies from UDP 67 to 68 on
@@ -293,8 +293,9 @@ ports, and TCP 80 while the certificate challenge listener is active. Verify
 IPv6 from an IPv6-capable external machine; IPv4 results do not cover IPv6.
 
 Read-only host verification. The `cmp` checks need a host checkout that includes
-`scripts/host/`. A successful oneshot service does not prove its rules are still
-installed, so check the jumps in both address families as well:
+`scripts/host/` and both files installed at the paths above; a deployment does
+not install them. A successful oneshot service does not prove its rules are
+still installed, so check the jumps in both address families as well:
 
 ```bash
 systemctl is-enabled --quiet demo-access-firewall.service
