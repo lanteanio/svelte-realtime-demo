@@ -662,7 +662,7 @@ function rootContextDockerfiles(read = readRepoFile, root = fileURLToPath(new UR
 }
 
 test('Compose build contexts include equivalent root paths and inherited Dockerfiles', QUICK, () => {
-	const root = fileURLToPath(new URL('../../', import.meta.url))
+	const root = resolve('/compose-fixtures/demo')
 	const absoluteRoot = resolve(root).replaceAll('\\', '/')
 	for (const context of ['.', './', 'nested/../', "'.'", '"./"', `../${basename(root)}`, `'${absoluteRoot}'`]) {
 		const base = `services:
@@ -679,18 +679,18 @@ test('Compose build contexts include equivalent root paths and inherited Dockerf
       context: ${context}
 `
 		const read = (name) => name === 'docker-compose.yml' ? base : rollback
-		assert.deepEqual([...rootContextDockerfiles(read)], ['Dockerfile', 'Dockerfile.database'],
+		assert.deepEqual([...rootContextDockerfiles(read, root)], ['Dockerfile', 'Dockerfile.database'],
 			`rollback context ${context} must retain its inherited Dockerfile`)
 	}
 })
 
 test('Compose root aliases are checked in both short and mapping build forms', QUICK, () => {
-	const root = resolve(fileURLToPath(new URL('../../', import.meta.url)))
+	const root = resolve('/compose-fixtures/demo')
 	for (const context of [`../${basename(root)}`, `'${root.replaceAll('\\', '/')}'`]) {
 		for (const build of [`build: ${context}`, `build:\n      context: ${context}\n      dockerfile: Dockerfile.postgres`]) {
 			const read = (name) => name === 'docker-compose.yml'
 				? `services:\n  postgres:\n    ${build}\n` : 'services:\n  postgres:\n    image: postgres\n'
-			assert.deepEqual([...rootContextDockerfiles(read)], [build.includes('dockerfile:') ? 'Dockerfile.postgres' : 'Dockerfile'])
+			assert.deepEqual([...rootContextDockerfiles(read, root)], [build.includes('dockerfile:') ? 'Dockerfile.postgres' : 'Dockerfile'])
 		}
 	}
 	const read = (name) => name === 'docker-compose.yml'
@@ -700,6 +700,12 @@ test('Compose root aliases are checked in both short and mapping build forms', Q
 })
 
 test('Compose context and Dockerfile scalars cannot hide on nested lines', QUICK, () => {
+	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
+		const read = (file) => file === name
+			? 'services:\n  postgres:\n    build: migrations\n      /..\n'
+			: 'services:\n  app:\n    build: .\n  postgres:\n    build:\n      context: migrations\n      dockerfile: Dockerfile.postgres\n'
+		assert.throws(() => rootContextDockerfiles(read), /a short build context cannot have nested lines/)
+	}
 	for (const [key, path] of [['dockerfile', 'Dockerfile.postgres'], ['context', './migrations']]) {
 		for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
 			const read = (file) => file === name
@@ -707,6 +713,15 @@ test('Compose context and Dockerfile scalars cannot hide on nested lines', QUICK
 				: 'services:\n  postgres:\n    build: .\n'
 			assert.throws(() => rootContextDockerfiles(read), new RegExp(`${key}: expected a single-line literal path`))
 		}
+	}
+})
+
+test('Compose Dockerfiles cannot use drive-letter paths', QUICK, () => {
+	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
+		const read = (file) => file === name
+			? 'services:\n  postgres:\n    build:\n      context: .\n      dockerfile: C:/Dockerfile.postgres\n'
+			: 'services:\n  postgres:\n    build: .\n'
+		assert.throws(() => rootContextDockerfiles(read), /Dockerfile must be inside the repository/)
 	}
 })
 
