@@ -627,7 +627,10 @@ function rootContextDockerfiles(read = readRepoFile, root = fileURLToPath(new UR
 	const files = new Set()
 	const builds = new Map()
 	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
-		const top = composeEntries(read(name).split('\n'), 0, name)
+		const text = read(name).replaceAll('\r\n', '\n')
+		assert.ok(!/[\r\u0085\u2028\u2029]/.test(text),
+			`${name}: only LF and CRLF line breaks are supported`)
+		const top = composeEntries(text.split('\n'), 0, name)
 		assert.ok(!top.has('include'), `${name}: included Compose files must be checked explicitly`)
 		const services = top.get('services')
 		assert.ok(services && services.value === '', `${name}: services must be a block mapping`)
@@ -716,6 +719,24 @@ test('Compose context and Dockerfile scalars cannot hide on nested lines', QUICK
 	}
 })
 
+test('Compose declarations cannot hide after unsupported line breaks in comments', QUICK, () => {
+	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
+		for (const separator of ['\r', '\u0085', '\u2028', '\u2029']) {
+			for (const declaration of ['# build note' + separator + '    build: .', 'build:\n      context: .\n      # image note' + separator + '      dockerfile: Dockerfile.alt']) {
+				const read = (file) => file === name
+					? `services:\n  app:\n    ${declaration}\n`
+					: 'services:\n  app:\n    build: .\n'
+				assert.throws(() => rootContextDockerfiles(read), /only LF and CRLF line breaks are supported/,
+					`${name}, separator U+${separator.charCodeAt(0).toString(16)}, ${declaration}`)
+			}
+		}
+		const read = (file) => file === name
+			? 'services:\r\n  app:\r\n    # build note\r\n    build:\r\n      context: .\r\n      dockerfile: Dockerfile.alt\r\n'
+			: 'services:\n  app:\n    build: .\n'
+		assert.ok(rootContextDockerfiles(read).has('Dockerfile.alt'), `${name}: CRLF declarations are read`)
+	}
+})
+
 test('Compose Dockerfiles cannot use drive-letter paths', QUICK, () => {
 	for (const name of ['docker-compose.yml', 'docker-compose.rollback.yml']) {
 		const read = (file) => file === name
@@ -734,6 +755,8 @@ test('Compose Dockerfiles cannot use drive-letter paths', QUICK, () => {
 // - literal build contexts resolve against the checkout directory, including
 //   parent-relative and absolute aliases; nested context/dockerfile scalars
 //   require reader support rather than silently falling back to defaults;
+// - Compose input uses LF or CRLF line breaks; other YAML line separators
+//   are refused before comments and declarations are read;
 // - .dockerignore holds only printable ASCII, tabs and line breaks, a
 //   byte-order mark at the very start aside;
 // - a trimmed line is exactly `dir`, `/dir`, `./dir`, `dir/`, `/dir/` or

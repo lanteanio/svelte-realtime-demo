@@ -133,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Build-context checks reject unsupported YAML line separators in Compose files before reading comments or build declarations.
+
 - Host sampling uses available logs and counters without assuming a configured monitoring service.
 
 - **The control-colour vocabulary is written down where colours get chosen.** `btn-warning` is the dress for a control that induces chaos or failure on purpose - a retry storm, a shed simulation, a deliberately failing order - and nine of the eleven that wear it are exactly that, so the yellow reads as a promise that pressing this makes something go wrong deliberately. It is not the dress for a destructive action; those wear `btn-outline btn-error` and go through the confirm step. Two controls used it for something else and have been brought into line, because a vocabulary that holds except twice predicts nothing: the board's "Shuffle notes" FAB is now neutral, which still tells it apart from its siblings without borrowing the chaos reading, and the notification inbox's "Dismiss" is now ghost so the success-dressed "Got it" carries the pair on its own. Neither induces failure. The FAB menu test that located Shuffle by `.btn-warning` now locates every action by the label a visitor reads, so it pins the menu's contents instead of its dress - asserting the colour meant a renamed action passed while a re-dressed one failed.
