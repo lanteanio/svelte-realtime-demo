@@ -307,6 +307,53 @@ sudo ip6tables -S DEMO-FORWARD
 sudo sshd -T | grep -E '^(passwordauthentication|kbdinteractiveauthentication|x11forwarding|allowtcpforwarding|maxauthtries|pubkeyauthentication|permitrootlogin|port) '
 ```
 
+### Backup restore verification
+
+On the Linux Docker host, from the deployment checkout, run:
+
+```bash
+bash scripts/host/verify-backup.sh /absolute/backup-directory /absolute/new-private-result-directory
+```
+
+The backup directory must contain regular, non-symlink `database.dump` (a
+PostgreSQL custom-format archive), `roles.sql` (the matching global roles dump),
+`redis.rdb` and `configuration.tgz`. Use a new absolute result directory with no
+symlink components. Python 3, Bash, GNU coreutils and Docker Compose are required.
+The procedure reads the healthy running Postgres and Redis container image IDs,
+uses those exact local images with `--pull never`, and verifies the source
+containers remain healthy. It does not change the live database or Redis data.
+Run it with enough host headroom for a 512 MiB Postgres verifier and a 256 MiB
+Redis verifier; each is limited to 150 seconds and runs with `--network none`.
+
+Postgres restores `roles.sql` with `ON_ERROR_STOP` and the database with
+`pg_restore --exit-on-error --create`, preserving owners and ACLs. It compares
+restored table counts and exact COPY payloads against the archive, so a zero
+exit status on its own does not count as a passing restore. The checker accepts
+unquoted, lower-case application table names and a simple database identifier;
+unfamiliar dump shapes fail closed. Redis must load the RDB into an isolated
+server and account for every checked key as loaded or expired at load. Temporary
+database files, COPY payloads and role hashes stay in container tmpfs;
+containers are removed on exit. Roles are compared by SHA-256 digests produced
+inside the query pipeline, never by retained password-hash files.
+
+A zero exit with `full_restore_check=passed` creates `result.json` in the private
+result directory. It records image IDs, backup file checksums, UTC times, table
+counts, Redis counts and comparisons against the current source. Current source
+counts, ownership or roles may differ from an older backup; inspect those
+booleans separately from archive restoration and decide whether the recovery
+point is acceptable. The configuration archive is checksummed but not restored
+by this database check. Record separate configuration/certificate recovery
+coverage before maintenance. A failure or missing `result.json` is incomplete;
+retain the private diagnostic files and investigate rather than treating it as
+a successful restore.
+
+Result directories are mode 0700 and files mode 0600. Keep the latest successful
+record and records for retained backup sets; remove superseded evidence under
+the backup retention policy. They contain aggregate table counts, ownership
+metadata and role digests, not passwords or password hashes. Protect the original
+roles backup as credential material. Do not copy its content into logs or tickets.
+Offline validation: `python3 -m unittest discover -s test/host -v`.
+
 ### Maintenance restart
 
 A host restart interrupts all app replicas, Postgres and Redis together. Reserve
