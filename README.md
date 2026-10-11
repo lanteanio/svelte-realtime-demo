@@ -686,9 +686,9 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 CPU utilization, runnable/blocked work, swap activity and pressure counters
 separate resource use from contention; device latency/queues and interface
 error/drop deltas add storage and network context. Compare device utilization
-with its actual capacity, and retain kernel/device error counts from the
-approved monitoring system. Low CPU or a healthy container on its own does not
-mean the host is healthy.
+with its actual capacity, and retain kernel/device error counts from available
+host logs and counters. Write down which counters were unavailable. Low CPU or a
+healthy container on its own does not mean the host is healthy.
 
 `scripts/observe.sh` remains a supplementary stress-run streamer. Its listener
 metrics scrape can reach a different worker on each request under SO_REUSEPORT:
