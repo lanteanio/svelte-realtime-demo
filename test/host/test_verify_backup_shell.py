@@ -30,6 +30,8 @@ class BackupShellTests(unittest.TestCase):
         code = "awk '\n /^COPY" + between("awk '\n /^COPY", "' /tmp/source-data.sql") + "' \"$FIXTURE/dump.sql\""
         good = 'COPY public.notes (id) FROM stdin;\n1\n2\n\\.\n'
         cases = [(good, True, 'public.notes|2\n'),
+                 (good.replace('public.notes', '"public"."notes"'), True, 'public.notes|2\n'),
+                 (good + 'COPY public.other (id) FROM stdin;\nx\n', False, ''),
                  ('COPY public.notes (id) FROM stdin;\n\\.\n', True, 'public.notes|0\n'),
                  (good + 'COPY public.other (id) FROM stdin;\nx\n\\.\n', True, 'public.notes|2\npublic.other|1\n'),
                  ('-- no table\n', False, ''),
@@ -69,7 +71,7 @@ class BackupShellTests(unittest.TestCase):
                 self.assertEqual((self.directory / 'restored-ROLES.tsv').read_text(), 'digest\n')
 
     def test_argument_validation(self):
-        code = 'if [ "$#" -ne 2 ];' + between('if [ "$#" -ne 2 ];', 'mkdir -m 700')
+        code = between('\nscript_dir=', 'mkdir -m 700').split('\n', 1)[1]
         # Convert Windows test paths to the absolute spelling realpath emits in Bash.
         setup = 'fixture=$(cd "$FIXTURE" && pwd)\n'
         for name in ['database.dump', 'roles.sql', 'redis.rdb', 'configuration.tgz']:
@@ -78,6 +80,8 @@ class BackupShellTests(unittest.TestCase):
         self.assertEqual(valid.returncode, 0, valid.stderr)
         (self.directory / 'result').mkdir()
         cases = ['set --', 'set -- relative /unused-result',
+                 'set -- "$fixture" "$fixture/unused" extra',
+                 'set -- "$fixture/." "$fixture/unused"',
                  'set -- "$fixture" "$fixture/result"',
                  'set -- "$fixture" relative',
                  'set -- "$fixture" "$fixture/a,b"',
@@ -87,8 +91,39 @@ class BackupShellTests(unittest.TestCase):
                 result = self.run_shell(setup + setup_case + '\n' + code)
                 self.assertNotEqual(result.returncode, 0, result.stdout)
 
+    def test_backup_paths_cannot_change_mount_options(self):
+        code = between('\nscript_dir=', 'mkdir -m 700').split('\n', 1)[1]
+        for name in ['normal', 'b,ro', 'b\nro']:
+            with self.subTest(name=name):
+                if os.name == 'nt' and '\n' in name:
+                    self.skipTest('Win32 forbids newline filenames; the Linux CI run exercises this case')
+                backup = self.directory / name
+                backup.mkdir()
+                for file in ['database.dump', 'roles.sql', 'redis.rdb', 'configuration.tgz']:
+                    (backup / file).write_text('fixture')
+                setup = 'fixture=$(cd "$FIXTURE" && pwd)\nset -- "$fixture/' + name + '" "$fixture/result"\n'
+                result = self.run_shell(setup + code)
+                self.assertEqual(result.returncode == 0, name == 'normal', result.stderr)
+
+    def test_every_backup_input_must_be_a_regular_file(self):
+        code = between('\nscript_dir=', 'mkdir -m 700').split('\n', 1)[1]
+        names = ['database.dump', 'roles.sql', 'redis.rdb', 'configuration.tgz']
+        for name in names:
+            (self.directory / name).write_text('fixture')
+        setup = 'fixture=$(cd "$FIXTURE" && pwd)\nset -- "$fixture" "$fixture/result"\n'
+        for name in names:
+            file = self.directory / name
+            file.unlink()
+            with self.subTest(name=name, kind='missing'):
+                self.assertNotEqual(self.run_shell(setup + code).returncode, 0)
+            file.mkdir()
+            with self.subTest(name=name, kind='directory'):
+                self.assertNotEqual(self.run_shell(setup + code).returncode, 0)
+            file.rmdir()
+            file.write_text('fixture')
+
     def test_backup_symlinks_are_rejected(self):
-        code = 'if [ "$#" -ne 2 ];' + between('if [ "$#" -ne 2 ];', 'mkdir -m 700')
+        code = between('\nscript_dir=', 'mkdir -m 700').split('\n', 1)[1]
         for name in ['database.dump', 'roles.sql', 'redis.rdb', 'configuration.tgz']:
             (self.directory / name).write_text('fixture')
         setup = 'fixture=$(cd "$FIXTURE" && pwd)\n'
