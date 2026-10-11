@@ -529,43 +529,6 @@ application image IDs and replica count with each window. Keep credentials,
 peer addresses, board names and user content out of the evidence; do not export
 environment files, full container inspection output or raw application logs.
 
-### Disk capacity checks
-
-The operator running host builds or maintenance owns the capacity check. Check
-weekly, before host builds and daily while a threshold is crossed. Record UTC
-time, filesystem, used percentage, available bytes, inode usage and the command
-exit statuses in a private maintenance record. Compare with the previous record;
-a single reading is not a growth rate. Put the date of the next check in the
-same record.
-
-Planning starts at **75% used or less than 20 GiB available**. At **90% used or
-less than 5 GiB available**, stop optional builds and investigate urgently.
-These are review thresholds, not permission to delete data. The check below
-prints the category and exits 1 for planning or 2 for urgent action:
-
-```bash
-bash scripts/host/check-disk-capacity.sh /
-```
-
-Attribute usage before proposing cleanup. These commands are read-only; run
-with the privileges needed to read the directories and retain exit statuses:
-
-```bash
-docker system df -v
-docker buildx du
-sudo du -x -h --max-depth=1 /var/lib/containerd /var/lib/docker /var/log /root/.maintenance-backups
-sudo journalctl --disk-usage
-df -i /
-```
-
-Image and build-cache totals can share containerd snapshots, so do not add
-reported reclaimable totals or promise that pruning one category frees their
-sum. Propose separately approved cleanup with exact scope, retained rollback
-images, backup retention and expected free-space range. Inspect the installed
-`docker buildx prune --help` before choosing retention options; CLI flags differ
-between versions. Include journal retention as a separate option. After any
-approved cleanup, rerun the same measurements and record actual reclaimed space.
-
 Use available history first. When fresh measurements would answer a concrete
 question, take a five-minute window and, when useful, a comparable window under
 different traffic. Record aggregate traffic beside resource measurements. Only
@@ -709,6 +672,43 @@ per-resource utilization, saturation and errors; service/patch/access/exposure
 state; external readiness; comparison with any matched window; missing data; and
 what the review concluded. Store raw numeric samples alongside the summary so
 the comparisons can be reproduced.
+
+### Disk capacity checks
+
+The operator running host builds or maintenance owns the capacity check. Check
+weekly, before host builds and daily while a threshold is crossed. Record UTC
+time, filesystem, used percentage, available bytes, inode usage and the command
+exit statuses in a private maintenance record. Compare with the previous record;
+a single reading is not a growth rate. Put the date of the next check in the
+same record.
+
+Planning starts at **75% used or less than 20 GiB available**. At **90% used or
+less than 5 GiB available**, stop optional builds and investigate urgently.
+These are review thresholds, not permission to delete data. The check below
+prints the category and exits 1 for planning or 2 for urgent action:
+
+```bash
+bash scripts/host/check-disk-capacity.sh /
+```
+
+Attribute usage before proposing cleanup. These commands are read-only; run
+with the privileges needed to read the directories and retain exit statuses:
+
+```bash
+docker system df -v
+docker buildx du
+sudo du -x -h --max-depth=1 /var/lib/containerd /var/lib/docker /var/log /root/.maintenance-backups
+sudo journalctl --disk-usage
+df -i /
+```
+
+Image and build-cache totals can share containerd snapshots, so do not add
+reported reclaimable totals or promise that pruning one category frees their
+sum. Propose separately approved cleanup with exact scope, retained rollback
+images, backup retention and expected free-space range. Inspect the installed
+`docker buildx prune --help` before choosing retention options; CLI flags differ
+between versions. Include journal retention as a separate option. After any
+approved cleanup, rerun the same measurements and record actual reclaimed space.
 
 ---
 
