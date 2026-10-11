@@ -11,56 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- CI runs the PostgreSQL undo integration suite with migrations in a disposable database.
-
-### Fixed
-
-- WebSocket-first connections use ephemeral identities instead of leaving unreachable 30-day sessions in Redis.
-- Board undo tests reject additional page-clock writers that could keep an idle countdown running.
-
-- Undo restore tests reject a second existing board without consuming the original receipt.
-
-- Compose build-context tests reject continued short-form paths and drive-qualified Dockerfiles.
 - The README documents the host firewall for IPv4 and IPv6, Docker ingress and SSH settings, with the canonical rules in `scripts/host/` and checks to run after a restart.
 
-- Maintenance readiness capture handles terminal Ctrl+C and preserves error-based outage windows and completed outcomes.
-
-- Touch coverage measures hydrated board controls and the rename editor, with a nonempty measurement guard on each route.
-- Board rename tests locate the labelled editor independently of its responsive width.
-- Startup diagnostics retain early arena loading failures and name failed entry modules before delivered siblings.
-
-- JavaScript syntax checks skip retained local worktrees while continuing to validate nested application source directories.
-
-- Project checks include generated environment declarations and preserve type coverage for session identity and serialized maintenance sampling.
-
-- Board undo errors clear after six seconds; countdown updates stop at expiry and stay outside the live announcement region.
-
-- Note deletion and undo acquire the board lock before child rows, preventing deadlocks with stale-board cleanup.
-
-- Board names wrap without clipping, with a keyboard-accessible rename control. The canvas fits below the header and above the activity bar, and section headings preserve whole words beside supporting text.
-- Host sampling reviews run on demand, and the README explains how to extract sysstat history and compare intervals.
-
-- Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
-- Legacy identity cookies retain display-profile hints but receive a fresh server-generated visitor ID, preventing impersonation through a forged cookie.
-
-- Cluster tests cover every configured cron replica and wait for auction push delivery.
-
-- Maintenance readiness capture continues through postflight failures until the external smoke and readiness checks recover; the runbook checks dependency health, unchanged images and that no service has failed.
-
-- Update the WebSocket adapter to `0.6.0-next.95`, which skips subscription-total checks for incomplete connection snapshots and includes connection counts in mismatch diagnostics.
-
-- Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents. History changes cannot rotate the observation while the matching document response is still pending.
-
-- Docker build-context checks reject Dockerfile-specific ignore files for every repository-root build declared in the deployment and rollback Compose files, including parent-relative and absolute context aliases. Unsupported multiline context and Dockerfile values fail explicitly.
-
-- The local cluster harness can run four replicas, with arena coverage that follows individual visitors through interest entry, removal and re-entry on every process.
-
-- News and Top-K controls retain the latest Redis write when replica publishes arrive out of order and recover after Redis revision counters reset. Each subscribed page reconciles every notified control with serialized snapshot reads, including initial load and reconnect; notifications arriving during a read trigger another read. A client-side return within the ten-minute stream resume window reads each control twice, for the retained value and then the resumed snapshot.
-
-- The touch sweep checks the width of checkbox and toggle labels as well as their height, removes its temporary todo even when an assertion fails, and only empties the shared kanban fixture inside the isolated local test harness. Remote runs explicitly report omitted seed-button coverage.
-
-### Added
-
+- CI runs the PostgreSQL undo integration suite with migrations in a disposable database.
 - CI runs the functional cluster tier on four replicas for pushes and pull requests, with failed-test artifacts retained for 14 days. Diagnostic probes stay opt-in and receive separate replica targets from the local harness.
 
 - The README covers host sampling: bounded windows, traffic comparisons, on-demand access checks and an external readiness check.
@@ -138,6 +91,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Documented the optional `HEAP_SNAPSHOT_DIR` setting in `.env.example`.
 
+- Host sampling reviews run on demand, and the README explains how to extract sysstat history and compare intervals.
+
+- The local cluster harness can run four replicas, with arena coverage that follows individual visitors through interest entry, removal and re-entry on every process.
+
 ### Changed
 
 - **`svelte-adapter-uws` moves to 0.6.0-next.94, and remote entities move between packets again.** The adapter's smooth-channel render loop read its motion flag one line after `beginFrame` had reset it, so playback frames never rendered and remote motion was quantized to the packet rate - on `/demos/arena` that is about 21 wire frames a second against a 60fps display, so the dots visibly stepped. Measured on the new version with the motion probe: remote motion on 100% of animation frames, 15.2 of 15.3 drawn dots moving per frame. The bump is adapter-only; the compatibility manifest qualifies it against the same `svelte-realtime` 0.6.0-next.90, extensions 0.6.0-next.63 and uWS v20.69.0 the previous pin used, so nothing else moves. The intervening 0.6.0-next.93 carried the same fix and was rejected here: it intermittently lost presence deliveries, failing the multiplayer spec in four of six isolated runs where .91 had failed none in fourteen, and .94 restores that to eight of eight. Gated on the new version: `npm run check` clean, unit 131/131, the full main tier 455 passed with none failed, and the cluster tier measured against .91 on the same tree rather than against a remembered number - its two extra failures are two cross-replica demos already known to fail intermittently, and both pass three of three in isolation on the new version while the older one still fails one of three. The subscription-accounting warnings the tier emits are unchanged by the move and stay open on their own.
@@ -152,8 +109,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`/demos/upload` describes `live.notify` accurately.** The page and module claimed the upload notification fanned out to "every other tab the same user has open". `live.notify({ userId }, ...)` targets the user's most recently connected socket, locally and through the cluster registry - last-write-wins, not fan-out. Copy, headings, and the closing explainer now say that. Re-uploading a file is also an upsert rather than a second logical entry, since ids are content-addressed: the record, its order-list position, and the byte counter move together in one Redis turn.
 
+- Update the WebSocket adapter to `0.6.0-next.95`, which skips subscription-total checks for incomplete connection snapshots and includes connection counts in mismatch diagnostics.
+
 ### Fixed
 
+- WebSocket-first connections use ephemeral identities instead of leaving unreachable 30-day sessions in Redis.
+- Board undo tests reject additional page-clock writers that could keep an idle countdown running.
+
+- Undo restore tests reject a second existing board without consuming the original receipt.
+
+- Compose build-context tests reject continued short-form paths and drive-qualified Dockerfiles.
+
+- Maintenance readiness capture handles terminal Ctrl+C and preserves error-based outage windows and completed outcomes.
+
+- Touch coverage measures hydrated board controls and the rename editor, with a nonempty measurement guard on each route.
+- Board rename tests locate the labelled editor independently of its responsive width.
+- Startup diagnostics retain early arena loading failures and name failed entry modules before delivered siblings.
+
+- JavaScript syntax checks skip retained local worktrees while continuing to validate nested application source directories.
+
+- Project checks include generated environment declarations and preserve type coverage for session identity and serialized maintenance sampling.
+
+- Board undo errors clear after six seconds; countdown updates stop at expiry and stay outside the live announcement region.
+
+- Note deletion and undo acquire the board lock before child rows, preventing deadlocks with stale-board cleanup.
+
+- Board names wrap without clipping, with a keyboard-accessible rename control. The canvas fits below the header and above the activity bar, and section headings preserve whole words beside supporting text.
+
+- Undo receipt tests cover deletion through a second existing board and preserve unexpired receipts during cleanup.
+- Legacy identity cookies retain display-profile hints but receive a fresh server-generated visitor ID, preventing impersonation through a forged cookie.
+
+- Cluster tests cover every configured cron replica and wait for auction push delivery.
+
+- Maintenance readiness capture continues through postflight failures until the external smoke and readiness checks recover; the runbook checks dependency health, unchanged images and that no service has failed.
+
+
+- Wire diagnostics follow the current document across navigation, retain unanswered requests across reconnects, and exclude delayed frames from replaced documents. History changes cannot rotate the observation while the matching document response is still pending.
+
+- Docker build-context checks reject Dockerfile-specific ignore files for every repository-root build declared in the deployment and rollback Compose files, including parent-relative and absolute context aliases. Unsupported multiline context and Dockerfile values fail explicitly.
+
+
+- News and Top-K controls retain the latest Redis write when replica publishes arrive out of order and recover after Redis revision counters reset. Each subscribed page reconciles every notified control with serialized snapshot reads, including initial load and reconnect; notifications arriving during a read trigger another read. A client-side return within the ten-minute stream resume window reads each control twice, for the retained value and then the resumed snapshot.
+
+- The touch sweep checks the width of checkbox and toggle labels as well as their height, removes its temporary todo even when an assertion fails, and only empties the shared kanban fixture inside the isolated local test harness. Remote runs explicitly report omitted seed-button coverage.
 - Page, section and subsection headings use a shared 24/18/14px scale across the landing page, demos and board. Section titles wrap within narrow panels.
 
 - A wire report with one received frame lists its value without claiming it repeated an unchanged payload.
@@ -351,6 +349,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ALLOWED_ORIGINS` (build-time) admits a deployment reachable under more than one hostname.** Comma-separated full origins, passed through to the adapter's origin policy; unset leaves it on `same-origin` pinned to the runtime `ORIGIN`. It is read when the bundle is built rather than when a container starts, because the origin policy is serialized into the build, so the compose file carries it as a build argument. New `test/e2e/ws-admission.spec.js` drives the handshake from a node client, which is the only way to set an `Origin` a browser will not let script touch, and asserts the accepted case alongside the refused ones - a suite that asserts only refusals passes equally well against a server that refuses everything, including one that is simply down.
 
 ---
+
 
 ## [0.6.0-next.0] - 2026-07-13
 
