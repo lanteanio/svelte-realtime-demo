@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - WebSocket-first connections use ephemeral identities instead of leaving unreachable 30-day sessions in Redis.
+- Board undo tests reject additional page-clock writers that could keep an idle countdown running.
+
 - Undo restore tests reject a second existing board without consuming the original receipt.
 
 - Compose build-context tests reject continued short-form paths and drive-qualified Dockerfiles.

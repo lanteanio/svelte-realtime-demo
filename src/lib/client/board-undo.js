@@ -6,7 +6,7 @@ export function isBoardUndoShortcut(event) {
 	return !target?.isContentEditable && !target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')
 }
 
-/** Update only while an undo deadline is live, including its exact expiry. */
+/** Update once immediately, then while a deadline is live through its expiry. */
 export function startUndoCountdown(deadlines, update) {
 	const end = deadlines.reduce((latest, value) => Math.max(latest, value), 0)
 	let timer

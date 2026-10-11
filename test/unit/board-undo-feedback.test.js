@@ -11,6 +11,34 @@ const script = page.match(/<script>([\s\S]*?)<\/script>/)[1]
 const nodes = (/** @type {any} */ (parseAst(script))).body
 const effects = nodes.filter((node) => node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression' && node.expression.callee.name === '$effect')
 
+test('only the undo countdown callback writes the page clock', () => {
+	const writes = []
+	const countdowns = []
+	function containsClock(node) {
+		if (!node || typeof node !== 'object') return false
+		if (node.type === 'Identifier') return node.name === 'clock'
+		return Object.values(node).some(value => Array.isArray(value)
+			? value.some(containsClock) : containsClock(value))
+	}
+	function walk(node) {
+		if (!node || typeof node !== 'object') return
+		if ((node.type === 'AssignmentExpression' && containsClock(node.left))
+			|| (node.type === 'UpdateExpression' && containsClock(node.argument))) writes.push(node)
+		if (node.type === 'CallExpression' && node.callee.name === 'startUndoCountdown') countdowns.push(node)
+		for (const value of Object.values(node)) {
+			if (Array.isArray(value)) value.forEach(walk)
+			else walk(value)
+		}
+	}
+	nodes.forEach(walk)
+	assert.equal(countdowns.length, 1)
+	const callback = countdowns[0].arguments[1]
+	assert.equal(callback.type, 'ArrowFunctionExpression')
+	assert.equal(writes.length, 1, 'Only the deadline-bound countdown callback may write clock')
+	assert.equal(writes[0], callback.body.body[0].expression,
+		'Clock updates must belong directly to the deadline-bound countdown callback')
+})
+
 test('undo countdown is idle without a live deadline and stops exactly at the last expiry', (t) => {
 	t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 })
 	for (const deadlines of [[], [900]]) {
