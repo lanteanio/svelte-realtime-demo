@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 mode=${1:-}
-case "$mode" in apply|remove) ;; *) echo 'usage: firewall-rules.sh apply|remove' >&2; exit 2;; esac
+case "$mode" in apply|remove) ;; *) echo 'usage: demo-access-firewall.sh apply|remove' >&2; exit 2;; esac
 interface=eth0
 case "$interface" in *[!a-zA-Z0-9_.:-]*|'') echo invalid-interface >&2; exit 2;; esac
 temp=$(mktemp -d)

@@ -1,8 +1,10 @@
 [Unit]
 Description=Demo host inbound access policy
-After=network-pre.target ufw.service
-Before=docker.service
-Wants=network-pre.target
+DefaultDependencies=no
+After=local-fs.target ufw.service
+Before=network-pre.target ssh.socket docker.service shutdown.target
+Wants=local-fs.target network-pre.target
+Conflicts=shutdown.target
 
 [Service]
 Type=oneshot

@@ -119,6 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Host firewall starts before network configuration, keeps systemd units LF-only, and verifies both address families during maintenance checks.
+
 - WebSocket-first connections use ephemeral identities instead of leaving unreachable 30-day sessions in Redis.
 - Board undo tests reject additional page-clock writers that could keep an idle countdown running.
 

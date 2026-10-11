@@ -258,9 +258,10 @@ are [demo-access-firewall.sh](scripts/host/demo-access-firewall.sh) and
 [demo-access-firewall.service](scripts/host/demo-access-firewall.service). The
 host installs them as `/usr/local/sbin/demo-access-firewall` (root, mode 0700)
 and `/etc/systemd/system/demo-access-firewall.service` (root, mode 0644). The
-enabled `demo-access-firewall.service` applies both address families before
-Docker starts. Keep the installed copies identical to the copies in this
-repository.
+tracked `demo-access-firewall.service` orders application of both address
+families before network configuration, the SSH socket and Docker start.
+Installing this unit on the host requires operator approval. Once it is
+installed, keep the installed copies identical to the copies in this repository.
 
 `INPUT` enters `DEMO-INPUT`: allow loopback, established/related traffic,
 TCP 22/80/443, ICMP and ICMPv6, and IPv4 DHCP replies from UDP 67 to 68 on
@@ -269,7 +270,7 @@ neighbor discovery required for IPv6 connectivity. Outbound policy is unchanged.
 Postgres and Redis publish only on IPv4 loopback, not public interfaces.
 
 Docker DNAT traffic traverses `DOCKER-USER` and `DEMO-FORWARD`. The policy
-returns established/related traffic and traffic arriving off `eth0` to Docker's
+returns established/related traffic and traffic not arriving on `eth0` to Docker's
 own rules. New TCP ingress on `eth0` is allowed to continue only when the
 conntrack **original destination port** is 22, 80 or 443; other forwarded ingress
 is dropped. Matching the original port covers published ports even when Docker
@@ -291,11 +292,17 @@ host restart. From an external machine verify TCP 22 and 443, closed dependency
 ports, and TCP 80 while the certificate challenge listener is active. Verify
 IPv6 from an IPv6-capable external machine; IPv4 results do not cover IPv6.
 
-Read-only host verification:
+Read-only host verification. The `cmp` checks need a host checkout that includes
+`scripts/host/`. A successful oneshot service does not prove its rules are still
+installed, so check the jumps in both address families as well:
 
 ```bash
 systemctl is-enabled --quiet demo-access-firewall.service
 systemctl is-active --quiet demo-access-firewall.service
+sudo iptables -C INPUT -j DEMO-INPUT
+sudo iptables -C DOCKER-USER -j DEMO-FORWARD
+sudo ip6tables -C INPUT -j DEMO-INPUT
+sudo ip6tables -C DOCKER-USER -j DEMO-FORWARD
 cmp scripts/host/demo-access-firewall.sh /usr/local/sbin/demo-access-firewall
 cmp scripts/host/demo-access-firewall.service /etc/systemd/system/demo-access-firewall.service
 sudo iptables -S DEMO-INPUT
@@ -422,6 +429,10 @@ outside temporary storage, `MAINT_EXPECTED_REPLICAS` to the healthy app count an
   systemctl is-enabled --quiet docker
   systemctl is-enabled --quiet demo-access-firewall.service
   systemctl is-active --quiet demo-access-firewall.service
+  iptables -C INPUT -j DEMO-INPUT
+  iptables -C DOCKER-USER -j DEMO-FORWARD
+  ip6tables -C INPUT -j DEMO-INPUT
+  ip6tables -C DOCKER-USER -j DEMO-FORWARD
   systemctl is-active --quiet docker
   maintenance_failed=$(systemctl --failed --no-legend --plain)
   test -z "$maintenance_failed"
@@ -507,6 +518,10 @@ unhealthy dependency:
   systemctl is-enabled --quiet docker
   systemctl is-enabled --quiet demo-access-firewall.service
   systemctl is-active --quiet demo-access-firewall.service
+  iptables -C INPUT -j DEMO-INPUT
+  iptables -C DOCKER-USER -j DEMO-FORWARD
+  ip6tables -C INPUT -j DEMO-INPUT
+  ip6tables -C DOCKER-USER -j DEMO-FORWARD
   maintenance_failed=$(systemctl --failed --no-legend --plain)
   test -z "$maintenance_failed"
   journalctl -b -p err --no-pager
