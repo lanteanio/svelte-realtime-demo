@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI runs the PostgreSQL undo integration suite with migrations in a disposable database.
+
 ### Fixed
 
 - WebSocket-first connections use ephemeral identities instead of leaving unreachable 30-day sessions in Redis.

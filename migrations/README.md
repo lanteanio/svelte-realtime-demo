@@ -16,4 +16,6 @@ third-party-owned integration tables rather than application schema.
 
 Deletion undo uses `004_note_deletion_undo.sql`. The note deletion and its visitor-owned snapshot commit in one statement; restoring consumes the receipt and inserts the note in one statement. An existing note wins over the snapshot. Expired receipts are removed once a minute.
 
-To check these operations against a disposable PostgreSQL database, set `NOTE_UNDO_TEST_DATABASE_URL` and run `node --test test/integration/note-undo.postgres.test.js`. The test creates and removes its own schema.
+Run `npm run test:integration` with Docker available to start a disposable PostgreSQL container, apply the migrations and check deletion/restore behavior, including concurrent board deletion. The command binds a random loopback port and removes its container on success or failure. CI runs it for every push and pull request.
+
+To use an existing disposable database instead, set `NOTE_UNDO_TEST_DATABASE_URL` and run `node --test test/integration/note-undo.postgres.test.js`. The test creates and removes its own schema.

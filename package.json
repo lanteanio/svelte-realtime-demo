@@ -20,6 +20,7 @@
 		"test": "node scripts/test-safe.mjs",
 		"test:all": "node scripts/test-all.mjs",
 		"test:unit": "node scripts/run-unit.mjs",
+		"test:integration": "node scripts/run-postgres-integration.mjs",
 		"test:e2e": "npm run test:e2e:safe",
 		"test:e2e:main": "node scripts/run-local-e2e.mjs main",
 		"test:e2e:safe": "node scripts/run-local-e2e.mjs safe",
