@@ -336,15 +336,16 @@ Postgres restores `roles.sql` with `ON_ERROR_STOP` and the database with
 `pg_restore --exit-on-error --create`, preserving owners and ACLs. It compares
 restored table counts and exact COPY payloads against the archive, so a zero
 exit status on its own does not count as a passing restore. The checker accepts
-unquoted, lower-case application table names and a simple database identifier;
-unfamiliar dump shapes fail closed. Redis must load the RDB into an isolated
-server and account for every checked key as loaded or expired at load. Temporary
-database files, COPY payloads and role hashes stay in container tmpfs;
-containers are removed on exit. Roles are compared by SHA-256 digests produced
-inside the query pipeline, never by retained password-hash files. Memberships
-between two PostgreSQL-owned `pg_` roles are excluded from the source comparison
-because initdb assigns their grantor to its bootstrap administrator. Every
-membership involving an application role remains in the comparison.
+lower-case application table names with optional double quotes and a simple
+database identifier; unfamiliar dump shapes fail closed. Redis must load the RDB
+into an isolated server and account for every checked key as loaded or expired
+at load. Temporary database files, COPY payloads and role hashes stay in
+container tmpfs; containers are removed on exit. Roles are compared by SHA-256
+digests produced inside the query pipeline, never by retained password-hash
+files. Memberships between two PostgreSQL-owned `pg_` roles are excluded from
+the source comparison because initdb assigns their grantor to its bootstrap
+administrator. Every membership involving an application role remains in the
+comparison.
 
 A zero exit with `full_restore_check=passed` creates `result.json` in the private
 result directory. It records image IDs, backup file checksums, UTC times, table
@@ -354,8 +355,10 @@ booleans separately from archive restoration and decide whether the recovery
 point is acceptable. The configuration archive is checksummed but not restored
 by this database check. Record separate configuration/certificate recovery
 coverage before maintenance. A failure or missing `result.json` is incomplete;
-retain the private diagnostic files and investigate rather than treating it as
-a successful restore.
+retain the private result directory and investigate rather than treating it as
+a successful restore. Detailed restore-step logs remain in container tmpfs and
+are destroyed on exit because database errors can echo credential statements.
+The retained outer stderr files may therefore be empty even when a restore fails.
 
 Result directories are mode 0700 and files mode 0600. Keep the latest successful
 record and records for retained backup sets; remove superseded evidence under

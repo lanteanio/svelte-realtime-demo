@@ -37,6 +37,22 @@ class RestoreResultTests(unittest.TestCase):
             with self.subTest(bad=bad):
                 with self.assertRaises(ValueError): module.validate(bad, REDIS)
 
+    def test_role_digest_shape_is_required(self):
+        for digest in ['a' * 63 + '  -', 'g' * 64 + '  -', 'a' * 64 + ' file', 'a' * 64 + '  -\n' + 'b' * 64 + '  -']:
+            with self.subTest(digest=digest):
+                with self.assertRaisesRegex(ValueError, 'Expected a role digest only'):
+                    module.validate(POSTGRES.replace('a' * 64 + '  -', digest), REDIS)
+
+    def test_ownership_section_is_required(self):
+        with self.assertRaisesRegex(ValueError, 'Missing or repeated section: OWNERSHIP'):
+            module.validate(POSTGRES.replace('BEGIN_OWNERSHIP', 'BEGIN_OTHER'), REDIS)
+
+    def test_credentials_outside_role_digest_are_rejected(self):
+        for credential in ['SCRAM-SHA-256$example', 'md5' + 'a' * 32]:
+            with self.subTest(credential=credential):
+                with self.assertRaisesRegex(ValueError, 'Credential hashes must not enter the result'):
+                    module.validate(POSTGRES + '\n' + credential, REDIS)
+
     def test_invalid_redis_fails_closed(self):
         for bad in [REDIS.replace('source_rdb_keys=3', 'source_rdb_keys=4'),
                     REDIS.replace('loaded_keys=2', ''),

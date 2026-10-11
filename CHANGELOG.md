@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Backup restore verification uses pinned local images and isolated memory-backed databases, validates restored data and application role memberships, and records results without retaining role password hashes.
+- Backup restore verification uses pinned local images and isolated memory-backed databases, validates restored archive data, compares ownership and application role memberships against the current source, and records results without retaining role password hashes.
 
 - `scripts/host/check-disk-capacity.sh` reports when disk usage crosses the planning or urgent threshold, and the README lists read-only commands for finding what uses the space before any cleanup is approved.
 

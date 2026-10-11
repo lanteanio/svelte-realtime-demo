@@ -23,6 +23,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check:deps
+      - run: python3 -m unittest discover -s test/host -v
       - run: npm run test:integration
       - run: npx playwright install --with-deps chromium
       - run: npm test
