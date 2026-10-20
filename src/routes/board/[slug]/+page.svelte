@@ -86,6 +86,8 @@
 		const version = ++announcementVersion
 		noteAnnouncement = ''
 		await tick()
+		// Leave the empty region visible across frames before repeating its text.
+		await new Promise((resolve) => setTimeout(resolve, 100))
 		if (version === announcementVersion) noteAnnouncement = message
 	}
 

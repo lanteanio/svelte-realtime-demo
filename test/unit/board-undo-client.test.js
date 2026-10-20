@@ -17,7 +17,7 @@ function page() {
 	let deliverDelete, deliverList
 	const ctx = vm.createContext({
 		boardId: 'board', deletions: [], usedReceipts: new Set(), undoBusy: false, noteError: '', clock: time,
-		noteAnnouncement: '', announcementVersion: 0, tick: async () => {},
+		noteAnnouncement: '', announcementVersion: 0, tick: async () => {}, setTimeout: (fn) => fn(),
 		Date: { now: () => time }, setInterval: () => 0, clearInterval: () => {}, $effect: (fn) => fn(),
 		deleteNote: () => new Promise((resolve) => { deliverDelete = resolve }),
 		pendingNoteDeletions: () => new Promise((resolve) => { deliverList = resolve }),
@@ -65,6 +65,21 @@ test('delayed reload receipt list does not resurrect an already restored deletio
 	assert.equal(p.ctx.deletions.length, 0)
 })
 
+
+test('repeated announcements stay empty until a later timer turn', async () => {
+	const p = page()
+	await p.ctx.announceNote('Note restored.')
+	const timers = []
+	p.ctx.setTimeout = (callback, delay) => timers.push({ callback, delay })
+	const repeated = p.ctx.announceNote('Note restored.')
+	await new Promise((resolve) => setImmediate(resolve))
+	assert.equal(p.ctx.noteAnnouncement, '')
+	assert.equal(timers.length, 1)
+	assert.ok(timers[0].delay >= 100)
+	timers[0].callback()
+	await repeated
+	assert.equal(p.ctx.noteAnnouncement, 'Note restored.')
+})
 
 test('a delayed announcement cannot replace a newer action result', async () => {
 	const p = page()

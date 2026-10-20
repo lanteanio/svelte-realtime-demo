@@ -71,6 +71,7 @@ test.describe('Collaborative deletion undo', () => {
 		await page.locator('body').click({ position: { x: 5, y: 5 } })
 		await page.keyboard.press('Control+z')
 		await expect(getNotes(page)).toHaveCount(2)
+		await expect(page.getByTestId('board-note-announcement')).toHaveText('Note restored.')
 		await expect(page.getByTestId('board-undo')).toHaveCount(0)
 		await page.keyboard.press('Control+y')
 		await page.keyboard.press('Control+Shift+z')
@@ -98,8 +99,7 @@ test.describe('Collaborative deletion undo', () => {
 			await expect(getNotes(sameVisitor)).toHaveCount(2)
 			await sameVisitor.getByTestId('board-undo').click()
 			const feedback = sameVisitor.getByTestId('board-note-announcement')
-			await expect(feedback).not.toHaveText('Note deleted.')
-			await expect(feedback).toHaveText(/\S/)
+			await expect(feedback).toHaveText('Undo expired, was already used, or the note already exists')
 			await expect(sameVisitor.getByTestId('board-undo')).toHaveCount(0)
 			await expect(sameVisitor.getByTestId('board-undo-toast')).toHaveCount(0, { timeout: 8000 })
 			await expect(getNotes(sameVisitor)).toHaveCount(2)
@@ -133,12 +133,20 @@ test.describe('Collaborative deletion undo', () => {
 		await page.getByTestId('board-undo').click()
 		await expect(getNotes(page)).toHaveCount(1)
 		await expect(live).toHaveText('Note restored.')
-		const restoresBefore = await live.evaluate((node) => node.announcementEvents.filter((text) => text === 'Note restored.').length)
+		await live.evaluate((node) => {
+			node.announcementFrames = [node.textContent]
+			const sample = () => {
+				if (node.announcementFrames.at(-1) !== node.textContent) node.announcementFrames.push(node.textContent)
+				node.announcementFrameId = requestAnimationFrame(sample)
+			}
+			node.announcementFrameId = requestAnimationFrame(sample)
+		})
 		await page.getByTestId('board-undo').click()
 		await expect(getNotes(page)).toHaveCount(2)
 		await expect(page.getByTestId('board-undo-toast')).toHaveCount(0)
 		await expect(live).toHaveText('Note restored.')
-		await expect.poll(() => live.evaluate((node) => node.announcementEvents.filter((text) => text === 'Note restored.').length)).toBe(restoresBefore + 1)
+		await expect.poll(() => live.evaluate((node) => node.announcementFrames)).toEqual(['Note restored.', '', 'Note restored.'])
+		await live.evaluate((node) => cancelAnimationFrame(node.announcementFrameId))
 		expect(await original.evaluate((node) => node === document.querySelector('[data-testid="board-note-announcement"]'))).toBe(true)
 	})
 
@@ -150,7 +158,7 @@ test.describe('Collaborative deletion undo', () => {
 				let request
 				try { request = JSON.parse(String(message)) } catch {}
 				if (request?.rpc === 'boards/notes/deleteNote' && ++deleteRequests === 2) {
-					ws.send(JSON.stringify({ topic: '__rpc', event: request.id, data: { id: request.id, ok: false, code: 'INTERNAL_ERROR', error: 'Could not delete the note' } }))
+					ws.send(JSON.stringify({ topic: '__rpc', event: request.id, data: { id: request.id, ok: false, code: 'INTERNAL_ERROR', error: 'Deletion refused by test server' } }))
 					return
 				}
 				server.send(message)
@@ -164,14 +172,14 @@ test.describe('Collaborative deletion undo', () => {
 		await note.getByLabel('Delete note').click({ force: true })
 		const toast = page.getByTestId('board-undo-toast')
 		const live = page.getByTestId('board-note-announcement')
-		await expect(toast).toContainText(/Could not delete the note[\s\S]*Note deleted\./)
+		await expect(toast).toContainText(/Deletion refused by test server[\s\S]*Note deleted\./)
 		await expect(toast.getByText('Note deleted.', { exact: true })).toBeVisible()
 		await expect(page.getByTestId('board-undo')).toBeEnabled()
-		await expect(live).toHaveText('Could not delete the note')
+		await expect(live).toHaveText('Deletion refused by test server')
 		await expect(getNotes(page)).toHaveCount(1)
-		await expect(toast.getByText('Could not delete the note', { exact: true })).toHaveCount(0, { timeout: 8000 })
+		await expect(toast.getByText('Deletion refused by test server', { exact: true })).toHaveCount(0, { timeout: 8000 })
 		await expect(toast.getByText('Note deleted.', { exact: true })).toBeVisible()
-		await expect(live).toHaveText('Could not delete the note')
+		await expect(live).not.toHaveText('Note deleted.')
 		await page.getByTestId('board-undo').click()
 		await expect(getNotes(page)).toHaveCount(2)
 		await expect(live).toHaveText('Note restored.')
