@@ -109,6 +109,7 @@ function activePresence() {
 /** Dormant presence facade; construction starts its heartbeat timer. */
 export const presence = {
 	join(...args) { return activePresence().join(...args) },
+	sync(...args) { return activePresence().sync(...args) },
 	leave(...args) { return activePresence().leave(...args) },
 	get hooks() { return activePresence().hooks },
 	purgeUser(...args) { return activePresence().purgeUser(...args) },

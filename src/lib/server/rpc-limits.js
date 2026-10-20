@@ -29,14 +29,16 @@
  */
 
 /**
- * Board RPCs that predate the generated families and carry no `__` segment.
- * `moveCursor` and `moveNote` fire per pointer frame; `joinBoard` is called
- * on every reconnect during a storm.
+ * Board transport outside the generated families. Note movement is per
+ * pointer frame; board roles replace the raw presence handshake and the old
+ * join RPC. A home page can observe 100 boards at once, including reconnects,
+ * so those exact role paths must not consume the user-action budget. Their
+ * stream access checks still validate the board and its granted scope.
  */
 const BOARD_PER_FRAME = new Set([
 	'boards/notes/moveNote',
-	'boards/cursors/moveCursor',
-	'boards/cursors/joinBoard'
+	'boards/cursors/observeBoard',
+	'boards/cursors/participateBoard'
 ])
 
 /**

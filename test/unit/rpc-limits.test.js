@@ -7,8 +7,8 @@ import { isPerFrameRpc } from '../../src/lib/server/rpc-limits.js'
 const PER_FRAME = [
 	// The board, whose paths predate the generated families.
 	'boards/notes/moveNote',
-	'boards/cursors/moveCursor',
-	'boards/cursors/joinBoard',
+	'boards/cursors/observeBoard',
+	'boards/cursors/participateBoard',
 	// Every pointer event.
 	'demos/multiplayer/lounge/__cursor/move',
 	'demos/multiplayer/lounge/__cursor/reportViewport',
@@ -39,6 +39,8 @@ const COUNTED = [
 	// Ordinary declared actions.
 	'demos/multiplayer/lounge/setHeadline',
 	'boards/notes/createNote',
+	'boards/cursors/observeBoardAgain',
+	'boards/cursors/participateBoard/action',
 	'demos/auctions/auction/placeBid'
 ]
 

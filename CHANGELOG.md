@@ -145,6 +145,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Managed board roles share the server-resolved tenant topic while releasing observers and participants independently. Read-only roster access holds an explicit grant, and participation retains background pressure admission.
+
 - Alarm schedules, fired records and retention use separate Redis keys for each tenant and the public scope.
 
 - Board presence and cursor clients wait for managed participation and use the server-resolved topic, preserving tenant scope across route changes and reconnects.

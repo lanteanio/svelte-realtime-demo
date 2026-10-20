@@ -9,6 +9,8 @@
 -->
 <script>
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
+	import { empty } from 'svelte-realtime/client'
+	import { observeBoard } from '$live/boards/cursors'
 	import CountdownTimer from './CountdownTimer.svelte'
 
 	let { board, onpresence } = $props()
@@ -18,7 +20,13 @@
 	// see "1 here" for a board that nobody is actually on. The next
 	// heartbeat for a still-present user re-adds them via the new
 	// {key:data} heartbeat shape, so legitimate users do not flicker.
-	const presenceStore = $derived(presence(`board:${board.board_id}`, { maxAge: 90000 }))
+	// The managed stream authorizes this read-only observer before the
+	// adapter requests a roster; it also reacquires the grant on reconnect.
+	const observation = $derived(observeBoard(board.board_id))
+	const observationValue = $derived($observation)
+	const observationStatus = $derived(observation.status)
+	const topic = $derived(observationValue?.topic && $observationStatus === 'connected' ? observationValue.topic : null)
+	const presenceStore = $derived(topic ? presence(topic, { maxAge: 90000 }) : empty)
 	const users = $derived($presenceStore ?? [])
 
 	// Report presence count to parent for sorting

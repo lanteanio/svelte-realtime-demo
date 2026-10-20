@@ -10,13 +10,11 @@ declare module "$live/boards/activity" {
 }
 
 declare module "$live/boards/cursors" {
-  import type { RpcError } from 'svelte-realtime/client';
+  import type { StreamStore, RpcError } from 'svelte-realtime/client';
   import type { Readable } from 'svelte/store';
 
-  export const joinBoard: (...args: any[]) => Promise<any>;
-  export const leaveBoard: (...args: any[]) => Promise<any>;
-  export type ErrorCode = "FORBIDDEN" | "OVERLOADED" | "REALTIME_UNAVAILABLE";
-  export const moveCursor: (...args: any[]) => Promise<any>;
+  export const observeBoard: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const participateBoard: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const empty: Readable<undefined>;
 }
 

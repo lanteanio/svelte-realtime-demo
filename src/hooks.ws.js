@@ -37,6 +37,7 @@ import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local
 import { lookupSession, createEphemeralIdentity, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { evaluateUpgradeOrigin, upgradeOriginPolicy } from '$lib/server/origin-policy'
 import { isPerFrameRpc } from '$lib/server/rpc-limits'
+import { usesExplicitBoardPresenceLifecycle } from '$lib/server/board-presence'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface at boot.
@@ -476,17 +477,10 @@ export function open(ws, ctx) {
  */
 const PRIVATE_CHAT_RE = /^demos:chat:private(:presence)?$/
 const AUDIT_TOPIC_RE = /^audit:(acme|globex)$/
-// Board presence has an explicit lifecycle: PresenceBar calls joinBoard on
-// mount and leaveBoard on cleanup. BoardCard is an observer of the same
-// roster, not a member. Redis presence.sync authorizes an observer by calling
-// platform.checkSubscribe with the real topic; delegating that check back to
-// presence.hooks.subscribe would turn every board-list observer into a member
-// and make the badge stick at "1 here" after the real member leaves.
-const BOARD_PRESENCE_TOPIC_RE = /^board:[^:]+$/
-
-function usesExplicitBoardPresenceLifecycle(topic) {
-	return BOARD_PRESENCE_TOPIC_RE.test(topic)
-}
+// Managed board streams own participant and observer roles, including the
+// tenant-scoped canonical topic they explicitly grant. Checking that grant
+// must not delegate to a plugin subscribe hook and turn an observer into a
+// participant. The shared helper also recognizes the managed role topics.
 
 function denialFor(topic, ws) {
 	if (PRIVATE_CHAT_RE.test(topic)) return 'FORBIDDEN'
