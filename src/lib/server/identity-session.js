@@ -26,8 +26,8 @@
  * @module identity-session
  */
 import { randomBytes, randomUUID } from 'node:crypto'
-import { redis } from '$lib/server/redis'
-import { generateIdentity } from '$lib/names'
+import { redis } from '#lib/server/redis.js'
+import { generateIdentity } from '#lib/names.js'
 
 const SESSION_TTL_SEC = 60 * 60 * 24 * 30
 export const SESSION_COOKIE_MAX_AGE = SESSION_TTL_SEC

@@ -19,9 +19,9 @@
  */
 
 import { createIdempotencyStore } from 'svelte-adapter-uws-extensions/redis/idempotency'
-import { env } from '$env/dynamic/private'
-import { redis, breaker } from '$lib/server/redis'
-import { metrics } from '$lib/server/metrics'
+import * as env from '$app/env/private'
+import { redis, breaker } from '#lib/server/redis.js'
+import { metrics } from '#lib/server/metrics.js'
 
 export const MAX_FILES = 30
 export const MAX_FILE_BYTES = 50 * 1024 * 1024

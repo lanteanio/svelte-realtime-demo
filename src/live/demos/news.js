@@ -49,8 +49,8 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { live, LiveError, combineCounts } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis } from '#lib/server/redis.js'
 
 const STORY_CAP = 24
 const MAX_HEADLINE_LEN = 80

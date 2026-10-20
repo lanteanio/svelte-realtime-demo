@@ -37,8 +37,8 @@
  */
 
 import { live } from 'svelte-realtime/server'
-import { env } from '$env/dynamic/private'
-import { TOPICS } from '$lib/server/topics'
+import * as env from '$app/env/private'
+import { TOPICS } from '#lib/server/topics.js'
 import { purge as purgeChat } from '$live/demos/chat'
 import { purge as purgeNotifications } from '$live/demos/notifications'
 import { purge as purgeAuctions } from '$live/demos/auctions'

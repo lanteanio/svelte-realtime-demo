@@ -39,7 +39,7 @@
 
 import { createHash } from 'node:crypto'
 import { live, LiveError } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
+import { TOPICS } from '#lib/server/topics.js'
 import {
 	chunkIdempotency,
 	storeChunk,
@@ -56,7 +56,7 @@ import {
 	MAX_FILE_BYTES,
 	MAX_CHUNK_BYTES,
 	MAX_FILENAME_LEN
-} from '$lib/server/upload'
+} from '#lib/server/upload.js'
 
 const PUSH_EVENT = 'demos:upload:incoming'
 

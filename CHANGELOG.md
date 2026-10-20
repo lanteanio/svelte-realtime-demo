@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-20
+
+### Changed
+
+- Upgrade to SvelteKit 3, Vite 8, and vite-plugin-svelte 7. Configure the adapter in `vite.config.js`, use explicit `#lib` imports, and read chat routing state from `$app/state`.
+- Require Node.js 22.19 or newer.
+- Declare private runtime variables in `src/env.js` and read them through `$app/env/private`.
+- Update svelte-adapter-uws to 0.5.11, svelte-realtime to 0.5.14, and svelte-adapter-uws-extensions to 0.5.11.
+- Update uWebSockets.js to v20.69.0, the version svelte-adapter-uws 0.5.11 installs. v20.67.0 can cut off a streamed response after its first backpressure event.
+
+### Added
+
+- Run browser tests against two local production servers with disposable PostgreSQL and Redis containers.
+
+### Fixed
+
+- Keep repeated upload notifications visible when their files contain identical bytes.
+- Use the selected local target for mobile and WebSocket load tests. Remote targets require explicit opt-in.
+- Include the target helper in the standalone load-test Docker image.
+- Wait for delivered events in the replay diagnostic and cluster auction test.
+- Check native WebSocket state during navigation and server connection closure after document replacement.
+- Display the configured publish-rate threshold on the pressure demo.
+
+### Security
+
+- Regenerate the lockfile and raise the minimum undici to 8.10.2 and ws to 8.21.0, so no installed package is in a range covered by a published npm advisory.
+
 ## [0.5.1] - 2026-05-23
 
 ### Changed

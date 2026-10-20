@@ -15,7 +15,7 @@
  */
 
 import pg from 'pg'
-import { env } from '$env/dynamic/private'
+import * as env from '$app/env/private'
 
 const pool = env.DATABASE_URL
 	? new pg.Pool({ connectionString: env.DATABASE_URL })

@@ -17,9 +17,10 @@
  */
 
 import { test, expect } from '@playwright/test'
+import { resolveE2EBaseURL } from '../scripts/test-target.mjs'
 
-const INSTANCE_A = process.env.BASE_URL || 'http://localhost:3091'
-const INSTANCE_B = process.env.INSTANCE_B || 'http://localhost:3092'
+const INSTANCE_A = resolveE2EBaseURL()
+const INSTANCE_B = resolveE2EBaseURL({ ...process.env, BASE_URL: process.env.INSTANCE_B || 'http://localhost:3092' })
 
 // Requires two distinct instances; see the matching guard in
 // cluster-probe.spec.js. Skip rather than ERR_CONNECTION_REFUSED when the
@@ -119,13 +120,10 @@ test.describe('cluster bugs: presence + push', () => {
 			const baCard = ba.getByTestId('inbox-card').filter({ hasText: item })
 			const bbCard = bb.getByTestId('inbox-card').filter({ hasText: item })
 
-			// Pre-fix bug: only the same-replica bidder sees the card; the
-			// other-replica bidder never receives the push.
-			const baVisible = await baCard.isVisible({ timeout: 8_000 }).catch(() => false)
-			const bbVisible = await bbCard.isVisible({ timeout: 8_000 }).catch(() => false)
-			console.log(`[PUSH] sameReplica=${baVisible} otherReplica=${bbVisible}`)
-			expect(baVisible, 'bidder on same replica as seller should see push').toBe(true)
-			expect(bbVisible, 'bidder on other replica should also see push').toBe(true)
+			await Promise.all([
+				expect(baCard, 'bidder on the same replica receives the push').toBeVisible({ timeout: 5_000 }),
+				expect(bbCard, 'bidder on the other replica receives the push').toBeVisible({ timeout: 5_000 })
+			])
 		} finally {
 			await seller.close()
 			await bidderSameReplica.close()

@@ -28,8 +28,8 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { redis, leader } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis, leader } from '#lib/server/redis.js'
 
 const FEED_CAP = 30
 

@@ -58,6 +58,7 @@
 	let activeHandle = $state(null)
 
 	let incoming = $state([])
+	let nextNotificationId = 0
 	let pushReady = $state(false)
 	let pushHandlerInstalled = $state(false)
 	let unregisterPush = null
@@ -77,7 +78,7 @@
 		// only gate the upload form.
 		unregisterPush = onPush('demos:upload:incoming', (data) => {
 			incoming = [
-				{ ...data, receivedAt: Date.now() },
+				{ ...data, notificationId: ++nextNotificationId },
 				...incoming
 			].slice(0, 5)
 			return { ack: 'ok' }
@@ -297,7 +298,7 @@
 			<div class="card-body py-3 space-y-1">
 				<h2 class="card-title text-sm">New uploads on your other devices</h2>
 				<ul class="space-y-1 text-sm">
-					{#each incoming as evt (evt.fileId)}
+					{#each incoming as evt (evt.notificationId)}
 						<li class="flex items-center gap-2" data-testid="incoming-item">
 							<span class="badge badge-info badge-sm">push</span>
 							<span class="font-medium" data-testid="incoming-filename">{evt.filename}</span>

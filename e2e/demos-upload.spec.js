@@ -81,7 +81,11 @@ test.describe('/demos/upload', () => {
 	})
 
 	test('re-upload of the same file dedupes every chunk', async ({ page }) => {
+		const browserErrors = []
+		page.on('console', (msg) => { if (msg.type() === 'error') browserErrors.push(msg.text()) })
+		page.on('pageerror', (err) => browserErrors.push(err.message))
 		await gotoFreshUpload(page)
+		await expect(page.getByTestId('push-ready')).toBeAttached()
 
 		const sizeBytes = 200 * 1024
 		const seed = `${RUN}-DEDUP`
@@ -90,6 +94,7 @@ test.describe('/demos/upload', () => {
 		await expect(page.getByTestId('upload-result')).toBeVisible({ timeout: 15_000 })
 		// Wait for upload to settle (the input is disabled while uploading).
 		await expect(page.getByTestId('file-input')).toBeEnabled({ timeout: 8_000 })
+		await expect(page.getByTestId('incoming-filename')).toHaveText(`${seed}.bin`)
 
 		// Capture how many chunks the first upload produced; the second
 		// upload should match it AND have every chunk deduped.
@@ -113,6 +118,8 @@ test.describe('/demos/upload', () => {
 
 		const upResult = page.getByTestId('upload-result')
 		await expect(upResult.getByTestId('result-deduped')).toHaveText(firstChunks)
+		await expect(page.getByTestId('incoming-filename')).toHaveText([`${seed}-2.bin`, `${seed}.bin`])
+		expect(browserErrors).toEqual([])
 	})
 
 	test('cross-device push: upload from tab A, tab B sees the incoming banner', async ({ browser }) => {

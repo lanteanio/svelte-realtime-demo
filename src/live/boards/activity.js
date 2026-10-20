@@ -10,7 +10,7 @@
  */
 
 import { live } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
+import { TOPICS } from '#lib/server/topics.js'
 
 /**
  * Build an activity event payload. Every event carries a UUID so the

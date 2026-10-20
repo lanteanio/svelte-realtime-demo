@@ -18,12 +18,12 @@
 	import { Layers, LayoutGrid, Shuffle, Users, Sparkles, X } from 'lucide-svelte'
 	import { activity } from '$live/boards/activity'
 	import { settings, updateSettings } from '$live/boards/settings'
-	import Canvas from '$lib/components/Canvas.svelte'
-	import StickyNote from '$lib/components/StickyNote.svelte'
-	import PresenceBar from '$lib/components/PresenceBar.svelte'
-	import CursorOverlay from '$lib/components/CursorOverlay.svelte'
-	import ActivityTicker from '$lib/components/ActivityTicker.svelte'
-	import BoardHeader from '$lib/components/BoardHeader.svelte'
+	import Canvas from '#lib/components/Canvas.svelte'
+	import StickyNote from '#lib/components/StickyNote.svelte'
+	import PresenceBar from '#lib/components/PresenceBar.svelte'
+	import CursorOverlay from '#lib/components/CursorOverlay.svelte'
+	import ActivityTicker from '#lib/components/ActivityTicker.svelte'
+	import BoardHeader from '#lib/components/BoardHeader.svelte'
 
 	let { data } = $props()
 	const boardId = $derived(data.boardId)

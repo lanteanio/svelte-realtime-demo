@@ -13,15 +13,15 @@ import path from 'node:path'
 import os from 'node:os'
 import { createMessage, LiveError, setCronPlatform, live, pushHooks, configureCron, _activateDerived } from 'svelte-realtime/server'
 import { wirePublishRateMetrics, connectionMetricsHook } from 'svelte-adapter-uws-extensions/prometheus'
-import { bus, limiter, presence, cursor, replay, registry, leader, redis } from '$lib/server/redis'
-import { metrics } from '$lib/server/metrics'
-import { tasks } from '$lib/server/tasks'
-import { lookupSession, createSession, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
+import { bus, limiter, presence, cursor, replay, registry, leader, redis } from '#lib/server/redis.js'
+import { metrics } from '#lib/server/metrics.js'
+import { tasks } from '#lib/server/tasks.js'
+import { lookupSession, createSession, tryParseLegacyJsonCookie } from '#lib/server/identity-session.js'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface and
 // registers the orchestrator cron at boot. See src/lib/server/demo-purge.js.
-import '$lib/server/demo-purge'
+import '#lib/server/demo-purge.js'
 
 // SIGUSR2 heap-snapshot trigger. `kill -SIGUSR2 <pid>` on the host writes
 // a `heap-<timestamp>.heapsnapshot` file under HEAP_SNAPSHOT_DIR (default
@@ -42,7 +42,7 @@ process.on('SIGUSR2', () => {
 
 /**
  * Message-tier admission control. Pairs with the handshake-tier
- * upgradeAdmission in svelte.config.js.
+ * upgradeAdmission in vite.config.js.
  *
  * background: cursor moves and note drag shed under any pressure
  * signal (memory, publish-rate, subscriber-ratio). Optional UX,

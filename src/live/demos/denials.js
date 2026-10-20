@@ -21,8 +21,8 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis } from '#lib/server/redis.js'
 
 const MAX_ENTRIES = 200
 const SEEDED_KEY = 'demos:denials:seeded'

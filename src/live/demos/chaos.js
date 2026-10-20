@@ -33,7 +33,7 @@
  */
 
 import { live } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
+import { TOPICS } from '#lib/server/topics.js'
 
 const TICK_MS = 100
 const HISTORY_MAX = 60

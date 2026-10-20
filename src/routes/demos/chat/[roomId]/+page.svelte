@@ -16,10 +16,10 @@
 	   `code: 'FORBIDDEN'`. We render a banner; messages never appear.
 -->
 <script>
-	import { page } from '$app/stores'
+	import { page } from '$app/state'
 	import { chat, sendMessage } from '$live/demos/chat'
 
-	const roomId = $derived($page.params.roomId)
+	const roomId = $derived(page.params.roomId)
 
 	let messages = $state([])
 	let presence = $state([])

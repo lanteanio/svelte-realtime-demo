@@ -25,9 +25,9 @@ import {
 	deleteNote as dbDeleteNote,
 	batchUpdateNotes as dbBatchUpdateNotes,
 	touchBoard
-} from '$lib/server/db'
-import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '$lib/server/validate'
-import { TOPICS } from '$lib/server/topics'
+} from '#lib/server/db.js'
+import { validateBoardId, validateNoteId, validateNoteContent, validateCoord, validateNoteColor, validateNoteFields, validateZIndex } from '#lib/server/validate.js'
+import { TOPICS } from '#lib/server/topics.js'
 import { activityEvent } from './activity'
 
 /**

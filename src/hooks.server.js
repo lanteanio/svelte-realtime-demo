@@ -8,9 +8,9 @@
  * (like the stress test board used by the E2E suite).
  */
 
-import { ensureBoard } from '$lib/server/db'
+import { ensureBoard } from '#lib/server/db.js'
 import pg from 'pg'
-import { env } from '$env/dynamic/private'
+import * as env from '$app/env/private'
 import { live } from 'svelte-realtime/server'
 
 // Dev-mode safety net: warn once if a stream subscribes to a topic and
@@ -35,6 +35,6 @@ if (env.DATABASE_URL) {
 	})
 }
 
-export function handleError({ error }) {
-	console.error('[handleError]', error)
+export function handleError({ error, kind }) {
+	if (kind === 'unknown') console.error('[handleError]', error)
 }

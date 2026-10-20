@@ -10,10 +10,10 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard, tryAdvisoryLock, advisoryUnlock } from '$lib/server/db'
-import { generateSlug } from '$lib/names'
-import { validateBoardTitle } from '$lib/server/validate'
-import { TOPICS } from '$lib/server/topics'
+import { listBoards, createBoard as dbCreateBoard, listStaleBoards, deleteBoard as dbDeleteBoard, tryAdvisoryLock, advisoryUnlock } from '#lib/server/db.js'
+import { generateSlug } from '#lib/names.js'
+import { validateBoardTitle } from '#lib/server/validate.js'
+import { TOPICS } from '#lib/server/topics.js'
 
 /** How long a board lives without activity (1 hour). */
 const BOARD_TTL_MS = 60 * 60 * 1000

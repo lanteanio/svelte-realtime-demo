@@ -12,7 +12,7 @@
  */
 
 import { json, error } from '@sveltejs/kit'
-import { updateSessionField } from '$lib/server/identity-session'
+import { updateSessionField } from '#lib/server/identity-session.js'
 
 const VALID_ORGS = new Set(['acme', 'globex'])
 

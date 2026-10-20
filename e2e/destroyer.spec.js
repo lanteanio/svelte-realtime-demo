@@ -14,8 +14,9 @@
 
 import { test, expect } from '@playwright/test';
 import { WebSocket } from 'ws';
+import { resolveE2EBaseURL, toWebSocketURL, toHandshakeOrigin } from '../scripts/test-target.mjs';
 
-const WS_URL = 'wss://svelte-realtime-demo.lantean.io/ws';
+const WS_URL = toWebSocketURL(resolveE2EBaseURL());
 const BOARD_URL = '/board/stress-me-out';
 const LEVELS = [1000, 2000, 3000, 5000, 7000, 10000];
 
@@ -30,7 +31,7 @@ function connectUser(index) {
 		const cookie = `identity=${encodeURIComponent(JSON.stringify({ id, name, color }))}`;
 
 		const ws = new WebSocket(WS_URL, {
-			headers: { Cookie: cookie },
+			headers: { Cookie: cookie, Origin: toHandshakeOrigin(WS_URL) },
 			rejectUnauthorized: false
 		});
 

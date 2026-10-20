@@ -9,7 +9,7 @@
  * trusted host sets the token.
  */
 import { error } from '@sveltejs/kit'
-import { metrics } from '$lib/server/metrics'
+import { metrics } from '#lib/server/metrics.js'
 
 export function GET({ request }) {
 	const expected = process.env.METRICS_SCRAPE_TOKEN

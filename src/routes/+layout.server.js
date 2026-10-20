@@ -3,7 +3,7 @@
  *
  * Manages the user's identity via a session cookie. The cookie carries
  * only a 128-bit opaque session-id; the identity itself lives in Redis
- * under `identity-session:<id>`. See $lib/server/identity-session for
+ * under `identity-session:<id>`. See #lib/server/identity-session.js for
  * the storage contract.
  *
  * The cookie is NOT httpOnly because the client-side JS needs to read
@@ -18,7 +18,7 @@ import {
 	createSession,
 	tryParseLegacyJsonCookie,
 	SESSION_COOKIE_MAX_AGE
-} from '$lib/server/identity-session'
+} from '#lib/server/identity-session.js'
 
 const COOKIE_OPTS = {
 	path: '/',

@@ -55,9 +55,11 @@ test('from-seq pause+resume captures wire frames', async ({ page }) => {
 
 	await page.goto('/demos/from-seq')
 
-	// Wait for initial rehydrate (20 events tagged rehydrate)
-	await expect(page.getByTestId('tier-rehydrate')).toContainText(/rehydrate: 20/, { timeout: 15_000 })
-	console.log('[probe] initial rehydrate complete')
+	// A fresh store can have fewer than 20 historical events. Live delivery
+	// confirms the subscription is running before the pause/resume probe.
+	await expect(page.getByTestId('tier-live')).toContainText(/live:\s*[1-9]\d*/, { timeout: 15_000 })
+	await expect(page.getByTestId('event-row').first()).toBeVisible()
+	console.log('[probe] live delivery started')
 
 	// Let a few live events flow in
 	await page.waitForTimeout(4000)

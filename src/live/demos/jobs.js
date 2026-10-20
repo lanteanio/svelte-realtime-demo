@@ -45,8 +45,8 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { tasks, pgClient, TASKS_TABLE } from '$lib/server/tasks'
+import { TOPICS } from '#lib/server/topics.js'
+import { tasks, pgClient, TASKS_TABLE } from '#lib/server/tasks.js'
 
 const VALID_MODES = new Set(['succeed', 'fail-once', 'fail-always'])
 const TASK_NAME = 'simulate-work'

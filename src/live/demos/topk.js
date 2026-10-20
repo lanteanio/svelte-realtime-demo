@@ -40,8 +40,8 @@
  */
 
 import { live, LiveError, combineCounts } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis } from '#lib/server/redis.js'
 
 /** Pool of 12 visually distinct items competing for the leaderboards. */
 const ITEMS = [

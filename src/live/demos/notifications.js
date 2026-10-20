@@ -43,8 +43,8 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis } from '#lib/server/redis.js'
 
 const PUSH_TIMEOUT_MS = 8000
 const ACTIVITY_CAP = 50

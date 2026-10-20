@@ -7,9 +7,9 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { getBoard, updateBoard } from '$lib/server/db'
-import { validateBoardId, validateBoardFields } from '$lib/server/validate'
-import { TOPICS } from '$lib/server/topics'
+import { getBoard, updateBoard } from '#lib/server/db.js'
+import { validateBoardId, validateBoardFields } from '#lib/server/validate.js'
+import { TOPICS } from '#lib/server/topics.js'
 import { activityEvent } from './activity'
 
 export const updateSettings = live(async (ctx, boardId, fields) => {

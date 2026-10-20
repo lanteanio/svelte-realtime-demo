@@ -20,9 +20,9 @@
 
 import { live } from 'svelte-realtime/server'
 import { createIdempotencyStore } from 'svelte-adapter-uws-extensions/redis/idempotency'
-import { TOPICS } from '$lib/server/topics'
-import { redis, breaker } from '$lib/server/redis'
-import { metrics } from '$lib/server/metrics'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis, breaker } from '#lib/server/redis.js'
+import { metrics } from '#lib/server/metrics.js'
 
 const COUNT_KEY = 'demos:checkout:count'
 

@@ -9,7 +9,7 @@
  * If the slug doesn't match any board, we return a 404.
  */
 
-import { getBoardBySlug } from '$lib/server/db'
+import { getBoardBySlug } from '#lib/server/db.js'
 import { error } from '@sveltejs/kit'
 
 export async function load({ params }) {

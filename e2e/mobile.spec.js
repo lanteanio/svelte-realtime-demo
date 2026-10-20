@@ -1,7 +1,8 @@
 // @ts-check
 import { test, expect, devices } from '@playwright/test';
+import { resolveE2EBaseURL } from '../scripts/test-target.mjs';
 
-const BASE = 'https://svelte-realtime-demo.lantean.io';
+const BASE = resolveE2EBaseURL();
 
 // Use iPhone 13 profile for realistic mobile viewport + touch
 const iPhone = devices['iPhone 13'];

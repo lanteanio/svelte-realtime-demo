@@ -13,7 +13,7 @@
 <script>
 	import { boards, createBoard } from '$live/boards'
 	import { goto } from '$app/navigation'
-	import BoardCard from '$lib/components/BoardCard.svelte'
+	import BoardCard from '#lib/components/BoardCard.svelte'
 
 	let newTitle = $state('')
 

@@ -93,7 +93,7 @@ For OS-level tuning (sysctl, ulimits, conntrack), see the [svelte-adapter-uws pr
 
 ### Prerequisites
 
-- Node.js >= 20
+- Node.js >= 22.19
 - Docker (for Postgres and Redis, or bring your own)
 
 ### Install
@@ -192,25 +192,34 @@ Playwright tests covering:
 - Cursor destroyer (ramp with live cursor movement)
 
 ```bash
-# Run everything
+# Install the test browser once
+npx playwright install chromium
+
+# Run target checks and both browser projects
+npm test
+
+# Run the main browser project
 npm run test:e2e
 
-# Run without the stress/destroyer tests (faster)
-npx playwright test --grep-invert "Stress|Destroyer"
-
-# Run only the stress test
-npx playwright test e2e/stress.spec.js
-
-# Run the destroyer from the server (bypass NAT limits)
-node e2e/destroyer-standalone.js
-node e2e/destroyer-standalone.js --cursors
+# Run the isolated project, including the 1000-user stress test
+npm run test:e2e:isolated
 ```
 
-Tests run against `https://svelte-realtime-demo.lantean.io`. Change `baseURL` in `playwright.config.js` to test elsewhere.
+The npm test commands require Docker and a checkout without `.env` files. They build the app, create disposable PostgreSQL and Redis containers, and start two production servers on loopback ports. Each browser project gets fresh state. Tests run serially with no retries, and the runner removes its processes and containers afterward.
+
+For an already-built checkout, run `node scripts/run-local-e2e.mjs all --skip-build`. Do not install dependencies or rebuild while tests are running.
+
+Direct Playwright runs default to `http://127.0.0.1:3000`; set `BASE_URL` and `INSTANCE_B` to select existing test servers. Remote targets also require `ALLOW_REMOTE_E2E=1`. Mobile tests and WebSocket clients use the same selected target.
+
+The server connection lifecycle check requires the local runner's exclusive services and runs in the isolated project.
+
+The two 10000-connection destroyer tests remain opt-in and are reported as skipped by the local runner. Run them only on a resource-isolated test host, with `RUN_DESTROYER=1` and an explicit test target. The standalone load client accepts `--url ws://localhost:3000/ws` and `--cursors`.
 
 ---
 
 ## Environment variables
+
+The private SvelteKit variables for database URLs and purge intervals are declared in `src/env.js`. They stay dynamic so the production server reads its runtime configuration when it starts.
 
 | Variable | Default | Description |
 |---|---|---|

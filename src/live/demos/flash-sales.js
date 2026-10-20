@@ -34,8 +34,8 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { redis } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { redis } from '#lib/server/redis.js'
 
 const PRODUCT_LOCK_MAX_WAIT_MS = 1500
 const PER_BUY_DELAY_MS = 80

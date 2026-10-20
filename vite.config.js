@@ -8,6 +8,7 @@
  * 4. realtime() -- Transforms $live imports into RPC/stream client code
  */
 import { sveltekit } from '@sveltejs/kit/vite'
+import adapter from 'svelte-adapter-uws'
 import tailwindcss from '@tailwindcss/vite'
 import uws from 'svelte-adapter-uws/vite'
 import realtime from 'svelte-realtime/vite'
@@ -20,7 +21,25 @@ export default defineConfig({
 		sourcemap: false
 	},
 	plugins: [
-		sveltekit(),
+		sveltekit({
+			adapter: adapter({
+				websocket: {
+					// The load tests open many connections from one address.
+					upgradeRateLimit: 0,
+					upgradeAdmission: {
+						maxConcurrent: 4000,
+						perTickBudget: 256
+					},
+					pressure: {
+						publishRatePerSec: 10000,
+						memoryHeapUsedRatio: 0.97
+					}
+				}
+			}),
+			// Enable runes for application files without changing dependencies.
+			dynamicCompileOptions: ({ filename }) =>
+				filename.includes('node_modules') ? undefined : { runes: true }
+		}),
 		tailwindcss(),
 		uws(),
 		realtime(),

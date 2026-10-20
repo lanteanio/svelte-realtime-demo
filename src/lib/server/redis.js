@@ -25,8 +25,8 @@ import { createReplay } from 'svelte-adapter-uws-extensions/redis/replay'
 import { createConnectionRegistry } from 'svelte-adapter-uws-extensions/redis/registry'
 import { createLeader } from 'svelte-adapter-uws-extensions/redis/leader'
 import { createCircuitBreaker } from 'svelte-adapter-uws-extensions/breaker'
-import { env } from '$env/dynamic/private'
-import { metrics } from '$lib/server/metrics'
+import * as env from '$app/env/private'
+import { metrics } from '#lib/server/metrics.js'
 
 /** Shared Redis connection. All utilities below share this client. */
 export const redis = createRedisClient({ url: env.REDIS_URL })

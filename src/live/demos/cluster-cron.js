@@ -38,8 +38,8 @@
  */
 
 import { live } from 'svelte-realtime/server'
-import { TOPICS } from '$lib/server/topics'
-import { leader, redis } from '$lib/server/redis'
+import { TOPICS } from '#lib/server/topics.js'
+import { leader, redis } from '#lib/server/redis.js'
 
 const TICK_CAP = 30
 

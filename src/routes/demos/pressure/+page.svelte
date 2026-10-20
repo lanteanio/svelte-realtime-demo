@@ -176,8 +176,8 @@
 				the handler checks <code>ctx.shed('background')</code>;
 				if it fires, a real shed event lands in the log below.
 				The <code>publishRatePerSec</code> threshold is set to
-				500/sec in <code>svelte.config.js</code> so +1000 / +5000
-				reliably trip shedding.
+				10000/sec in <code>vite.config.js</code>. Shedding depends on
+				the total publish rate, including active subscriptions.
 			</p>
 		</div>
 	</div>

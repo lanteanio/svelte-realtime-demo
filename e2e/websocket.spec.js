@@ -1,5 +1,49 @@
 import { test, expect } from '@playwright/test';
-import { createBoard, waitForBoardReady, waitForWS } from './helpers.js';
+import { createBoard, waitForWS } from './helpers.js';
+
+async function observeNativeSockets(page) {
+	await page.addInitScript(() => {
+		const NativeWebSocket = window.WebSocket;
+		const sockets = [];
+		window.__webSocketAudit = { documentId: crypto.randomUUID(), sockets };
+		window.WebSocket = class extends NativeWebSocket {
+			constructor(...args) {
+				super(...args);
+				sockets.push(this);
+			}
+		};
+	});
+}
+
+async function socketState(page) {
+	return page.evaluate(() => ({
+		documentId: window.__webSocketAudit.documentId,
+		open: window.__webSocketAudit.sockets.filter((socket) => socket.readyState === WebSocket.OPEN).length,
+		connecting: window.__webSocketAudit.sockets.filter((socket) => socket.readyState === WebSocket.CONNECTING).length
+	}));
+}
+
+async function expectOneNativeSocket(page) {
+	await expect.poll(async () => {
+		const { open, connecting } = await socketState(page);
+		return { open, connecting };
+	}, { message: 'the current document must have exactly one live WebSocket' }).toEqual({ open: 1, connecting: 0 });
+	return socketState(page);
+}
+
+async function createBoardThroughForm(page, name) {
+	await page.getByPlaceholder('New board name...').fill(name);
+	await page.getByRole('button', { name: 'Create', exact: true }).click();
+	await expect(page).toHaveURL(/\/board\//);
+	await expect(page.getByRole('heading', { level: 1, name, exact: true })).toBeVisible();
+	await expect(page.getByRole('button', { name: 'Set background to #f5f5f4', exact: true })).toBeVisible();
+}
+
+async function returnHomeThroughLink(page) {
+	await page.locator('.navbar a[href="/"]').click();
+	await expect(page.getByRole('heading', { level: 1, name: 'Boards', exact: true })).toBeVisible();
+	await expect(page.getByPlaceholder('New board name...')).toBeVisible();
+}
 
 test.describe('WebSocket Connection', () => {
 	test('WebSocket connects on page load', async ({ page }) => {
@@ -60,89 +104,73 @@ test.describe('WebSocket Connection', () => {
 		await expect(wifiIcon.first()).toBeVisible({ timeout: 5000 });
 	});
 
-	test('only ONE WebSocket connection per session (no leaks)', async ({ page }) => {
-		const wsConnections = [];
-
-		page.on('websocket', (ws) => {
-			wsConnections.push({ url: ws.url(), openedAt: Date.now(), closed: false });
-			ws.on('close', () => {
-				const entry = wsConnections.find((c) => c.url === ws.url() && !c.closed);
-				if (entry) entry.closed = true;
-			});
-		});
-
-		// Navigate to home
+	test('one WebSocket per document through navigation and refresh', async ({ page }) => {
+		await observeNativeSockets(page);
 		await page.goto('/');
-		await page.waitForTimeout(2000);
-		const afterHome = wsConnections.length;
-		console.log(`\n=== WS CONNECTION AUDIT ===`);
-		console.log(`After home page load: ${afterHome} connection(s)`);
-		expect(afterHome).toBe(1);
+		await waitForWS(page);
+		const initial = await expectOneNativeSocket(page);
 
-		// Navigate to a board
-		const boardUrl = await createBoard(page, `WS Audit ${Date.now()}`);
-		await waitForBoardReady(page);
-		await page.waitForTimeout(2000);
-		const afterBoard = wsConnections.filter((c) => !c.closed).length;
-		console.log(`After board navigation: ${wsConnections.length} total, ${afterBoard} open`);
+		// Use hydrated application navigation so this checks one document's
+		// singleton through page changes, including actual form submission.
+		await createBoardThroughForm(page, `WS Audit ${Date.now()}`);
+		expect((await expectOneNativeSocket(page)).documentId).toBe(initial.documentId);
+		await returnHomeThroughLink(page);
+		expect((await expectOneNativeSocket(page)).documentId).toBe(initial.documentId);
 
-		// Should still be just 1 open connection (the original may have been
-		// replaced, but we should NOT have multiple open simultaneously)
-		expect(afterBoard).toBeLessThanOrEqual(1);
-
-		// Navigate back to home
+		// Document replacement has its own observer. Browser automation can
+		// omit old-document close events; inspect real current socket states.
 		await page.goto('/');
-		await page.waitForTimeout(2000);
-		const afterReturn = wsConnections.filter((c) => !c.closed).length;
-		console.log(`After return to home: ${wsConnections.length} total, ${afterReturn} open`);
-		expect(afterReturn).toBeLessThanOrEqual(1);
-
-		// Refresh the page
+		await waitForWS(page);
+		const afterNavigation = await expectOneNativeSocket(page);
+		expect(afterNavigation.documentId).not.toBe(initial.documentId);
 		await page.reload();
-		await page.waitForTimeout(2000);
-		const afterRefresh = wsConnections.filter((c) => !c.closed).length;
-		console.log(`After page refresh: ${wsConnections.length} total, ${afterRefresh} open`);
-		expect(afterRefresh).toBeLessThanOrEqual(1);
-
-		console.log(`\nAll WS connections:`);
-		wsConnections.forEach((c, i) => {
-			console.log(`  ${i + 1}. ${c.closed ? 'CLOSED' : 'OPEN '} - opened at +${c.openedAt - wsConnections[0].openedAt}ms`);
-		});
+		await waitForWS(page);
+		expect((await expectOneNativeSocket(page)).documentId).not.toBe(afterNavigation.documentId);
 	});
 
 	test('navigating between multiple boards does not leak connections', async ({ page }) => {
-		const wsConnections = [];
-
-		page.on('websocket', (ws) => {
-			wsConnections.push({ url: ws.url(), closed: false });
-			ws.on('close', () => {
-				const entry = wsConnections.find((c) => !c.closed);
-				if (entry) entry.closed = true;
-			});
-		});
-
+		await observeNativeSockets(page);
 		await page.goto('/');
-		await page.waitForTimeout(1500);
+		await waitForWS(page);
+		const initial = await expectOneNativeSocket(page);
 
-		// Create and visit 3 different boards
 		for (let i = 0; i < 3; i++) {
-			await page.goto('/');
-			await waitForWS(page);
-			await page.getByPlaceholder('New board name...').fill(`Leak Test ${i} ${Date.now()}`);
-			await page.getByRole('button', { name: 'Create' }).click();
-			await page.waitForURL(/\/board\//, { timeout: 15000 });
-			await waitForBoardReady(page);
-			await page.waitForTimeout(1500);
+			await createBoardThroughForm(page, `Leak Test ${i} ${Date.now()}`);
+			expect((await expectOneNativeSocket(page)).documentId).toBe(initial.documentId);
+			await returnHomeThroughLink(page);
+			expect((await expectOneNativeSocket(page)).documentId).toBe(initial.documentId);
 		}
+	});
 
-		const openCount = wsConnections.filter((c) => !c.closed).length;
-		console.log(`\nAfter visiting 3 boards: ${wsConnections.length} total WS, ${openCount} still open`);
-
-		// Should not have more than 1 open connection
-		expect(openCount).toBeLessThanOrEqual(1);
-
-		// Total connections should be reasonable (1 original + maybe reconnects on nav)
-		// but definitely not 3x or more
-		console.log(`Total WS connections created: ${wsConnections.length}`);
+	test('socket observer detects an additional real WebSocket', async ({ page }) => {
+		await observeNativeSockets(page);
+		await page.goto('/');
+		await waitForWS(page);
+		const initial = await expectOneNativeSocket(page);
+		try {
+			await page.evaluate(async () => {
+				const audit = window.__webSocketAudit;
+				const existing = audit.sockets.find((socket) => socket.readyState === WebSocket.OPEN);
+				const extra = new WebSocket(existing.url);
+				audit.control = extra;
+				await new Promise((resolve, reject) => {
+					extra.addEventListener('open', resolve, { once: true });
+					extra.addEventListener('error', () => reject(new Error('additional WebSocket failed to open')), { once: true });
+				});
+			});
+			await expect.poll(() => socketState(page)).toEqual({
+				documentId: initial.documentId, open: 2, connecting: 0
+			});
+		} finally {
+			await page.evaluate(async () => {
+				const extra = window.__webSocketAudit.control;
+				if (!extra || extra.readyState === WebSocket.CLOSED) return;
+				await new Promise((resolve) => {
+					extra.addEventListener('close', resolve, { once: true });
+					extra.close();
+				});
+			});
+		}
+		expect((await expectOneNativeSocket(page)).documentId).toBe(initial.documentId);
 	});
 });

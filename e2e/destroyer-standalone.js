@@ -12,21 +12,29 @@
  * 125 timers and the harness can hit the configured rate.
  *
  * Usage:
- *   node destroyer.js                          # presence only
- *   node destroyer.js --cursors                # with cursor movement
- *   node destroyer.js --url wss://localhost/ws # custom server
+ *   node e2e/destroyer-standalone.js                            # presence only
+ *   node e2e/destroyer-standalone.js --cursors                  # with cursor movement
+ *   node e2e/destroyer-standalone.js --url ws://localhost:3000/ws # custom server
  *
  *   WORKERS=8 LEVELS=1000 CURSOR_INTERVAL_MS=8 SUSTAIN_MS=60000 \
- *     node destroyer-standalone.js --cursors
+ *     node e2e/destroyer-standalone.js --cursors
  */
 
 import cluster from 'node:cluster';
 import { WebSocket } from 'ws';
+import { assertSafeE2ETarget, resolveE2EBaseURL, toWebSocketURL, toHandshakeOrigin } from '../scripts/test-target.mjs';
 
 const args = process.argv.slice(2);
 const WITH_CURSORS = args.includes('--cursors');
-const WS_URL = args.find(a => a.startsWith('wss://')) || 'wss://svelte-realtime-demo.lantean.io/ws';
-const HTTP_URL = WS_URL.replace('wss://', 'https://').replace('/ws', '');
+const urlFlag = args.indexOf('--url');
+const explicitUrl = args.find((arg) => arg.startsWith('--url='))?.slice('--url='.length)
+	|| (urlFlag >= 0 ? args[urlFlag + 1] : null)
+	|| args.find((arg) => /^(?:ws|wss):\/\//.test(arg));
+if (urlFlag >= 0 && !args[urlFlag + 1]) throw new Error('--url requires a WebSocket URL');
+const target = explicitUrl ? assertSafeE2ETarget(explicitUrl) : new URL(toWebSocketURL(resolveE2EBaseURL()));
+if (!['ws:', 'wss:'].includes(target.protocol)) throw new Error('--url must use ws or wss');
+const WS_URL = target.href;
+const HTTP_URL = toHandshakeOrigin(WS_URL);
 const BOARD_SLUG = 'stress-me-out';
 
 // Multi-process: WORKERS=N forks N child Node processes that each handle
@@ -41,7 +49,7 @@ const SHARD_BASE = SHARD * 100_000;
 
 // Ramps past 10K to find the actual ceiling when fired from a Linux box
 // against the demo (home networks NAT-table-out around 5-10K). Override via
-// LEVELS env var: `LEVELS=1000,5000,15000,30000 node destroyer-standalone.js`.
+// LEVELS env var: `LEVELS=1000,5000,15000,30000 node e2e/destroyer-standalone.js`.
 const LEVELS = process.env.LEVELS
 	? process.env.LEVELS.split(',').map((s) => parseInt(s.trim(), 10)).filter(Number.isFinite)
 	: [1000, 2000, 5000, 10000, 15000, 20000, 30000, 50000];
@@ -51,7 +59,7 @@ const LEVELS = process.env.LEVELS
 // At N bots x 125Hz that's N*125 raw RPCs/sec landing on the publish path
 // before per-WS coalescing kicks in -- the real ceiling-finding workload.
 //
-//   CURSOR_INTERVAL_MS=8 node destroyer-standalone.js --cursors    # PARTY MODE
+//   CURSOR_INTERVAL_MS=8 node e2e/destroyer-standalone.js --cursors    # PARTY MODE
 const CURSOR_INTERVAL_MS = Number.isFinite(parseInt(process.env.CURSOR_INTERVAL_MS, 10))
 	? parseInt(process.env.CURSOR_INTERVAL_MS, 10)
 	: 32;
@@ -154,7 +162,7 @@ function connectUser(index) {
 			id, name: `X${SHARD_BASE + index}`, color: '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0')
 		}))}`;
 
-		const ws = new WebSocket(WS_URL, { headers: { Cookie: cookie }, rejectUnauthorized: false });
+		const ws = new WebSocket(WS_URL, { headers: { Cookie: cookie, Origin: toHandshakeOrigin(WS_URL) }, rejectUnauthorized: false });
 		const timer = setTimeout(() => { ws.close(); reject(new Error('timeout')); }, 60000);
 
 		ws.on('open', () => { clearTimeout(timer); resolve({ ws, index }); });

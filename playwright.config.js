@@ -1,22 +1,8 @@
 import { defineConfig } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { resolveE2EBaseURL } from './scripts/test-target.mjs';
 
-// Auto-load .env from the project root into process.env so tests that
-// depend on operational secrets (e.g. METRICS_SCRAPE_TOKEN for the
-// /metrics endpoint in demos-cluster-cron.spec.js) work without the
-// caller having to source the file manually. Existing process.env
-// entries always win so an explicit override from the shell takes
-// precedence over the file. Missing file is fine -- many environments
-// won't have one (e.g. CI that injects env vars directly).
-try {
-	const env = readFileSync('.env', 'utf8');
-	for (const line of env.split(/\r?\n/)) {
-		const m = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-		if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-	}
-} catch { /* no .env, that's fine */ }
-
-const BASE_URL = process.env.BASE_URL || 'https://svelte-realtime-demo.lantean.io';
+// Targets and test secrets come from the caller, never from deployment files.
+const BASE_URL = resolveE2EBaseURL();
 
 // The suite splits into two projects:
 //
@@ -30,17 +16,17 @@ const BASE_URL = process.env.BASE_URL || 'https://svelte-realtime-demo.lantean.i
 //   No retries -- the stress / destroyer / alone tests want a clean
 //   pass/fail signal under isolation, not a flaky-retry crutch.
 //
-// `npm run test:e2e` runs both projects sequentially; `npm run
-// test:e2e:fast` runs just `main` for quick iteration; `npm run
-// test:e2e:isolated` runs just the isolated suite (which is where
-// stress ceiling probes live and operators want focused output).
+// The local runner uses one worker and no retries. `test:e2e:all` runs both
+// projects sequentially, resetting its databases between them. `test:e2e`
+// runs main, and `test:e2e:isolated` runs isolated.
 export default defineConfig({
 	testDir: './e2e',
 	timeout: 30_000,
 	expect: { timeout: 10_000 },
 	fullyParallel: false,
 	retries: 1,
-	reporter: 'html',
+	reporter: process.env.LOCAL_E2E === '1' ? 'list' : 'html',
+	outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR || 'test-results',
 	use: {
 		baseURL: BASE_URL,
 		trace: 'on-first-retry',
@@ -54,7 +40,8 @@ export default defineConfig({
 			testIgnore: [
 				'**/stress.spec.js',
 				'**/destroyer.spec.js',
-				'**/destroyer-presence.spec.js'
+				'**/destroyer-presence.spec.js',
+				'**/websocket-lifecycle.spec.js'
 			],
 			grepInvert: /alone on the page/,
 			use: { browserName: 'chromium' }
@@ -64,26 +51,18 @@ export default defineConfig({
 			workers: 1,
 			retries: 0,
 			timeout: 600_000,
-			// `dependencies: ['main']` was tried and rejected: Playwright's
-			// dependency mechanism is fail-fast (if a dep fails, dependents
-			// skip), AND `--project=isolated` ALSO runs declared dependencies
-			// -- so isolated could neither run after a main flake nor stand
-			// alone. The shell `&&` in `test:e2e:all` is a cleaner sequencer:
-			// both projects always get to run, the caller controls order, and
-			// isolated remains usable standalone via `test:e2e:isolated`.
-			// What still matters: do NOT run `test:e2e:fast` (main) and
-			// `test:e2e:isolated` simultaneously against the same demo -- the
-			// stress test's 1K-bot ramp saturates cluster pub/sub and the
-			// "alone" tests can't pass while main's 3 workers each hold a
-			// presence-attached page.
+			// The runner executes isolated even when main fails. Keep the two
+			// projects sequential: load tests and quiet-cluster assertions
+			// need exclusive use of the application instances.
 			testMatch: [
 				'**/stress.spec.js',
 				'**/destroyer.spec.js',
 				'**/destroyer-presence.spec.js',
 				'**/demos-auctions.spec.js',
-				'**/demos-notifications.spec.js'
+				'**/demos-notifications.spec.js',
+				'**/websocket-lifecycle.spec.js'
 			],
-			grep: /alone on the page|Stress Test|Destroyer Test|Presence Destroyer/,
+			grep: /alone on the page|Stress Test|Destroyer Test|Presence Destroyer|WebSocket lifecycle/,
 			use: { browserName: 'chromium' }
 		}
 	]

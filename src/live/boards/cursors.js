@@ -12,8 +12,8 @@
  */
 
 import { live, LiveError } from 'svelte-realtime/server'
-import { cursor, presence } from '$lib/server/redis'
-import { TOPICS } from '$lib/server/topics'
+import { cursor, presence } from '#lib/server/redis.js'
+import { TOPICS } from '#lib/server/topics.js'
 
 /** Register this connection as present on the given board. */
 export const joinBoard = live(async (ctx, boardId) => {
