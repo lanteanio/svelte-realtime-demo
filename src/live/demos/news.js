@@ -379,6 +379,8 @@ export const trending = live.aggregate(TOPICS.demoNewsView, {
 	}
 }, {
 	topic: TOPICS.demoNewsTopkBase,
+	// The firehose counts synthetic story views without visitor identities.
+	forget: 'retain',
 	windows: {
 		last30s:    { type: 'sliding',  durationMs: 30_000, slideMs: 3_000 },
 		thisMinute: { type: 'tumbling', period: 'minute' },

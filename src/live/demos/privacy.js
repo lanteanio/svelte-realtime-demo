@@ -192,6 +192,7 @@ function moodReducers() {
  */
 export const rawMood = live.aggregate(TOPICS.demoPrivacyMoods, moodReducers(), {
 	topic: TOPICS.demoPrivacyAggRaw,
+	forget: 'reset',
 	windows: {
 		round: { type: 'tumbling', period: 'minute' }
 	}
@@ -206,6 +207,7 @@ export const rawMood = live.aggregate(TOPICS.demoPrivacyMoods, moodReducers(), {
  */
 export const privateMood = live.aggregate(TOPICS.demoPrivacyMoods, moodReducers(), {
 	topic: TOPICS.demoPrivacyAggPrivate,
+	forget: 'reset',
 	windows: {
 		round: { type: 'tumbling', period: 'minute' }
 	},

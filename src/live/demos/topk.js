@@ -252,6 +252,8 @@ export const trending = live.aggregate(TOPICS.demoTopkEvent, {
 	}
 }, {
 	topic: TOPICS.demoTopkBase,
+	// Synthetic item counts contain no visitor data.
+	forget: 'retain',
 	windows: {
 		last10s:    { type: 'sliding',  durationMs: 10_000, slideMs: 1_000 },
 		last1min:   { type: 'sliding',  durationMs: 60_000, slideMs: 5_000 },
