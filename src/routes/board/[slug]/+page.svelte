@@ -40,12 +40,25 @@
 	const notesStore = $derived(notes(boardId))
 	const settingsStore = $derived(settings(boardId))
 	const activityStore = $derived(activity(boardId))
-	const participation = $derived(participateBoard(boardId))
+	let participationAttempt = $state(0)
+	const participation = $derived(participateBoard(boardId, participationAttempt))
 	const participationStatus = $derived(participation.status)
+	const participationError = $derived(participation.error)
 	const participant = $derived($participation)
 	// Read data before checking status so the managed subscription starts.
 	// Retained data is not a grant after reconnect: wait for its new reply.
 	const boardTopic = $derived(participant?.topic && $participationStatus === 'connected' ? participant.topic : null)
+
+	$effect(() => {
+		if ($participationError?.code !== 'OVERLOADED') return
+		const currentBoard = boardId
+		// Participation is background work: spread retries after admission sheds
+		// it, and use a fresh stream argument to retry the failed attachment.
+		const timer = setTimeout(() => {
+			if (boardId === currentBoard) participationAttempt += 1
+		}, 800 + Math.random() * 700)
+		return () => clearTimeout(timer)
+	})
 
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 

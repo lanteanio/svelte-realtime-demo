@@ -88,3 +88,40 @@ test('a retained participant topic stays unavailable until a fresh attach is con
 	context.$participationStatus = 'connected'
 	assert.equal(vm.runInNewContext(expression, context), context.participant.topic)
 })
+
+function participationRetry(code) {
+	const source = readFileSync(new URL('../../src/routes/board/[slug]/+page.svelte', import.meta.url), 'utf8').match(/<script>([\s\S]*?)<\/script>/)[1]
+	const nodes = (/** @type {any} */ (parseAst(source))).body
+	const effect = nodes.find((node) => node.type === 'ExpressionStatement' && node.expression.callee?.name === '$effect' && source.slice(node.start, node.end).includes('OVERLOADED'))
+	assert.ok(effect, 'the page retries admission overloads')
+	const callback = effect.expression.arguments[0]
+	const timers = new Map()
+	const context = {
+		$participationError: code ? { code } : null, boardId: 'first', participationAttempt: 0,
+		Math: { random: () => 0.5 },
+		setTimeout: (callback, delay) => { timers.set(1, { callback, delay }); return 1 },
+		clearTimeout: (timer) => timers.delete(timer)
+	}
+	const cleanup = vm.runInNewContext(`(${source.slice(callback.start, callback.end)})()`, context)
+	return { context, timers, cleanup }
+}
+
+test('participation retries only admission overloads with jitter', () => {
+	for (const code of [null, 'FORBIDDEN', 'INTERNAL']) assert.equal(participationRetry(code).timers.size, 0)
+	const retry = participationRetry('OVERLOADED')
+	assert.equal(retry.timers.size, 1)
+	assert.equal(retry.timers.get(1).delay, 1150)
+	retry.timers.get(1).callback()
+	assert.equal(retry.context.participationAttempt, 1)
+})
+
+test('participation retry is canceled on cleanup and cannot target a later board', () => {
+	const retry = participationRetry('OVERLOADED')
+	retry.cleanup()
+	assert.equal(retry.timers.size, 0)
+	assert.equal(retry.context.participationAttempt, 0)
+	const moved = participationRetry('OVERLOADED')
+	moved.context.boardId = 'second'
+	moved.timers.get(1).callback()
+	assert.equal(moved.context.participationAttempt, 0)
+})
