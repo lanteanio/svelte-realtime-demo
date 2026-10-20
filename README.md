@@ -206,6 +206,14 @@ upgrade. Run it before starting a new application revision:
 npm run migrate
 ```
 
+When upgrading to ordered durable alarms and versioned Redis idempotency
+results, stop every older application replica before starting the upgraded
+workers. Legacy Redis alarm rows acquire generation 1 on first use; no separate
+row conversion is needed. Older writers must stay stopped so they cannot
+overwrite the new generation or result envelope. Failed alarm executions remain
+retained for an explicit operator retry; callback effects must be idempotent
+before uncertain work is retried.
+
 ### Dev mode
 
 ```bash
