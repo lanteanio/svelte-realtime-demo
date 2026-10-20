@@ -786,6 +786,93 @@ approved cleanup, rerun the same measurements and record actual reclaimed space.
 
 ---
 
+## Offline field performance exports
+
+`node scripts/field-performance.mjs export.json` validates a local aggregate
+export and writes its summary to stdout. The command opens no network
+connections and installs no browser collector. Collection is opt-in: production
+instrumentation, deployment and retention require a separate operator decision.
+Use this format for origin-wide hard-navigation measurements from the canonical
+demo origin. Keep soft navigations, laboratory runs and generated traffic out of
+field exports; mark all local fixtures as `datasetKind: "test"`.
+
+The schema has exactly these top-level fields:
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | `1` |
+| `datasetKind` | `field` or `test`; copied unchanged into the report |
+| `collectorVersion` | Exact three-part version of the measurement library |
+| `window` | UTC dates `start` inclusive and `end` exclusive, `YYYY-MM-DD` |
+| `coverage` | Nonempty arrays `device`, `connection`, `geography` |
+| `segments` | One aggregate per collected dimension combination, no duplicates |
+
+Device values are `desktop`, `mobile`, `tablet`, `unknown`. Connection values are
+effective-connection categories `slow-2g`, `2g`, `3g`, `4g`, `unknown`, not measured
+bandwidth. Geography values are continents `africa`, `asia`, `europe`,
+`north-america`, `south-america`, `oceania`, `unknown`. Declare the intended
+coverage before collection; unsupported or unavailable classification belongs
+in `unknown`, never in a guessed category. The summary includes the Cartesian
+product of the declared dimensions. An absent segment has null counts and p75;
+its absence does not mean zero visits. Coverage describes the declared matrix,
+not every visitor or device outside it.
+
+Each segment contains its `device`, `connection`, `geography`, `navigationCount`
+and `metrics` object with `lcp`, `inp`, `cls`. Each metric contains
+`eligibleCount`, `missingCount` and `distribution`, a strictly increasing array
+of `{ "value": number, "count": positiveInteger }`. Count one final metric per
+eligible navigation; repeated callback updates must replace the earlier value
+before aggregation, never add another sample. INP eligibility requires an
+interaction and browser support. Do not turn ineligible or unreported metrics
+into zero. `navigationCount` counts only the source's collected navigation
+population; it does not estimate all origin traffic. Per metric, distribution
+counts plus `missingCount` must equal `eligibleCount`, which cannot exceed
+`navigationCount`. The report preserves all four counts, including the derived
+ineligible count.
+
+LCP and INP values are milliseconds; CLS is a unitless score. The summary takes
+the value at rank `ceil(0.75 * sampleCount)` in the weighted distribution. It
+does not average segment percentiles or mix metrics. Fewer than 20 observed
+samples withhold p75 as `insufficient-samples`; zero observations use
+`no-samples`. The exported function `summarizeFieldPerformance` accepts a higher
+`minimumSamples` value. This floor limits small-group metric disclosure; it
+does not establish statistical confidence or anonymize an export by itself.
+
+Keep input files private. Store only aggregated, independent metric frequency
+tables: no URLs, board names, content, visitor/session/metric IDs, raw IPs,
+per-visit timestamps, browser fingerprints or attribution nodes. Unknown fields
+at every level are rejected. Distributions are omitted from summaries. Files
+larger than 5 MiB, invalid dates/counts and unknown dimensions are rejected;
+CLI errors never echo their contents. The parser validates structure and
+arithmetic only: every result says `sourceAuthenticity: "unverified"`. Source
+review must establish real traffic, eligibility, deduplication, collection
+window and retention separately before calling a report a field baseline.
+
+This complete input is a synthetic format example, not a field measurement:
+
+```json
+{
+  "schemaVersion": 1,
+  "datasetKind": "test",
+  "collectorVersion": "6.1.1",
+  "window": { "start": "2026-10-01", "end": "2026-10-08" },
+  "coverage": { "device": ["desktop", "mobile"], "connection": ["unknown"], "geography": ["unknown"] },
+  "segments": [{
+    "device": "desktop", "connection": "unknown", "geography": "unknown",
+    "navigationCount": 20,
+    "metrics": {
+      "lcp": { "eligibleCount": 20, "missingCount": 0, "distribution": [{ "value": 1000, "count": 20 }] },
+      "inp": { "eligibleCount": 0, "missingCount": 0, "distribution": [] },
+      "cls": { "eligibleCount": 20, "missingCount": 0, "distribution": [{ "value": 0, "count": 20 }] }
+    }
+  }]
+}
+```
+
+The desktop p75 values are 1000 ms, null and 0; mobile remains uncollected.
+Keep the original aggregate export with its collection methodology in the
+operator's private evidence storage so the arithmetic can be reproduced.
+
 ## E2E tests
 
 Playwright tests covering:

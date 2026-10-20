@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An offline field-performance export validator reports segmented metric p75, eligibility and missing coverage without individual navigation records or production collection.
+
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
 
 - Backup verifier tests cover quoted COPY table names, incomplete trailing sections and unsafe backup-directory names.
