@@ -53,7 +53,7 @@ function connectUser(index) {
 	});
 }
 
-function startCursorMovement(user, boardId) {
+function startCursorMovement(user, topic) {
 	const { ws } = user;
 
 	let x = 50 + Math.random() * 1100;
@@ -74,7 +74,7 @@ function startCursorMovement(user, boardId) {
 			if (ws.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
 					type: 'cursor',
-					topic: `board:${boardId}`,
+					topic,
 					data: { x: Math.round(x), y: Math.round(y) }
 				}));
 			}
@@ -186,8 +186,8 @@ test.describe('Destroyer Test', () => {
 			for (let batch = 0; batch < newUsers.length; batch += 25) {
 				await Promise.all(newUsers.slice(batch, batch + 25).map(async (user) => {
 					try {
-						await joinBoardWithRetry(user.ws, boardId)
-						joinedUsers.push(user)
+						const topic = await joinBoardWithRetry(user.ws, boardId)
+						joinedUsers.push({ ...user, topic })
 					} catch {
 						joinFailed++
 					}
@@ -199,7 +199,7 @@ test.describe('Destroyer Test', () => {
 
 			// Start cursor movement only after a successful board join.
 			for (const user of joinedUsers) {
-				allIntervals.push(startCursorMovement(user, boardId));
+				allIntervals.push(startCursorMovement(user, user.topic));
 			}
 
 			// Let cursors settle
@@ -218,7 +218,7 @@ test.describe('Destroyer Test', () => {
 				frames = await measureFrames(page);
 
 				presenceText = await page.locator('.text-xs.opacity-50')
-					.filter({ hasText: /online/ }).first()
+					.filter({ hasText: /^\d+ on this board$/ }).first()
 					.textContent({ timeout: 5000 }).catch(() => 'N/A');
 
 				heapMB = await page.evaluate(() => {

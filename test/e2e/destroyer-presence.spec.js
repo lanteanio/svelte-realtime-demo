@@ -140,7 +140,7 @@ test.describe('Presence Destroyer', () => {
 				await page.waitForTimeout(2000);
 
 				presenceText = await page.locator('.text-xs.opacity-50')
-					.filter({ hasText: /online/ }).first()
+					.filter({ hasText: /^\d+ on this board$/ }).first()
 					.textContent({ timeout: 5000 }).catch(() => 'N/A');
 
 				heapMB = await page.evaluate(() => {

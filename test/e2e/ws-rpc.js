@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 
 /** Send one realtime RPC and wait for its correlated `__rpc` response. */
-export function callRpc(ws, rpc, args, { timeoutMs = 10_000 } = {}) {
+export function callRpc(ws, rpc, args, { timeoutMs = 10_000, stream = false } = {}) {
 	return new Promise((resolve, reject) => {
 		const id = `e2e-${crypto.randomUUID()}`
 		const timer = setTimeout(() => finish(new Error(`${rpc} timed out`)), timeoutMs)
@@ -31,25 +31,27 @@ export function callRpc(ws, rpc, args, { timeoutMs = 10_000 } = {}) {
 			}
 			if (envelope?.topic !== '__rpc' || envelope.event !== id) return
 			if (envelope.data?.ok) finish(null, envelope.data.data)
-			else finish(new Error(`${rpc} failed: ${envelope.data?.code ?? 'UNKNOWN'}`))
+			else finish(Object.assign(new Error(`${rpc} failed: ${envelope.data?.code ?? 'UNKNOWN'}`), { code: envelope.data?.code }))
 		}
 
 		ws.on('message', onMessage)
 		ws.once('close', onClose)
-		ws.send(JSON.stringify({ rpc, id, args }), (error) => {
+		ws.send(JSON.stringify({ rpc, id, args, ...(stream ? { stream: true } : {}) }), (error) => {
 			if (error) finish(error)
 		})
 	})
 }
 
-/** Retry an idempotent board join without flooding a recovering dependency. */
+/** Retain managed participation until socket close and return its canonical topic. */
 export async function joinBoardWithRetry(ws, boardId, { attempts = 3 } = {}) {
 	let lastError
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
-			await callRpc(ws, 'boards/cursors/joinBoard', [boardId])
-			return
+			const participant = await callRpc(ws, 'boards/cursors/participateBoard', [boardId], { stream: true })
+			if (typeof participant?.topic !== 'string' || !participant.topic) throw new Error('Board participation did not acknowledge a topic')
+			return participant.topic
 		} catch (error) {
+			if (error?.code !== 'OVERLOADED') throw error
 			lastError = error
 			if (attempt < attempts) await delay(attempt * 500)
 		}

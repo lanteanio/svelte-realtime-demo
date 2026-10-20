@@ -44,7 +44,7 @@ function connectUser(index) {
  * Start moving a joined cursor through the same one-way adapter wire path
  * used by Canvas.svelte. Cursor movement intentionally has no RPC response.
  */
-function startCursorMovement(user, boardSlug) {
+function startCursorMovement(user, topic) {
 	const { ws } = user;
 
 	// Random starting position and velocity
@@ -68,7 +68,7 @@ function startCursorMovement(user, boardSlug) {
 			if (ws.readyState === WebSocket.OPEN) {
 				ws.send(JSON.stringify({
 					type: 'cursor',
-					topic: `board:${boardSlug}`,
+					topic,
 					data: { x: Math.round(x), y: Math.round(y) }
 				}));
 			}
@@ -141,8 +141,8 @@ test.describe('Stress Test', () => {
 		for (let batch = 0; batch < users.length; batch += 25) {
 			await Promise.all(users.slice(batch, batch + 25).map(async (user) => {
 				try {
-					await joinBoardWithRetry(user.ws, boardId)
-					joinedUsers.push(user)
+					const topic = await joinBoardWithRetry(user.ws, boardId)
+					joinedUsers.push({ ...user, topic })
 				} catch {
 					joinFailed++
 				}
@@ -153,7 +153,7 @@ test.describe('Stress Test', () => {
 		console.log(`Board joins: ${joinedUsers.length} ok, ${joinFailed} failed (${(joinRate * 100).toFixed(1)}%)`)
 
 		console.log(`Starting cursor movement for ${joinedUsers.length} joined users...`);
-		const intervals = joinedUsers.map((user) => startCursorMovement(user, boardId));
+		const intervals = joinedUsers.map((user) => startCursorMovement(user, user.topic));
 
 		// Wait a moment for joins to propagate, then reload to see cursors
 		await page.waitForTimeout(2000);
@@ -207,7 +207,7 @@ test.describe('Stress Test', () => {
 		const canvasExists = await cursorCanvas.isVisible();
 		console.log(`Cursor canvas:     ${canvasExists ? 'visible' : 'not found'}`);
 
-		const presenceText = await page.locator('.text-xs.opacity-50').filter({ hasText: /online/ }).first().textContent().catch(() => 'N/A');
+		const presenceText = await page.locator('.text-xs.opacity-50').filter({ hasText: /^\d+ on this board$/ }).first().textContent().catch(() => 'N/A');
 		console.log(`Presence display:  ${presenceText}`);
 
 		// Let cursors fly for 10 seconds total

@@ -22,6 +22,7 @@
 
 import cluster from 'node:cluster';
 import { WebSocket } from 'ws';
+import { joinBoardWithRetry } from './ws-rpc.js';
 import {
 	assertSafeE2ETarget,
 	resolveE2EBaseURL,
@@ -66,7 +67,7 @@ const LEVELS = process.env.LEVELS
 
 // Per-bot cursor publish interval (ms). 32ms (~31Hz) keeps headroom; 8ms
 // (~125Hz) saturates the server's 8ms cursor throttle from every bot.
-// At N bots x 125Hz that's N*125 raw RPCs/sec landing on the publish path
+// At N bots x 125Hz that's N*125 raw cursor frames/sec on the publish path
 // before per-WS coalescing kicks in -- the real ceiling-finding workload.
 //
 //   CURSOR_INTERVAL_MS=8 node destroyer-standalone.js --cursors    # PARTY MODE
@@ -139,9 +140,6 @@ function runPrimary() {
 // Child: existing single-process destroyer logic
 // ============================================================
 
-let msgId = 0;
-const nextId = () => 'x' + (msgId++).toString(36);
-
 // Resolve board UUID. Env override (BOARD_UUID=<uuid>) skips the page
 // fetch entirely -- needed when running from a remote box where undici
 // rejects the page response with UND_ERR_INVALID_ARG (uWS's response
@@ -180,24 +178,7 @@ function connectUser(index) {
 	});
 }
 
-// Blind-retry joinBoard up to 3 times spaced ~1-4s apart. The demo's
-// `boards/cursors/joinBoard` is in the `background` admission class so it
-// gets shed with OVERLOADED under PUBLISH_RATE pressure during mass
-// connect. presence.join + cursor.attach are both idempotent (already-
-// joined returns early), so a redundant successful call after a shed
-// rejection costs only the wire frame, not server state churn. Without
-// this, fire-and-forget bots from rejected attempts permanently stay
-// outside per-board presence even though their WS is live.
-function joinBoard(ws, boardId) {
-	const send = () => {
-		try { ws.send(JSON.stringify({ rpc: 'boards/cursors/joinBoard', id: nextId(), args: [boardId] })); } catch {}
-	};
-	send();
-	setTimeout(send, 1000 + Math.random() * 1000);
-	setTimeout(send, 3000 + Math.random() * 1000);
-}
-
-function startCursor(ws, boardId) {
+function startCursor(ws, topic) {
 	let x = 50 + Math.random() * 1100, y = 50 + Math.random() * 550;
 	let vx = (Math.random() - 0.5) * 8, vy = (Math.random() - 0.5) * 8;
 
@@ -212,7 +193,7 @@ function startCursor(ws, boardId) {
 
 		try {
 			if (ws.readyState === WebSocket.OPEN) {
-				ws.send(JSON.stringify({ rpc: 'boards/cursors/moveCursor', id: nextId(), args: [boardId, { x: Math.round(x), y: Math.round(y) }] }));
+				ws.send(JSON.stringify({ type: 'cursor', topic, data: { x: Math.round(x), y: Math.round(y) } }));
 			}
 		} catch {}
 	}, CURSOR_INTERVAL_MS);
@@ -280,12 +261,20 @@ async function runChild() {
 		console.log(`  Total: ${allUsers.length}`);
 		console.log(`  Time: ${elapsed}ms (${(elapsed / Math.max(toAdd, 1)).toFixed(1)}ms/user)`);
 
-		// Join presence for new users
+		// Count acknowledged managed participation, not just open sockets.
+		// Never move a cursor before the server grants its canonical topic.
 		const newUsers = allUsers.slice(allUsers.length - ok);
-		for (const u of newUsers) {
-			joinBoard(u.ws, boardId);
-			if (WITH_CURSORS) allIntervals.push(startCursor(u.ws, boardId));
+		let joined = 0, joinFailed = 0;
+		for (let batch = 0; batch < newUsers.length; batch += BATCH) {
+			await Promise.all(newUsers.slice(batch, batch + BATCH).map(async (user) => {
+				try {
+					const topic = await joinBoardWithRetry(user.ws, boardId);
+					joined++;
+					if (WITH_CURSORS) allIntervals.push(startCursor(user.ws, topic));
+				} catch { joinFailed++; }
+			}));
 		}
+		console.log(`  Board joins: ${joined} ok, ${joinFailed} failed`);
 
 		// Hold steady at this level (settle for ramps, sustained load for probes)
 		await new Promise((r) => setTimeout(r, SUSTAIN_MS));
@@ -295,6 +284,7 @@ async function runChild() {
 
 		if (!alive) { console.log(`\n  STOPPED: server unresponsive at ${target}`); break; }
 		if (ok / Math.max(ok + fail, 1) < 0.5) { console.log(`\n  STOPPED: join rate below 50% at ${target}`); break; }
+		if (joined / Math.max(newUsers.length, 1) < 0.5) { console.log(`\n  STOPPED: acknowledged board joins below 50% at ${target}`); break; }
 
 		lastStable = target;
 		console.log(`  PASSED\n`);
