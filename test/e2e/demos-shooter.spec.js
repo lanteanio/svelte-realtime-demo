@@ -22,9 +22,10 @@ test.describe('/demos/shooter', () => {
 			}
 		}))
 		await openShooter(page)
+		await page.getByTestId('sh-lag').fill('300')
 		for (let attempt = 0; attempt < 24 && !rewinds.some((value) => value > 0); attempt++) {
 			await shootRenderedTarget(page)
-			await page.waitForTimeout(200)
+			await page.waitForTimeout(600)
 		}
 		await expect.poll(() => rewinds.some((value) => value > 0)).toBe(true)
 		const measured = rewinds.at(-1)
@@ -50,12 +51,10 @@ test.describe('/demos/shooter', () => {
 		await expect(page.getByTestId('sh-you-label')).toBeVisible()
 		const slider = page.getByTestId('sh-lag')
 		await expect(slider).toHaveAttribute('min', '0')
-		// The slider runs past the marked value, but the mark is a label for
-		// maxRewindMs rather than a threshold in this control: the render-time
-		// a shot carries is stamped at send time, so a delay invented on this
-		// page never reaches the server's rewind age. Asserting a miss beyond
-		// the mark would be asserting a mechanism the transport does not have.
-		await expect(slider).toHaveAttribute('max', '600')
+		// The maximum requests a much older world than the server can cover.
+		// Wire-age assertions separately prove that the held timestamp survives
+		// the public facade instead of being replaced at send time.
+		await expect(slider).toHaveAttribute('max', '2000')
 		await expect(slider).toHaveAttribute('step', '50')
 		await expect(page.getByTestId('sh-lag-cap-mark')).toHaveText('400 = cap')
 		await expect(slider).toHaveValue('0')
@@ -83,7 +82,7 @@ test.describe('/demos/shooter', () => {
 		expect(errors).toEqual([])
 	})
 
-	test('latency slider maps 0-400ms and defers each shot until its selected send delay', async ({ page }) => {
+	test('latency slider defers each shot until its selected send delay', async ({ page }) => {
 		const errors = collectShooterErrors(page)
 		await openShooter(page)
 		const slider = page.getByTestId('sh-lag')
@@ -112,8 +111,8 @@ test.describe('/demos/shooter', () => {
 		const errors = collectShooterErrors(page)
 		await openShooter(page)
 		const slider = page.getByTestId('sh-lag')
-		await slider.fill('600')
-		await expect(page.getByRole('heading', { name: 'Extra latency: 600ms' })).toBeVisible()
+		await slider.fill('2000')
+		await expect(page.getByRole('heading', { name: 'Extra latency: 2000ms' })).toBeVisible()
 		await slider.blur()
 
 		// The stopwatch runs inside the page so runner round-trips cannot eat
@@ -121,8 +120,8 @@ test.describe('/demos/shooter', () => {
 		// animation frame until its position attribute moves. Prediction means
 		// the dot moves on the next movement tick (~33ms); the defect this
 		// pins wrapped the whole command - prediction included - in the
-		// slider's setTimeout, so at 600ms the first movement could not arrive
-		// under 600ms and the budget below cannot be met.
+		// slider's setTimeout, so at 2000ms the first movement could not arrive
+		// under 2000ms and the budget below cannot be met.
 		const ms = await page.evaluate(() => new Promise((resolve) => {
 			const me = document.querySelector('[data-testid="sh-me"]')
 			const x0 = me.getAttribute('data-x')
@@ -145,7 +144,7 @@ test.describe('/demos/shooter', () => {
 			requestAnimationFrame(tick)
 		}))
 		expect(ms, 'the dot must move at all').toBeGreaterThan(0)
-		expect(ms, `first movement arrived ${Math.round(ms)}ms after keydown with the slider at 600`).toBeLessThan(500)
+		expect(ms, `first movement arrived ${Math.round(ms)}ms after keydown with the slider at 2000`).toBeLessThan(500)
 		expect(errors).toEqual([])
 	})
 

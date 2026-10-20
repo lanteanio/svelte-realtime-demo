@@ -3,12 +3,12 @@
  * /demos/shooter - lag-compensated hit detection on a smoothed world.
  *
  * The pitch: by the time a shot reaches the server, every target has moved
- * on. hitTest rewinds each candidate to the instant the shooter rendered
- * it - the client stamps the shot's render-time, the server bounds the
- * rewind with its OWN uplink + interpolation measurement (a client can
- * inflate its latency only by genuinely lagging), capped at maxRewindMs -
- * and resolves the ray against those historical positions. A hit that
- * landed on your screen lands on the server.
+ * on. The page captures an estimated server-clock timestamp when the
+ * shooter aims. hitTest bounds the requested rewind by its own uplink
+ * and interpolation measurement, capped at maxRewindMs, and resolves
+ * the ray against historical positions. The click-time estimate is not
+ * an exact interpolation-frame timestamp, and an old aim can miss when
+ * the requested rewind exceeds the measured allowance.
  *
  * Architecture:
  * - live.smooth() on demos:shooter:range with the pure shared apply
@@ -37,10 +37,10 @@ const TARGET_COUNT = 8
 
 /**
  * Orbit parameters per target - centers spread across the range, linear
- * speed w*r of roughly 14-41 units/sec. Slow enough that a shot delayed
- * by the page's full 400ms latency slider drifts at most ~17 units off
- * the rendered spot - inside the 18-unit hitbox - yet fast enough that
- * an UN-compensated shot at a moving target would systematically trail.
+ * speed w*r of roughly 14-41 units/sec. At the page's 2000ms slider
+ * maximum, the uncovered travel can exceed the 18-unit hitbox. A target
+ * moving along the ray can still be hit, so the cap is not an all-miss
+ * boundary.
  */
 function orbitFor(i) {
 	const key = 'npc:target-' + i

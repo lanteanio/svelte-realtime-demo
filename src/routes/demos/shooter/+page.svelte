@@ -3,21 +3,16 @@
 
 	Eight targets orbit the range; click to shoot a ray from your dot
 	toward the click point. The server resolves each shot against the
-	world AS YOU RENDERED IT: the shot carries a render-time stamp, the
-	server rewinds every candidate to that instant (bounded by its own
-	uplink + interpolation measurement, capped at maxRewindMs 400) and
-	tests the ray there.
+	historical world using a click-time estimate from the public server
+	clock. The estimate is captured before the slider's artificial wait,
+	then passed through shoot's rt option when the delayed send leaves.
+	It is not the exact interpolation-frame timestamp.
 
-	The compensation covers the legs the server measures itself, your real
-	uplink and interpolation, and nothing else: a shot's render-time is
-	stamped inside shoot() when the send leaves, so the latency slider's
-	setTimeout ages your aim instead of widening the rewind. Shots still
-	land through most of the slider's travel, but that is the orbit speeds
-	being slow enough to keep the drift inside the hitbox (see orbitFor in
-	shooter.js), NOT the rewind absorbing the wait. Fairness holds for the
-	same reason the slider cannot cheat: a client can inflate its measured
-	latency only by genuinely lagging, and the window is capped by
-	maxRewindMs.
+	The server bounds the requested rewind by its own uplink and
+	interpolation measurement, with maxRewindMs 400 as an upper ceiling.
+	Holding a shot does not earn a larger allowance. The slider reaches
+	2000ms so targets can drift outside the hitbox after that allowance
+	is exhausted; a target moving along the ray can still be hit.
 -->
 <script>
 	import MovePad from '$lib/components/MovePad.svelte'
@@ -30,30 +25,34 @@
 		apply,
 		initial: { x: RANGE_W / 2, y: RANGE_H / 2, hp: 3, score: 0 }
 	})
-	$effect(() => () => view.destroy())
+	const pendingShots = new Set()
+	$effect(() => () => {
+		for (const timer of pendingShots) clearTimeout(timer)
+		pendingShots.clear()
+		view.destroy()
+	})
 
 	// --- Artificial extra latency on YOUR shots (the demo's subject) ---
 	//
-	// Shots ONLY, never movement. `view.command` is where the local
-	// prediction runs - the dot moves on the same frame the key is down -
-	// so wrapping it in the invented delay lags the INPUT, not the send:
-	// at the slider's top the player's own dot trailed every keypress by
-	// 600ms, which reads as broken controls rather than as simulated
-	// latency. The channel offers no way to predict now and transmit
-	// later, and the slider's subject never needed one: the fairness
-	// story it exists for - the rewind measured from when the send
-	// leaves, aim ageing while a shot waits - is entirely about shots.
+	// Delay shots only. Movement prediction runs inside view.command and
+	// must stay immediate even while a shot waits to be transmitted.
 	let lagMs = $state(0)
 	let shotsFired = $state(0)
 
 	function scheduleFire(angle) {
+		const aimedAt = view.now()
 		const send = () => {
-			view.shoot({ angle })
+			view.shoot({ angle }, { rt: aimedAt })
 			shotsFired += 1
 			addFlash(angle)
 		}
-		if (lagMs > 0) setTimeout(send, lagMs)
-		else send()
+		if (lagMs > 0) {
+			const timer = setTimeout(() => {
+				pendingShots.delete(timer)
+				send()
+			}, lagMs)
+			pendingShots.add(timer)
+		} else send()
 	}
 
 	// --- One-shot visuals: muzzle flash lines and hit sparks ---
@@ -81,7 +80,7 @@
 
 	// Immediate click receipt, separate from the shot itself: with lag on the
 	// slider the muzzle flash honestly waits for the delayed send, which
-	// leaves the click with no acknowledgment for up to 600ms - and a control
+	// leaves the click with no acknowledgment for up to 2000ms - and a control
 	// that feels dead gets clicked again. The ring says "click received, send
 	// queued" at the click point the moment it happens; the flash still says
 	// "sent" when the send leaves.
@@ -223,14 +222,14 @@
 	<header>
 		<h1 class="page-title mt-2">Shooter: lag-compensated hits</h1>
 		<p class="text-sm opacity-70 mt-1">
-			Click inside the arena to shoot. The server rewinds every candidate to
-			the instant you rendered it and tests the ray there
-			(<code>live.smooth(&#123; hitTest &#125;)</code>) - so a shot that
-			landed on your screen lands on the server. The window it covers is the
-			one it measured itself - your real uplink and interpolation - capped by
-			<code>maxRewindMs: 400</code>. Crank the latency slider and the
-			compensation does not follow it: a shot is stamped when its send
-			leaves, so the wait ages your aim rather than widening the rewind.
+			Click inside the arena to shoot. Each shot keeps a click-time estimate
+			from the server clock, even when the latency slider delays its send.
+			The server tests the ray against historical positions
+			(<code>live.smooth(&#123; hitTest &#125;)</code>), bounded by the
+			uplink and interpolation allowance it measures itself, up to
+			<code>maxRewindMs: 400</code>. Raising the slider asks for an older
+			world; it does not increase that allowance. The score card reports
+			the rewind the server actually used for your last hit.
 		</p>
 	</header>
 
@@ -330,39 +329,29 @@
 			<div class="card bg-base-100 border border-base-300">
 				<div class="card-body py-3 space-y-1">
 					<h2 class="section-title card-title">Extra latency: {lagMs}ms</h2>
-					<!-- The mark labels what maxRewindMs IS; it is not a threshold in
-					     this slider's behaviour, and the caption must not imply one.
-					     The transport stamps a shot's render-time inside shoot(), at
-					     send time, so a delay invented here never enters the server's
-					     rewind age and the cap cannot be crossed from the app side at
-					     all. Making it crossable needs an app-supplied render stamp
-					     the public API does not expose. -->
+					<!-- The mark is the maximum allowance, not a promise that every
+					     shot below it is covered: the measured allowance can be lower. -->
 					<input
 						type="range"
 						class="range range-sm"
-						min="0" max="600" step="50"
+						min="0" max="2000" step="50"
 						bind:value={lagMs}
 						data-testid="sh-lag"
 					/>
 					<div class="relative h-4 text-[10px] font-mono opacity-60" aria-hidden="true">
 						<span class="absolute left-0">0</span>
-						<span class="absolute -translate-x-1/2" style="left: 66.67%" data-testid="sh-lag-cap-mark">400 = cap</span>
-						<span class="absolute right-0">600</span>
+						<span class="absolute -translate-x-1/2" style="left: 20%" data-testid="sh-lag-cap-mark">400 = cap</span>
+						<span class="absolute right-0">2000</span>
 					</div>
 					<p class="text-xs opacity-60">
-						Delays your shots with a
-						<code>setTimeout</code> wrapper - movement stays predicted
-						and immediate, so your own dot never lags your keys. The shot
-						fires (and the muzzle flash draws) when the send actually
-						leaves, and the
-						render-time it carries is stamped at that moment - so the
-						server rewinds to when the send left, not to when you
-						clicked. Your aim keeps ageing during the wait while the
-						compensation does not grow to match, so aimed shots start
-						to miss as you drag this up. That is the honest half of
-						the fairness rule: the rewind is measured from your real
-						uplink and interpolation, and a delay you invent locally
-						is not latency you earned.
+						Holds your shots before sending; movement stays immediate.
+						The click ring appears at once and the muzzle flash appears
+						when the shot leaves. Its timestamp stays at click time.
+						The server's measured allowance may be below the 400ms cap,
+						so even a shorter hold is not guaranteed a hit. Past 400ms,
+						some of the wait is always uncovered. Try 2000ms: targets
+						can drift outside your ray, though ones moving along it can
+						still be hit. Holding a shot does not earn extra rewind.
 					</p>
 				</div>
 			</div>
@@ -377,6 +366,12 @@
 			tick stamp, and <code>interest</code> covering the whole range -
 			declared because <code>hitTest</code> requires it: the shooter's
 			replicated set is the candidate-security gate.
+		</p>
+		<p>
+			The page captures <code>view.now()</code>, the estimated server clock,
+			when you aim and passes it as <code>view.shoot(cmd, &#123; rt &#125;)</code>
+			after the delay. This is a click-time estimate, not the exact timestamp
+			of the interpolated frame you see.
 		</p>
 		<p>
 			<code>hitTest</code>: ray from your state toward

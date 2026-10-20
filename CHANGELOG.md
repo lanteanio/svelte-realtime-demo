@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
 
+- Shooter timing tests verify click-time stamps on the real transport and cancellation of queued shots on navigation.
+
 - `npm run test:redis` runs session-capacity integration tests in a disposable pinned Redis container with an isolated loopback port.
 
 - Backup verifier tests cover quoted COPY table names, incomplete trailing sections and unsafe backup-directory names.
@@ -150,6 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Alarm schedules, fired records and retention use separate Redis keys for each tenant and the public scope.
 
 - Board presence and cursor clients wait for managed participation and use the server-resolved topic, preserving tenant scope across route changes and reconnects.
+
+- Delayed shooter actions retain their click-time server-clock estimate. The latency slider reaches 2000ms, marks the 400ms ceiling, and explains the server's measured rewind allowance. Leaving the page cancels pending shots.
 
 - Shooter score panels show the server-measured rewind used for the last hit.
 
