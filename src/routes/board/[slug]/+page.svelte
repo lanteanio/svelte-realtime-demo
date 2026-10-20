@@ -21,6 +21,7 @@
 	import { Layers, LayoutGrid, Shuffle, Users, Sparkles, X } from 'lucide-svelte'
 	import { activity } from '$live/boards/activity'
 	import { settings, updateSettings } from '$live/boards/settings'
+	import { participateBoard } from '$live/boards/cursors'
 	import Canvas from '$lib/components/Canvas.svelte'
 	import StickyNote from '$lib/components/StickyNote.svelte'
 	import PresenceBar from '$lib/components/PresenceBar.svelte'
@@ -39,6 +40,12 @@
 	const notesStore = $derived(notes(boardId))
 	const settingsStore = $derived(settings(boardId))
 	const activityStore = $derived(activity(boardId))
+	const participation = $derived(participateBoard(boardId))
+	const participationStatus = $derived(participation.status)
+	const participant = $derived($participation)
+	// Read data before checking status so the managed subscription starts.
+	// Retained data is not a grant after reconnect: wait for its new reply.
+	const boardTopic = $derived(participant?.topic && $participationStatus === 'connected' ? participant.topic : null)
 
 	const NOTE_COLORS = ['#fef08a', '#bbf7d0', '#bfdbfe', '#fbcfe8', '#fed7aa', '#e9d5ff']
 
@@ -247,7 +254,7 @@
 		onUpdate={(fields) => updateSettings(boardId, fields)}
 		onAddNote={handleAddNote}
 	>
-		<PresenceBar {boardId} />
+		<PresenceBar topic={boardTopic} />
 	</BoardHeader>
 	<p class="px-3 py-1 text-xs opacity-70" data-testid="board-undo-help">
 		Undo your note deletions for 30 seconds, including after reloading (Ctrl/Cmd+Z outside text fields).
@@ -257,7 +264,7 @@
 	<Canvas
 		background={$settingsStore?.background ?? '#f5f5f4'}
 		ondblclick={handleCanvasDoubleClick}
-		{boardId}
+		topic={boardTopic}
 		noteCount={$notesStore?.length ?? 0}
 	>
 		{#each $notesStore ?? [] as note (note.note_id)}
@@ -271,7 +278,7 @@
 			/>
 		{/each}
 
-		<CursorOverlay {boardId} userId={data.identity?.id} />
+		<CursorOverlay topic={boardTopic} userId={data.identity?.id} />
 	</Canvas>
 
 	<ActivityTicker items={$activityStore} />

@@ -18,14 +18,15 @@
 -->
 <script>
 	import { cursor } from 'svelte-adapter-uws/plugins/cursor/client'
+	import { empty } from 'svelte-realtime/client'
 
-	let { boardId, userId } = $props()
+	let { topic, userId } = $props()
 
 	// Subscribe to cursor positions. maxAge auto-removes stale entries.
-	const cursorStore = $derived(cursor(`board:${boardId}`, { maxAge: 10000 }))
+	const cursorStore = $derived(topic ? cursor(topic, { maxAge: 10000 }) : empty)
 
 	// Filter out our own cursor - we don't need to see ourselves.
-	const cursors = $derived([...$cursorStore].filter(([, { user }]) => user.id !== userId))
+	const cursors = $derived([...($cursorStore ?? [])].filter(([, { user }]) => user.id !== userId))
 
 	let canvas = $state()
 	let raf = 0

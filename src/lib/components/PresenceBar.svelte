@@ -5,10 +5,8 @@
 	overflow badge if there are more users. The "X online" count always
 	shows the real total.
 
-	The $effect handles joining/leaving: when the component mounts,
-	we call joinBoard (which registers us in the board's presence
-	channel). When it unmounts (navigate away), the cleanup function
-	calls leaveBoard.
+	The board page owns participation and supplies its acknowledged
+	canonical topic. This component only reads that topic's roster.
 
 	maxAge: 90000 (90 seconds) auto-removes stale entries on the
 	client side. The server sends heartbeat events every 30 seconds
@@ -18,13 +16,13 @@
 -->
 <script>
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
-	import { joinBoard, leaveBoard } from '$live/boards/cursors'
+	import { empty } from 'svelte-realtime/client'
 
 	const MAX_AVATARS_DESKTOP = 8
 	const MAX_AVATARS_MOBILE = 1
 
-	let { boardId } = $props()
-	const presenceStore = $derived(presence(`board:${boardId}`, { maxAge: 90000 }))
+	let { topic } = $props()
+	const presenceStore = $derived(topic ? presence(topic, { maxAge: 90000 }) : empty)
 	const users = $derived($presenceStore ?? [])
 
 	// Detect mobile by checking window width. Falls back to desktop cap
@@ -42,33 +40,6 @@
 	const visible = $derived(users.slice(0, maxAvatars))
 	const overflow = $derived(Math.max(0, users.length - maxAvatars))
 
-	$effect(() => {
-		let cancelled = false
-		let backoffTimer
-
-		async function joinWithRetry() {
-			try {
-				await joinBoard(boardId)
-			} catch (err) {
-				if (cancelled) return
-				if (err?.code === 'OVERLOADED') {
-					// Server admission-shed under pressure; retry with jitter so a
-					// stampede of clients does not all retry on the same tick.
-					backoffTimer = setTimeout(joinWithRetry, 800 + Math.random() * 700)
-					return
-				}
-				console.error('joinBoard failed:', err)
-			}
-		}
-
-		joinWithRetry()
-
-		return () => {
-			cancelled = true
-			if (backoffTimer) clearTimeout(backoffTimer)
-			leaveBoard(boardId).catch(() => {})
-		}
-	})
 </script>
 
 <div class="flex items-center gap-2">

@@ -18,7 +18,7 @@
 	// hooks.message dispatch wired in hooks.ws.js (onUnhandled).
 	import { move as moveCursor } from 'svelte-adapter-uws/plugins/cursor/client'
 
-	let { children, background, boardId, ondblclick, noteCount = 0 } = $props()
+	let { children, background, topic, ondblclick, noteCount = 0 } = $props()
 	let canvasEl = $state()
 
 	// The canvas background is a board setting, not a theme token, so the
@@ -36,9 +36,9 @@
 	})
 
 	function onPointerMove(e) {
-		if (!canvasEl || !boardId) return
+		if (!canvasEl || !topic) return
 		const rect = canvasEl.getBoundingClientRect()
-		moveCursor(`board:${boardId}`, {
+		moveCursor(topic, {
 			x: e.clientX - rect.left + canvasEl.scrollLeft,
 			y: e.clientY - rect.top + canvasEl.scrollTop
 		})

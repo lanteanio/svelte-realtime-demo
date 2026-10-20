@@ -11,11 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `npm run test:redis` runs session-capacity integration tests in a disposable pinned Redis container with an isolated loopback port.
+- Board client tests cover acknowledged topic use and cursor suppression before participation is ready.
 
 - Optional field-performance collection uses native browser metrics and shared Redis aggregates with a 32-day expiry and no visitor identifiers, URLs, content, raw IPs or per-visit timestamps. It is disabled by default and exports daily LCP, INP and CLS distributions with device, connection and missing-geography coverage. The offline validator reports segmented p75, eligibility and missing coverage.
 
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
+
+- `npm run test:redis` runs session-capacity integration tests in a disposable pinned Redis container with an isolated loopback port.
 
 - Backup verifier tests cover quoted COPY table names, incomplete trailing sections and unsafe backup-directory names.
 
@@ -144,6 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Alarm schedules, fired records and retention use separate Redis keys for each tenant and the public scope.
+
+- Board presence and cursor clients wait for managed participation and use the server-resolved topic, preserving tenant scope across route changes and reconnects.
 
 - Erasure resets mood aggregates and preserves synthetic leaderboard counts through explicit aggregate policies.
 
