@@ -36,6 +36,7 @@
 			// The store holds the pagination metadata the server sent; read it
 			// here so the caption reports the wire rather than a local guess.
 			hasMore = logFeed.hasMore
+			cursor = logFeed.cursor
 		})
 		return () => off()
 	})
@@ -47,6 +48,7 @@
 	// from `logFeed.hasMore` on every frame; `loadMore()`'s return value is
 	// kept as confirmation rather than as the source.
 	let hasMore = $state(/** @type {boolean | null} */ (null))
+	let cursor = $state(/** @type {unknown} */ (null))
 	let loading = $state(false)
 	let lastError = $state('')
 
@@ -255,7 +257,7 @@
 					hasMore: {hasMore === null ? 'waiting for the first page' : String(hasMore)}
 				</span>
 				<span class="text-xs opacity-60 font-mono" data-testid="cursor-state">
-					next cursor: {hasMore === false ? 'null' : '{ offset }'}
+					next cursor: {hasMore === null ? 'waiting for the first page' : JSON.stringify(cursor)}
 				</span>
 				{#if lastError}
 					<span class="text-xs text-error" data-testid="error">{lastError}</span>
@@ -276,21 +278,17 @@
 		<p>
 			Client: <code>$logFeed</code> is a normal stream store; the
 			extra surface is <code>logFeed.loadMore()</code> (returns
-			<code>Promise&lt;hasMore&gt;</code>) and <code>logFeed.hasMore</code>
-			(getter). New <code>'created'</code> publishes merge by id at the
+			<code>Promise&lt;hasMore&gt;</code>) plus the <code>logFeed.hasMore</code>
+			and <code>logFeed.cursor</code> getters. New <code>'created'</code> publishes merge by id at the
 			end of the list because the stream is configured with the
 			default <code>prepend: false</code>.
 		</p>
 		<p>
-			The caption reads <code>hasMore</code> off the store on every frame
-			rather than keeping a local copy, so it reports what the server
-			said and not what this page assumed. The cursor is retained inside
-			the store and is not on its public surface today, which is why the
-			readout can state the moment it becomes <code>null</code> - the
-			loader stops returning one once the feed is exhausted - but not the
-			<code>&#123; offset &#125;</code> value while pages remain. Showing
-			a number the page would have to reconstruct is exactly the kind of
-			invented reading this gallery tries not to print.
+			The caption reads <code>hasMore</code> and the retained
+			<code>cursor</code> from the store on every update. The cursor is the
+			server's opaque next-page value, serialized as JSON; it becomes
+			<code>null</code> when the loader exhausts the feed. Live inserts
+			change the visible row count without advancing that cursor.
 		</p>
 	</aside>
 </div>

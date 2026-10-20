@@ -45,6 +45,21 @@ function expectContiguousFromOne(seqs, n) {
 }
 
 test.describe('/demos/pagination', () => {
+	test('cursor readout retains the server offset through live inserts and advances with pages', async ({ page }) => {
+		await open(page)
+		const cursor = page.getByTestId('cursor-state')
+		await expect(cursor).toHaveText('next cursor: {"offset":25}')
+		const message = `cursor-${RUN}`
+		await page.getByTestId('append-message').fill(message)
+		await page.getByTestId('append-submit').click()
+		await expect(page.getByTestId('entry-row').last().getByTestId('entry-message')).toHaveText(message)
+		await expect(page.getByTestId('entry-row')).toHaveCount(26)
+		await expect(cursor).toHaveText('next cursor: {"offset":25}')
+		await page.getByTestId('load-more').click()
+		await expect(page.getByTestId('entry-row')).toHaveCount(51)
+		await expect(cursor).toHaveText('next cursor: {"offset":50}')
+	})
+
 	test('hydrates with exactly page 1: seqs 1..25 oldest-first, hasMore true', async ({ page }) => {
 		test.setTimeout(25_000)
 		await open(page)
@@ -57,7 +72,7 @@ test.describe('/demos/pagination', () => {
 		// true: until a frame lands the caption reads "waiting for the first
 		// page", so reading "true" here can only have come off the wire.
 		await expect(page.getByTestId('has-more-state')).toContainText('hasMore: true')
-		await expect(page.getByTestId('cursor-state')).toContainText('{ offset }')
+		await expect(page.getByTestId('cursor-state')).toHaveText('next cursor: {"offset":25}')
 		await expect(page.getByTestId('load-more')).toBeEnabled()
 		await expect(page.getByTestId('load-more')).toHaveText(`Load more (next ${PAGE_SIZE})`)
 		// Fixed 80px time column: two-digit h23 keeps every locale inside it.
