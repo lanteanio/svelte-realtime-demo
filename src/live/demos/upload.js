@@ -89,7 +89,7 @@ export const myUploadState = live(async () => ({
  * The headline primitive. live.upload's handler signature is
  * `(ctx, ...args)`; ctx is augmented with:
  *   - ctx.stream  AsyncIterable<Uint8Array> yielding chunks in arrival order
- *   - ctx.signal  AbortSignal that fires on cancel / disconnect / cap exceeded
+ *   - ctx.abortSignal  AbortSignal that fires on cancel / disconnect / cap exceeded
  *   - ctx.upload  { id, total?, source }
  *
  * We hash each chunk as it arrives, route through the redis idempotency
@@ -125,7 +125,7 @@ export const uploadFile = live.upload(async (ctx, args) => {
 		let dedupedChunks = 0
 
 		for await (const chunk of ctx.stream) {
-			if (ctx.signal.aborted) break
+			if (ctx.abortSignal.aborted) break
 			if (chunk.byteLength === 0) continue
 			if (chunk.byteLength > MAX_CHUNK_BYTES) {
 				throw new LiveError('VALIDATION', `chunk too large (max ${MAX_CHUNK_BYTES})`)
@@ -151,7 +151,7 @@ export const uploadFile = live.upload(async (ctx, args) => {
 			if (dedup) dedupedChunks++
 		}
 
-		if (ctx.signal.aborted) {
+		if (ctx.abortSignal.aborted) {
 			throw new LiveError('CANCELLED', 'upload cancelled')
 		}
 		if (hashes.length === 0) {

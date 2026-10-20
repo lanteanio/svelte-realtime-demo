@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Uploads use the public cancellation signal and release their active slot on cancellation.
+
 - Durable jobs retain their W3C trace context in the versioned database schema with automatic schema changes disabled.
 
 - Alarm reconciliation awaits durable scheduling and cancellation; rejected replacement writes fail the callback while preserving the pending intent.
