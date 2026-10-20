@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
+import { switchTenant, waitForWsConfirmed } from './tenants-helpers.js'
+import { watchWire } from './helpers.js'
 import {
 	cancelPending,
 	expectCountdownBetween,
@@ -19,6 +21,14 @@ async function openAt(page, origin) {
 	await openAlarms(page, `${origin}/demos/alarms`)
 }
 
+async function readFreshRoom(page, origin) {
+	const wire = watchWire(page)
+	await openAt(page, origin)
+	const snapshot = () => wire.rpcs.find((rpc) => rpc.rpc === 'demos/alarms/timers' && rpc.ok === true && Number.isInteger(rpc.rows))
+	await expect.poll(() => snapshot()?.rows ?? -1).toBeGreaterThanOrEqual(0)
+	await expect(page.getByTestId('al-log-row')).toHaveCount(snapshot().rows)
+}
+
 async function twoReplicas(browser) {
 	const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 	const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
@@ -29,6 +39,61 @@ async function twoReplicas(browser) {
 }
 
 test.describe('cluster: /demos/alarms', () => {
+	test('tenant schedules, firing and cancellation stay isolated across replicas', async ({ browser }) => {
+		test.setTimeout(90_000)
+		const scopes = [
+			{ origin: INSTANCE_A, tenant: 'acme' },
+			{ origin: INSTANCE_B, tenant: 'acme' },
+			{ origin: INSTANCE_B, tenant: 'globex' },
+			{ origin: INSTANCE_A, tenant: null }
+		]
+		const visitors = []
+		try {
+			for (const scope of scopes) {
+				const context = await browser.newContext({ baseURL: scope.origin })
+				const page = await context.newPage()
+				visitors.push({ context, page })
+				await page.goto('/demos/tenants')
+				await waitForWsConfirmed(page)
+				if (scope.tenant !== null) await switchTenant(page, /** @type {'acme' | 'globex'} */ (scope.tenant))
+				await openAt(page, scope.origin)
+			}
+			const [a, b, other, unscoped] = visitors.map(({ page }) => page)
+			for (const page of [a, other, unscoped]) await cancelPending(page)
+			const since = Date.now() - 1_000
+			await scheduleCustom(unscoped, 300)
+			await expectCountdownBetween(unscoped, 290, 300)
+			const publicDeadline = await unscoped.getByTestId('al-pending-at').locator('span').first().textContent()
+			await scheduleCustom(other, 240)
+			await expectCountdownBetween(other, 230, 240)
+			const otherDeadline = await other.getByTestId('al-pending-at').locator('span').first().textContent()
+			await scheduleCustom(a, 4)
+			await expectCountdownBetween(b, 1, 4)
+			await Promise.all([expectRecentAlarmCount(a, since, 1), expectRecentAlarmCount(b, since, 1)])
+			expect(await recentAlarms(a, since)).toEqual(await recentAlarms(b, since))
+			await readFreshRoom(b, INSTANCE_B)
+			await expectRecentAlarmCount(b, since, 1)
+			await readFreshRoom(other, INSTANCE_B)
+			await readFreshRoom(unscoped, INSTANCE_A)
+			await expect(other.getByTestId('al-pending-at').locator('span').first()).toHaveText(otherDeadline)
+			await expect(unscoped.getByTestId('al-pending-at').locator('span').first()).toHaveText(publicDeadline)
+			expect(await recentAlarms(other, since)).toEqual([])
+			expect(await recentAlarms(unscoped, since)).toEqual([])
+			await scheduleCustom(b, 60)
+			await expectCountdownBetween(a, 50, 60)
+			await cancelPending(a)
+			await expect(b.getByTestId('al-pending-empty')).toBeVisible()
+			await readFreshRoom(other, INSTANCE_B)
+			await readFreshRoom(unscoped, INSTANCE_A)
+			await expect(other.getByTestId('al-pending-at').locator('span').first()).toHaveText(otherDeadline)
+			await expect(unscoped.getByTestId('al-pending-at').locator('span').first()).toHaveText(publicDeadline)
+		} finally {
+			await Promise.allSettled(visitors.map(async ({ page, context }) => {
+				try { await cancelPending(page) } finally { await context.close() }
+			}))
+		}
+	})
+
 	test('schedule and replacement on separate replicas converge, then remote cancel clears both', async ({ browser }) => {
 		const pair = await twoReplicas(browser)
 		try {

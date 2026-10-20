@@ -14,9 +14,9 @@
  * `ctx.deleteAlarm` for this room whenever the loader runs. Durability
  * + cluster single-fire come from the app-wide `configureAlarm({
  * store, leader })` wiring in src/hooks.ws.js: the Redis alarm store
- * survives worker restarts, and the atomic store delete is the claim
- * that guarantees the precise timer and the recovery poll never both
- * fire the same alarm.
+ * survives worker restarts. An atomic generation-fenced claim retains
+ * the execution until its callback completes, so the precise timer and
+ * the recovery poll cannot both run the same scheduled generation.
  *
  * Arming pattern: `ctx.setAlarm` lives on the STREAM's ctx (it is
  * bound on the subscribe path) and on onAlarm's, not on a bare
@@ -37,7 +37,8 @@
  *
  * The fired log is a Redis list so it is cluster-shared and survives
  * restarts alongside the alarm rows. Records hold only framework
- * timestamps - no user content, no PII.
+ * timestamps - no user content, no PII. Redis keys follow ctx.tenantId so
+ * pending intents, fired records and retention share the stream's scope.
  *
  * Retention is BOTH a count and an age. The cap alone bounded the list
  * at twenty entries and nothing ever aged out: with light traffic a
@@ -99,7 +100,7 @@ export const schedule = live(async (ctx, inSeconds) => {
 	if (!Number.isFinite(s) || s < MIN_SECONDS || s > MAX_SECONDS) {
 		throw new LiveError('VALIDATION', `delay must be ${MIN_SECONDS}..${MAX_SECONDS} seconds`)
 	}
-	const at = await schedulePending(redis.redis, s)
+	const at = await schedulePending(redis.redis, s, ctx.tenantId)
 	ctx.publish(TOPICS.demoAlarmsControl, 'armed', { at })
 	return { ok: true, at }
 })
@@ -110,7 +111,7 @@ export const schedule = live(async (ctx, inSeconds) => {
  * timer and the durable store row.
  */
 export const cancel = live(async (ctx) => {
-	await clearPending(redis.redis)
+	await clearPending(redis.redis, ctx.tenantId)
 	ctx.publish(TOPICS.demoAlarmsControl, 'cancelled', {})
 	return { ok: true }
 })
@@ -120,7 +121,7 @@ export const cancel = live(async (ctx) => {
  * scheduled epoch-ms (or null) plus the server clock so the client can
  * render a skew-corrected countdown.
  */
-export const pendingAlarm = live(async () => {
-	const pending = await readPending(redis.redis)
+export const pendingAlarm = live(async (ctx) => {
+	const pending = await readPending(redis.redis, ctx.tenantId)
 	return { at: pending?.at ?? null, now: Date.now() }
 })

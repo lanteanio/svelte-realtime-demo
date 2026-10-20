@@ -147,6 +147,54 @@ const fired = (id, agoMs, now = NOW) =>
 	JSON.stringify({ id, at: now - agoMs - 5, firedAt: now - agoMs, lateMs: 5, recovered: false })
 const client = (redis) => /** @type {any} */ (redis)
 
+test('pending schedules and cancellation stay inside their tenant', async () => {
+	const redis = memoryRedis()
+	const scopes = [null, 'acme', 'globex', 'public']
+	const times = []
+	for (const [i, scope] of scopes.entries()) times.push(await schedulePending(client(redis), 2 + i, scope))
+	for (const [i, scope] of scopes.entries()) {
+		assert.equal((await readPending(client(redis), scope))?.at, times[i])
+		const ctx = { ...streamCtx(), tenantId: scope }
+		await loadRoom(client(redis), ctx, TOPIC)
+		assert.deepEqual(ctx.calls.setAlarm, [times[i]])
+	}
+	await clearPending(client(redis), 'acme')
+	assert.equal(await readPending(client(redis), 'acme'), null)
+	for (const i of [0, 2, 3]) assert.equal((await readPending(client(redis), scopes[i]))?.at, times[i])
+	assert.equal(redis.strings.size, 3)
+})
+
+test('tenant loaders prune and announce only records from their own scope', async () => {
+	const redis = memoryRedis()
+	const now = Date.now()
+	for (const scope of [null, 'acme', 'globex']) {
+		const key = scope === null ? LOG_KEY : `${LOG_KEY}:tenant:${scope}`
+		redis.lists.set(key, [fired(`${scope}-young`, 1_000, now), fired(`${scope}-old`, 2 * RETENTION_MS, now)])
+	}
+	const ctx = { ...streamCtx(), tenantId: 'acme' }
+	const rows = await loadRoom(client(redis), ctx, TOPIC)
+	assert.deepEqual(rows.map((row) => row.id), ['acme-young'])
+	assert.deepEqual(ctx.calls.published, [[TOPIC, 'deleted', { id: 'acme-old' }]])
+	assert.equal(redis.lists.get(`${LOG_KEY}:tenant:acme`).length, 1)
+	assert.equal(redis.lists.get(LOG_KEY).length, 2)
+	assert.equal(redis.lists.get(`${LOG_KEY}:tenant:globex`).length, 2)
+	assert.equal(redis.ttl.has(LOG_KEY), false)
+	assert.equal(redis.ttl.has(`${LOG_KEY}:tenant:globex`), false)
+})
+
+test('precise and recovered fires use the callback tenant for both atomic keys', async () => {
+	for (const recovered of [false, true]) {
+		for (const tenantId of [null, 'acme', 'globex', 'public']) {
+			const redis = memoryRedis()
+			const ctx = { ...alarmCtx({ at: NOW - 40, firedAt: NOW, lateMs: 40, recovered }), tenantId }
+			await recordFire(client(redis), ctx)
+			const suffix = tenantId === null ? '' : `:tenant:${tenantId}`
+			assert.deepEqual(redis.evals[0].keys, [`${LOG_KEY}${suffix}`, `${PENDING_KEY}${suffix}`])
+			assert.equal(ctx.calls.published[0][1].recovered, recovered)
+		}
+	}
+})
+
 test('the loader returns fresh records and removes stale and corrupt ones from Redis', async () => {
 	const redis = memoryRedis()
 	const young = fired('young', 1_000)

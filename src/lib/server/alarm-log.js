@@ -10,6 +10,11 @@ export const LOG_KEY = 'demos:alarms:fired'
 export const PENDING_KEY = 'demos:alarms:pending'
 export const LOG_CAP = 20
 
+/** @param {string} key @param {string | null | undefined} tenantId */
+function scopedKey(key, tenantId) {
+	return tenantId == null ? key : `${key}:tenant:${encodeURIComponent(tenantId)}`
+}
+
 /**
  * The part of the Redis client this module uses.
  * @typedef {{
@@ -35,9 +40,11 @@ export const LOG_CAP = 20
  * @param {AlarmRedis} client
  * @param {number} now epoch ms
  * @param {(event: string, data: any) => void} [publish]
+ * @param {string | null} [tenantId]
  */
-export async function readLog(client, now, publish) {
-	const raws = await client.lrange(LOG_KEY, 0, -1)
+export async function readLog(client, now, publish, tenantId) {
+	const logKey = scopedKey(LOG_KEY, tenantId)
+	const raws = await client.lrange(logKey, 0, -1)
 	const records = []
 	const corrupt = []
 	for (const raw of raws) {
@@ -46,9 +53,9 @@ export async function readLog(client, now, publish) {
 	const { fresh, stale } = partitionFired(records, now)
 	if (stale.length > 0 || corrupt.length > 0) {
 		const removal = client.multi()
-		for (const record of stale) removal.lrem(LOG_KEY, 1, record.raw)
-		for (const raw of corrupt) removal.lrem(LOG_KEY, 1, raw)
-		removal.pexpire(LOG_KEY, RETENTION_MS)
+		for (const record of stale) removal.lrem(logKey, 1, record.raw)
+		for (const raw of corrupt) removal.lrem(logKey, 1, raw)
+		removal.pexpire(logKey, RETENTION_MS)
 		await removal.exec()
 		if (publish) {
 			for (const record of stale) {
@@ -62,9 +69,10 @@ export async function readLog(client, now, publish) {
 /**
  * Read the pending-alarm intent, or null when none is recorded.
  * @param {AlarmRedis} client
+ * @param {string | null} [tenantId]
  */
-export async function readPending(client) {
-	return parseIntent(await client.get(PENDING_KEY))
+export async function readPending(client, tenantId) {
+	return parseIntent(await client.get(scopedKey(PENDING_KEY, tenantId)))
 }
 
 /**
@@ -127,17 +135,19 @@ return {0, raw}
 /**
  * Drop the pending intent.
  * @param {AlarmRedis} client
+ * @param {string | null} [tenantId]
  */
-export async function clearPending(client) {
-	await client.del(PENDING_KEY)
+export async function clearPending(client, tenantId) {
+	await client.del(scopedKey(PENDING_KEY, tenantId))
 }
 
 /**
  * Record the intent to fire `seconds` from now. Returns the fire time.
  * @param {AlarmRedis} client
  * @param {number} seconds already validated by the caller
+ * @param {string | null} [tenantId]
  */
-export async function schedulePending(client, seconds) {
+export async function schedulePending(client, seconds, tenantId) {
 	const now = Date.now()
 	const delayMs = Math.round(seconds * 1000)
 	const at = now + delayMs
@@ -147,7 +157,7 @@ export async function schedulePending(client, seconds) {
 	// so fire-time plus a full retention window can only expire an intent
 	// that is long dead - a crash orphan the fire path never cleared - which
 	// is the one case the TTL exists for.
-	await client.set(PENDING_KEY, JSON.stringify({ at, setAt: now }), 'PX', delayMs + RETENTION_MS)
+	await client.set(scopedKey(PENDING_KEY, tenantId), JSON.stringify({ at, setAt: now }), 'PX', delayMs + RETENTION_MS)
 	return at
 }
 
@@ -164,7 +174,7 @@ export async function schedulePending(client, seconds) {
  * would otherwise load normally until a loader run first prunes an aged
  * record, a day or more after a fire.
  * @param {AlarmRedis} client
- * @param {{ setAlarm(at: number): Promise<void>, deleteAlarm(): Promise<void>, publish(topic: string, event: string, data: any): void }} ctx
+ * @param {{ tenantId?: string | null, setAlarm(at: number): Promise<void>, deleteAlarm(): Promise<void>, publish(topic: string, event: string, data: any): void }} ctx
  * @param {string} topic the stream's own topic
  */
 export async function loadRoom(client, ctx, topic) {
@@ -172,14 +182,14 @@ export async function loadRoom(client, ctx, topic) {
 		throw new TypeError('loadRoom needs the stream topic to announce pruned records on')
 	}
 	try {
-		const pending = await readPending(client)
+		const pending = await readPending(client, ctx.tenantId)
 		if (pending) await ctx.setAlarm(pending.at)
 		else await ctx.deleteAlarm()
 	} catch {
 		// ctx.setAlarm is bound on the wire-subscribe path; a loader run
 		// reached another way (or a Redis blip) leaves the alarm as-is.
 	}
-	return readLog(client, Date.now(), (event, data) => ctx.publish(topic, event, data))
+	return readLog(client, Date.now(), (event, data) => ctx.publish(topic, event, data), ctx.tenantId)
 }
 
 /**
@@ -191,7 +201,7 @@ export async function loadRoom(client, ctx, topic) {
  * alarm, so a replacement scheduled while it was in flight would otherwise
  * wait for the next visitor's loader run to be armed again.
  * @param {AlarmRedis} client
- * @param {{ alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void, setAlarm(at: number): Promise<void> }} ctx
+ * @param {{ tenantId?: string | null, alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void, setAlarm(at: number): Promise<void> }} ctx
  */
 export async function recordFire(client, ctx) {
 	const record = {
@@ -202,7 +212,7 @@ export async function recordFire(client, ctx) {
 		recovered: ctx.alarm.recovered
 	}
 	const [recorded, intent] = await client.eval(
-		RECORD_FIRE, 2, LOG_KEY, PENDING_KEY,
+		RECORD_FIRE, 2, scopedKey(LOG_KEY, ctx.tenantId), scopedKey(PENDING_KEY, ctx.tenantId),
 		JSON.stringify(record), String(record.at), String(LOG_CAP - 1), String(RETENTION_MS)
 	)
 	if (recorded === 1) {

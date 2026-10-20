@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
+import { createAlarmStore } from 'svelte-adapter-uws-extensions/redis/alarm-store'
+import { configureAlarm, live, setCronPlatform } from 'svelte-realtime/server'
+import * as realtimeServer from 'svelte-realtime/server'
+import { createTestEnv } from 'svelte-realtime/testing'
 import {
-	clearPending, loadRoom, LOG_CAP, LOG_KEY, PENDING_KEY, readPending, recordFire, schedulePending
+	clearPending, loadRoom, LOG_CAP, LOG_KEY, PENDING_KEY, readLog, readPending, recordFire, schedulePending
 } from '../../src/lib/server/alarm-log.js'
 import { RETENTION_MS } from '../../src/lib/server/alarm-retention.js'
 
@@ -91,6 +95,69 @@ function expectRetentionTTL(pttl) {
 }
 
 test.describe('alarm log against a real Redis', () => {
+	test('the recovery poll restores tenant scope from the durable alarm row', async () => {
+		const env = createTestEnv()
+		const store = createAlarmStore(redis, { keyPrefix: `recovery:${randomUUID()}:` })
+		const wireTopic = `@t/acme/${TOPIC}`
+		const path = 'alarmRecovery/timers'
+		const keys = [LOG_KEY, PENDING_KEY, `${LOG_KEY}:tenant:acme`, `${PENDING_KEY}:tenant:acme`,
+			`${LOG_KEY}:tenant:globex`, `${PENDING_KEY}:tenant:globex`]
+		const callbacks = []
+		const publications = []
+		const publish = env.platform.publish.bind(env.platform)
+		env.platform.publish = (topic, event, data, ...options) => {
+			publications.push({ topic, event, data })
+			return publish(topic, event, data, ...options)
+		}
+		env.register('alarmRecovery', {
+			timers: live.stream(TOPIC, () => [], {
+				alarm: { onAlarm: async (ctx) => {
+					await recordFire(client, ctx)
+					callbacks.push({ tenantId: ctx.tenantId, alarm: ctx.alarm })
+				} }
+			})
+		})
+		try {
+			await client.del(...keys)
+			const at = Date.now() - 1_500
+			const publicIntent = { at: at + 60_000, setAt: at }
+			const otherIntent = { at: at + 90_000, setAt: at }
+			await client.set(PENDING_KEY, JSON.stringify(publicIntent), 'PX', RETENTION_MS)
+			await client.set(`${PENDING_KEY}:tenant:globex`, JSON.stringify(otherIntent), 'PX', RETENTION_MS)
+			await client.set(`${PENDING_KEY}:tenant:acme`, JSON.stringify({ at, setAt: at - 2_000 }), 'PX', RETENTION_MS)
+			// No local timer or connected visitor exists. The persisted row is
+			// the only input to the real recovery poll and callback resolver.
+			const generation = await store.nextGeneration(wireTopic)
+			await store.set(wireTopic, at, { path, tenantId: 'acme' }, generation)
+			setCronPlatform(env.platform)
+			configureAlarm({ store, leader: () => true, pollMs: 20 })
+			await expect.poll(() => callbacks.length).toBe(1)
+			expect(callbacks[0]).toMatchObject({ tenantId: 'acme', alarm: { at, recovered: true } })
+			const records = await readLog(client, Date.now(), undefined, 'acme')
+			expect(records).toHaveLength(1)
+			expect(records[0]).toMatchObject({ at, recovered: true })
+			expect(await readPending(client, 'acme')).toBeNull()
+			expect(await readPending(client)).toEqual(publicIntent)
+			expect(await readPending(client, 'globex')).toEqual(otherIntent)
+			expect(await readLog(client, Date.now())).toEqual([])
+			expect(await readLog(client, Date.now(), undefined, 'globex')).toEqual([])
+			expect(publications.filter(({ event }) => event === 'created')).toEqual([
+				{ topic: wireTopic, event: 'created', data: records[0] }
+			])
+			await expect.poll(() => store.getExecution(wireTopic, generation)).toBeNull()
+			expect(await store.get(wireTopic)).toBeNull()
+		} finally {
+			configureAlarm(null)
+			// The runtime-only helper clears any timer a failed assertion left.
+			;(/** @type {any} */ (realtimeServer))._resetAlarms()
+			setCronPlatform(null)
+			env.cleanup()
+			await store.clear()
+			await store.destroy()
+			await client.del(...keys)
+		}
+	})
+
 	test('a rejected replacement alarm keeps the newer intent and fails the old callback', async () => {
 		const at = await schedulePending(client, 30)
 		const ctx = alarmCtx(at - 1_000)
@@ -103,6 +170,40 @@ test.describe('alarm log against a real Redis', () => {
 		expect((await readPending(client)).at).toBe(at)
 		expect(await logged()).toEqual([])
 		expect(ctx.calls.published).toEqual([])
+	})
+
+	test('precise and recovered tenant fires leave other scopes intact', async () => {
+		const scopes = [null, 'acme', 'globex', 'public']
+		const keys = scopes.flatMap((scope) => scope === null
+			? [LOG_KEY, PENDING_KEY]
+			: [`${LOG_KEY}:tenant:${scope}`, `${PENDING_KEY}:tenant:${scope}`])
+		try {
+			for (const recovered of [false, true]) {
+				await client.del(...keys)
+				const times = []
+				for (const [i, scope] of scopes.entries()) times.push(await schedulePending(client, 2 + i, scope))
+				const ctx = { ...alarmCtx(times[1]), tenantId: 'acme' }
+				ctx.alarm.recovered = recovered
+				await recordFire(client, ctx)
+				await recordFire(client, ctx)
+				expect(await readPending(client, 'acme')).toBeNull()
+				for (const i of [0, 2, 3]) expect((await readPending(client, scopes[i]))?.at).toBe(times[i])
+				const room = { ...streamCtx(), tenantId: 'acme' }
+				const records = await loadRoom(client, room, TOPIC)
+				expect(records).toHaveLength(1)
+				expect(records[0]).toMatchObject({ at: times[1], recovered })
+				expect(ctx.calls.published).toHaveLength(1)
+				for (const scope of [null, 'globex', 'public']) {
+					expect(await loadRoom(client, { ...streamCtx(), tenantId: scope }, TOPIC)).toEqual([])
+				}
+				await clearPending(client, 'globex')
+				expect(await readPending(client, 'globex')).toBeNull()
+				expect((await readPending(client))?.at).toBe(times[0])
+				expect((await readPending(client, 'public'))?.at).toBe(times[3])
+			}
+		} finally {
+			await client.del(...keys)
+		}
 	})
 
 	test('a fire of the pending schedule lands at the head, keeps LOG_CAP, refreshes the TTL, clears the intent and is announced', async () => {

@@ -143,6 +143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Alarm schedules, fired records and retention use separate Redis keys for each tenant and the public scope.
+
 - Erasure resets mood aggregates and preserves synthetic leaderboard counts through explicit aggregate policies.
 
 - Uploads use the public cancellation signal and release their active slot on cancellation.
