@@ -2,15 +2,19 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { parseAst } from 'vite'
-import { combineCounts, configureForget, live, realtime, _resetAggregates } from 'svelte-realtime/server'
+import { combineCounts, configureForget, live, realtime } from 'svelte-realtime/server'
+import * as realtimeServer from 'svelte-realtime/server'
 import { createTestEnv } from 'svelte-realtime/testing'
 import { TOPICS } from '../../src/lib/server/topics.js'
+
+// Test-only teardown is exported by the runtime, outside the public typings.
+const { _resetAggregates } = /** @type {any} */ (realtimeServer)
 
 // Evaluate the actual declarations without starting the modules' Redis clients
 // or cron jobs. Reducers, windows and erasure options run in the real engine.
 function declaration(file, name) {
 	const source = readFileSync(new URL(`../../src/live/demos/${file}.js`, import.meta.url), 'utf8')
-	const ast = parseAst(source)
+	const ast = /** @type {any} */ (parseAst(source))
 	const expression = ast.body.find((node) => node.type === 'ExportNamedDeclaration'
 		&& node.declaration?.declarations?.[0]?.id.name === name).declaration.declarations[0].init
 	const helper = ast.body.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'moodReducers')

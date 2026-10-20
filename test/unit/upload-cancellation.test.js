@@ -8,7 +8,7 @@ import { LiveError } from 'svelte-realtime/server'
 
 function uploadHandler() {
 	const source = readFileSync(new URL('../../src/live/demos/upload.js', import.meta.url), 'utf8')
-	const declaration = parseAst(source).body.find((node) => node.type === 'ExportNamedDeclaration'
+	const declaration = (/** @type {any} */ (parseAst(source))).body.find((node) => node.type === 'ExportNamedDeclaration'
 		&& node.declaration?.declarations?.[0]?.id.name === 'uploadFile')
 	const handler = declaration.declaration.declarations[0].init.arguments[0]
 	const calls = { active: 0, stored: [], files: [], published: [] }
