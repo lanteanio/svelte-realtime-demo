@@ -135,8 +135,8 @@ declare module "$live/demos/collab-editor" {
   import type { Readable } from 'svelte/store';
 
   export const editorDoc: { status: import('svelte/store').Readable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
-  export const offsetRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: string) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, [action: string]: any };
-  export const crdtRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: string) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, [action: string]: any };
+  export const offsetRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
+  export const crdtRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
   export const empty: Readable<undefined>;
 }
 
@@ -254,7 +254,7 @@ declare module "$live/demos/multiplayer" {
   import type { Readable } from 'svelte/store';
 
   export type ErrorCode = "VALIDATION";
-  export const lounge: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: string) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, [action: string]: any };
+  export const lounge: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
   export const empty: Readable<undefined>;
 }
 
