@@ -329,8 +329,8 @@ export async function init({ platform }) {
 	platform.topicBroadcast = topicBroadcast
 	await awaitBestEffort('Redis bus activation', () => bus.activate(platform))
 	// Durable one-shot timers (live.alarm): the Redis store survives worker
-	// restarts; delete() is the atomic single-fire claim shared by the
-	// owning worker's precise timer and the leader's recovery poll.
+	// restarts; generation-fenced claims coordinate precise timers and the
+	// leader's recovery poll, retaining failed executions for explicit retry.
 	configureAlarm({ store: alarmStore, leader: () => leader.isLeader() })
 	// Right to erasure (live.forget): compose every wired store that can
 	// purge per-user rows. Entries without purgeUser (e.g. idempotency

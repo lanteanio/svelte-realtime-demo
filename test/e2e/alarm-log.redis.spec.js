@@ -57,8 +57,8 @@ function streamCtx() {
 	const calls = { setAlarm: [], deleteAlarm: 0, published: [] }
 	return {
 		calls,
-		setAlarm(at) { calls.setAlarm.push(at) },
-		deleteAlarm() { calls.deleteAlarm++ },
+		async setAlarm(at) { calls.setAlarm.push(at) },
+		async deleteAlarm() { calls.deleteAlarm++ },
 		publish(topic, event, data) { calls.published.push([topic, event, data]) }
 	}
 }
@@ -72,7 +72,7 @@ function alarmCtx(at) {
 		calls,
 		alarm: { at, firedAt, lateMs: firedAt - at, recovered: false },
 		publish(event, data) { calls.published.push([event, data]) },
-		setAlarm(next) { calls.setAlarm.push(next) }
+		async setAlarm(next) { calls.setAlarm.push(next) }
 	}
 }
 
@@ -91,6 +91,20 @@ function expectRetentionTTL(pttl) {
 }
 
 test.describe('alarm log against a real Redis', () => {
+	test('a rejected replacement alarm keeps the newer intent and fails the old callback', async () => {
+		const at = await schedulePending(client, 30)
+		const ctx = alarmCtx(at - 1_000)
+		const rejection = Promise.reject(new Error('replacement refused'))
+		rejection.catch(() => {})
+		ctx.setAlarm = () => rejection
+
+		await expect(recordFire(client, ctx)).rejects.toThrow('replacement refused')
+
+		expect((await readPending(client)).at).toBe(at)
+		expect(await logged()).toEqual([])
+		expect(ctx.calls.published).toEqual([])
+	})
+
 	test('a fire of the pending schedule lands at the head, keeps LOG_CAP, refreshes the TTL, clears the intent and is announced', async () => {
 		const now = Date.now()
 		const older = Array.from({ length: LOG_CAP }, (_, i) =>

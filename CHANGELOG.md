@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Alarm reconciliation awaits durable scheduling and cancellation; rejected replacement writes fail the callback while preserving the pending intent.
+
 - Shooter input validates finite bounded movement and shot angles while keeping health and score changes server-authorized.
 
 - Notification failures use fixed public messages and bounded outcome metrics, keeping backend exception text out of replies and shared activity.

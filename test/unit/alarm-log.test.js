@@ -127,8 +127,8 @@ function streamCtx() {
 	const calls = { setAlarm: [], deleteAlarm: 0, published: [] }
 	return {
 		calls,
-		setAlarm(at) { calls.setAlarm.push(at) },
-		deleteAlarm() { calls.deleteAlarm++ },
+		async setAlarm(at) { calls.setAlarm.push(at) },
+		async deleteAlarm() { calls.deleteAlarm++ },
 		publish(topic, event, data) { calls.published.push([topic, event, data]) }
 	}
 }
@@ -139,7 +139,7 @@ function alarmCtx(alarm) {
 		calls,
 		alarm,
 		publish(event, data) { calls.published.push([event, data]) },
-		setAlarm(at) { calls.setAlarm.push(at) }
+		async setAlarm(at) { calls.setAlarm.push(at) }
 	}
 }
 
@@ -445,6 +445,42 @@ test('a failed write surfaces to the caller instead of reporting success', async
 	redis.failing.add('del')
 	await assert.rejects(clearPending(client(redis)), /del/)
 	assert.equal(redis.strings.has(PENDING_KEY), true)
+})
+
+for (const method of ['setAlarm', 'deleteAlarm']) {
+	test(`the loader awaits ${method} and contains its rejected write`, async () => {
+		const redis = memoryRedis()
+		redis.lists.set(LOG_KEY, [fired('young', 1_000, Date.now())])
+		if (method === 'setAlarm') {
+			redis.strings.set(PENDING_KEY, JSON.stringify({ at: Date.now() + 5_000 }))
+		}
+		const entered = Promise.withResolvers()
+		const write = Promise.withResolvers()
+		write.promise.catch(() => {})
+		const ctx = { ...streamCtx(), [method]() { entered.resolve(); return write.promise } }
+		let loaded = false
+		const loading = loadRoom(client(redis), ctx, TOPIC).then((rows) => { loaded = true; return rows })
+		await entered.promise
+		await new Promise((resolve) => setImmediate(resolve))
+		const finishedBeforeWrite = loaded
+		write.reject(new Error('alarm write refused'))
+		const rows = await loading
+		assert.equal(finishedBeforeWrite, false, 'the loader must wait for durable scheduling')
+		assert.deepEqual(rows.map((row) => row.id), ['young'])
+	})
+}
+
+test('a rejected replacement alarm fails the old fire and preserves its pending intent', async () => {
+	const redis = memoryRedis()
+	const intent = JSON.stringify({ at: NOW + 30_000, setAt: NOW })
+	redis.evalReply = [0, intent]
+	redis.strings.set(PENDING_KEY, intent)
+	const rejection = Promise.reject(new Error('replacement refused'))
+	rejection.catch(() => {})
+	const ctx = { ...alarmCtx({ at: NOW, firedAt: NOW + 3, lateMs: 3, recovered: false }), setAlarm() { return rejection } }
+	await assert.rejects(recordFire(client(redis), ctx), /replacement refused/)
+	assert.equal(redis.strings.get(PENDING_KEY), intent)
+	assert.deepEqual(ctx.calls.published, [])
 })
 
 test('scheduling records the intent with a TTL a full retention window past its fire time', async () => {

@@ -164,7 +164,7 @@ export async function schedulePending(client, seconds) {
  * would otherwise load normally until a loader run first prunes an aged
  * record, a day or more after a fire.
  * @param {AlarmRedis} client
- * @param {{ setAlarm(at: number): void, deleteAlarm(): void, publish(topic: string, event: string, data: any): void }} ctx
+ * @param {{ setAlarm(at: number): Promise<void>, deleteAlarm(): Promise<void>, publish(topic: string, event: string, data: any): void }} ctx
  * @param {string} topic the stream's own topic
  */
 export async function loadRoom(client, ctx, topic) {
@@ -173,8 +173,8 @@ export async function loadRoom(client, ctx, topic) {
 	}
 	try {
 		const pending = await readPending(client)
-		if (pending) ctx.setAlarm(pending.at)
-		else ctx.deleteAlarm()
+		if (pending) await ctx.setAlarm(pending.at)
+		else await ctx.deleteAlarm()
 	} catch {
 		// ctx.setAlarm is bound on the wire-subscribe path; a loader run
 		// reached another way (or a Redis blip) leaves the alarm as-is.
@@ -191,7 +191,7 @@ export async function loadRoom(client, ctx, topic) {
  * alarm, so a replacement scheduled while it was in flight would otherwise
  * wait for the next visitor's loader run to be armed again.
  * @param {AlarmRedis} client
- * @param {{ alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void, setAlarm(at: number): void }} ctx
+ * @param {{ alarm: { at: number, firedAt: number, lateMs: number, recovered: boolean }, publish(event: string, data: any): void, setAlarm(at: number): Promise<void> }} ctx
  */
 export async function recordFire(client, ctx) {
 	const record = {
@@ -210,5 +210,5 @@ export async function recordFire(client, ctx) {
 		return
 	}
 	const pending = parseIntent(intent)
-	if (pending) ctx.setAlarm(pending.at)
+	if (pending) await ctx.setAlarm(pending.at)
 }
