@@ -17,6 +17,7 @@ import { bus, limiter, presence, cursor, replay, registry, leader, redis } from 
 import { metrics } from '#lib/server/metrics.js'
 import { tasks } from '#lib/server/tasks.js'
 import { lookupSession, createSession, tryParseLegacyJsonCookie } from '#lib/server/identity-session.js'
+import { bestEffort, forwardPluginFrame } from '#lib/server/hook-guard.js'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface and
@@ -238,13 +239,13 @@ export function open(ws, ctx) {
 	// degraded / recovered events into an empty set and the layout's
 	// `{#if $health === 'degraded'}` banner is silently dead. Required
 	// as of `svelte-adapter-uws-extensions@0.5.0-next.13`.
-	bus.hooks.open(ws, ctx)
-	presence.join(ws, 'global', platform)
+	bestEffort('Redis bus open hook', () => bus.hooks.open(ws, ctx))
+	bestEffort('global presence join', () => presence.join(ws, 'global', platform))
 	// Register the connection in realtime's local push registry (so
 	// live.push routes via platform.request) and in the cluster registry
 	// (so cross-instance pushes find this user via Redis).
 	pushHooks.open(ws, ctx)
-	registry.hooks.open(ws, ctx)
+	bestEffort('connection registry open hook', () => registry.hooks.open(ws, ctx))
 }
 
 /**
@@ -291,8 +292,8 @@ function denialFor(topic, ws) {
 export function subscribe(ws, topic, ctx) {
 	const reason = denialFor(topic, ws)
 	if (reason) return reason
-	presence.hooks.subscribe(ws, topic, ctx)
-	cursor.hooks.subscribe(ws, topic, ctx)
+	bestEffort('presence subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
+	bestEffort('cursor subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
 }
 
 /**
@@ -316,8 +317,8 @@ export function subscribeBatch(ws, topics, ctx) {
 			(denials ??= {})[topic] = reason
 			continue
 		}
-		presence.hooks.subscribe(ws, topic, ctx)
-		cursor.hooks.subscribe(ws, topic, ctx)
+		bestEffort('presence batch-subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
+		bestEffort('cursor batch-subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
 	}
 	return denials
 }
@@ -329,7 +330,7 @@ export function subscribeBatch(ws, topics, ctx) {
  * for just that topic so departed users disappear immediately.
  */
 export function unsubscribe(ws, topic, ctx) {
-	presence.hooks.unsubscribe(ws, topic, ctx)
+	bestEffort('presence unsubscribe hook', () => presence.hooks.unsubscribe(ws, topic, ctx))
 }
 
 /**
@@ -341,13 +342,12 @@ export function unsubscribe(ws, topic, ctx) {
  *
  * Wrapped in connectionMetricsHook so per-connection histograms
  * (duration, messages, bytes) and the close-code counter emit on every
- * close. The user-supplied close runs first; metrics observation runs
- * after, so a throw in the user close still misses metrics for that
- * connection (acceptable - a thrown close is an exceptional path).
+ * close. Metrics are recorded first and the user-supplied close runs
+ * after, so a throw in the user close does not skip them.
  */
 export const close = connectionMetricsHook(metrics, (ws, ctx) => {
-	presence.hooks.close(ws, ctx)
-	cursor.hooks.close(ws, ctx)
+	bestEffort('presence close hook', () => presence.hooks.close(ws, ctx))
+	bestEffort('cursor close hook', () => cursor.hooks.close(ws, ctx))
 	// Pass ctx so pushHooks.close routes through the realtime close
 	// that drains stream-subscription bookkeeping (silent-topic
 	// watchdogs, _topicWsCounts, __onUnsubscribe callbacks). Without
@@ -355,7 +355,7 @@ export const close = connectionMetricsHook(metrics, (ws, ctx) => {
 	// push-only and the silent-topic watchdog never disarms when test
 	// pages close, producing 30s-delayed warning floods.
 	pushHooks.close(ws, ctx)
-	registry.hooks.close(ws, ctx)
+	bestEffort('connection registry close hook', () => registry.hooks.close(ws, ctx))
 	// Per-demo cleanup that needs WS context (most demos use Redis
 	// for state and don't need a close hook; chaos.js keeps a
 	// per-user state Map in-process that would orphan on disconnect).
@@ -401,10 +401,14 @@ export const message = createMessage({
 	//     cursor hot path -- no RPC id allocation, no pending-promise map
 	//     entry, no timeout timer, no devtools/dedup.
 	//
+	//   {type:'cursor-snapshot', topic}     -> cursor.snapshot
+	//     Adapter's cursor client sends this on every status==='open'. Routed
+	//     by forwardPluginFrame so a failed Redis read is observed.
+	//
 	//   {type:'presence-snapshot', topic}   -> presence.hooks.message
 	//     Adapter's presence client sends this on every status==='open'
 	//     (initial connect + reconnect). The handler re-emits
-	//     `presence_state` to the requesting ws so board-scoped presence
+	//     `state` to the requesting ws so board-scoped presence
 	//     does not stay stale across reconnects.
 	//
 	// createMessage's onUnhandled gets the raw ArrayBuffer (same shape
@@ -418,8 +422,7 @@ export const message = createMessage({
 		let parsed
 		try { parsed = JSON.parse(_unhandledDecoder.decode(data)) } catch { return }
 		if (!parsed || typeof parsed !== 'object') return
-		cursor.hooks.message(ws, { data: parsed, platform })
-		presence.hooks.message(ws, { data: parsed, platform })
+		forwardPluginFrame(ws, parsed, platform, cursor, presence)
 	}
 })
 

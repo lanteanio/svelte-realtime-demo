@@ -41,7 +41,8 @@ export default defineConfig({
 				'**/stress.spec.js',
 				'**/destroyer.spec.js',
 				'**/destroyer-presence.spec.js',
-				'**/websocket-lifecycle.spec.js'
+				'**/websocket-lifecycle.spec.js',
+				'**/websocket-abrupt-close.spec.js'
 			],
 			grepInvert: /alone on the page/,
 			use: { browserName: 'chromium' }
@@ -60,9 +61,10 @@ export default defineConfig({
 				'**/destroyer-presence.spec.js',
 				'**/demos-auctions.spec.js',
 				'**/demos-notifications.spec.js',
-				'**/websocket-lifecycle.spec.js'
+				'**/websocket-lifecycle.spec.js',
+				'**/websocket-abrupt-close.spec.js'
 			],
-			grep: /alone on the page|Stress Test|Destroyer Test|Presence Destroyer|WebSocket lifecycle/,
+			grep: /alone on the page|Stress Test|Destroyer Test|Presence Destroyer|WebSocket lifecycle|WebSocket abrupt close/,
 			use: { browserName: 'chromium' }
 		}
 	]

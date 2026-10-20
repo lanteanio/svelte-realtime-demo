@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Wait for delivered events in the replay diagnostic and cluster auction test.
 - Check native WebSocket state during navigation and server connection closure after document replacement.
 - Display the configured publish-rate threshold on the pressure demo.
+- Keep the server running when a Redis-backed WebSocket open, subscribe, unsubscribe or close hook fails, including a presence join still pending when its socket closes, and when a cursor snapshot request cannot read Redis. Failures other than a closed socket are logged as rate-limited warnings.
 
 ### Security
 
