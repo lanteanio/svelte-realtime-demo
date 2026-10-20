@@ -27,6 +27,21 @@ import {
 test.describe.configure({ mode: 'serial' })
 
 test.describe('/demos/privacy', () => {
+	test('a page that lives through a tumble counts its first submission of the new round', async ({ page }) => {
+		test.setTimeout(180_000)
+		await openPrivacy(page)
+		// Keep a closing count above the new window's first count on the page.
+		await waitForFreshRound(page, { requireRoom: false })
+		await submitMood(page, 4)
+		const last = await submitMood(page, 4)
+		const round = await waitForFreshRound(page, { requireRoom: false, after: last.roundId })
+		const closingCount = (await rawState(page)).n
+		expect(closingCount, 'the closing window must remain visible before the first new submission').toBeGreaterThanOrEqual(2)
+		expect(round.distinct, 'the new window has no contributors yet').toBe(0)
+		expect(await submitMood(page, 2)).toEqual({ roundId: round.roundId, rolled: false })
+		expect((await rawState(page)).n, 'the first new submission replaces the closing count').toBe(1)
+	})
+
 	test('renders every mood action, aggregate state, privacy disclosure, and source link', async ({ page }) => {
 		await openPrivacy(page)
 		await expect(page.getByRole('heading', { name: 'Aggregate privacy: k-anonymity + differential privacy' })).toBeVisible()
