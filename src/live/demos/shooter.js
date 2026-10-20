@@ -95,7 +95,7 @@ export const shooter = live.smooth({
 		onHit: (ctx, target, info) => {
 			ctx.applyTo(target.key, { type: 'damage' })
 			ctx.applyTo(ctx.identity, { type: 'score' })
-			ctx.emitEvent('hit', { by: ctx.identity, target: target.key, at: info.point })
+			ctx.emitEvent('hit', { by: ctx.identity, target: target.key, at: info.point, rewindMs: info.rewindMs })
 			// Hitscan blocks on the first body - no penetration.
 			return { stop: true }
 		}

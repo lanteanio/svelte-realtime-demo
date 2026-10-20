@@ -151,6 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Board presence and cursor clients wait for managed participation and use the server-resolved topic, preserving tenant scope across route changes and reconnects.
 
+- Shooter score panels show the server-measured rewind used for the last hit.
+
 - Pagination captions show the retained server cursor as JSON instead of only its shape.
 
 - Erasure resets mood aggregates and preserves synthetic leaderboard counts through explicit aggregate policies.

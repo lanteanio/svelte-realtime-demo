@@ -98,6 +98,7 @@
 	// hitsSeen counts the event stream; the score card shows the
 	// authoritative counter the server keeps on your entity state.
 	let lastHit = $state('')
+	let lastRewindMs = $state(/** @type {number | null} */ (null))
 	let hitsSeen = $state(0)
 	$effect(() => {
 		const off = view.onEvent((e) => {
@@ -105,6 +106,7 @@
 			if (e.data?.at) addSpark(e.data.at)
 			if (e.data?.by === view.self) {
 				lastHit = e.data?.target ?? ''
+				lastRewindMs = e.data.rewindMs
 				hitsSeen += 1
 			}
 		})
@@ -318,6 +320,7 @@
 					<p class="font-mono text-xs opacity-60" data-testid="sh-hp">hp: {view.local.hp ?? 3}</p>
 					<p class="font-mono text-xs opacity-60" data-testid="sh-shots">shots fired: {shotsFired}</p>
 					<p class="font-mono text-xs opacity-60" data-testid="sh-hits">hit events seen: {hitsSeen}</p>
+					<p class="font-mono text-xs opacity-60" data-testid="sh-last-rewind">last hit rewind: {lastRewindMs === null ? 'waiting for a hit' : `${Math.round(lastRewindMs)}ms`}</p>
 					{#if lastHit}
 						<p class="font-mono text-xs opacity-60" data-testid="sh-last-hit">last hit: {lastHit}</p>
 					{/if}
@@ -382,7 +385,10 @@
 			<code>&#123;type:'damage'&#125;</code> to the victim and
 			<code>&#123;type:'score'&#125;</code> to the shooter via
 			<code>ctx.applyTo</code>, then <code>ctx.emitEvent('hit')</code>
-			drives the spark you see. A shot is fire-and-forget
+			drives the spark and reports <code>info.rewindMs</code>, the owner's
+			applied rewind duration. The score card shows that measurement for
+			your last hit; a miss does not produce an <code>onHit</code> event.
+			A shot is fire-and-forget
 			(<code>view.shoot</code>) - never predicted, its outcome is an
 			event, not a reconciliation.
 			See <a class="link" href="https://github.com/lanteanio/svelte-realtime-demo/blob/main/src/live/demos/shooter.js">shooter.js</a>.

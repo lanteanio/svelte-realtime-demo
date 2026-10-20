@@ -12,6 +12,28 @@ import {
 } from './shooter-helpers.js'
 
 test.describe('/demos/shooter', () => {
+	test('last hit displays the owner-measured rewind from the server event', async ({ page }) => {
+		const rewinds = []
+		page.on('websocket', (socket) => socket.on('framereceived', ({ payload }) => {
+			let frame
+			try { frame = JSON.parse(String(payload)) } catch { return }
+			if (frame.topic === '__smooth:demos:shooter:range' && frame.event === 'event' && frame.data?.type === 'hit') {
+				rewinds.push(frame.data.data?.rewindMs)
+			}
+		}))
+		await openShooter(page)
+		for (let attempt = 0; attempt < 24 && !rewinds.some((value) => value > 0); attempt++) {
+			await shootRenderedTarget(page)
+			await page.waitForTimeout(200)
+		}
+		await expect.poll(() => rewinds.some((value) => value > 0)).toBe(true)
+		const measured = rewinds.at(-1)
+		expect(Number.isFinite(measured)).toBe(true)
+		expect(measured).toBeGreaterThan(0)
+		expect(measured).toBeLessThanOrEqual(400)
+		await expect(page.getByTestId('sh-last-rewind')).toHaveText(`last hit rewind: ${Math.round(measured)}ms`)
+	})
+
 	test('renders the whole range, scoreboard, latency control, disclosure, and source link', async ({ page }) => {
 		const errors = collectShooterErrors(page)
 		await openShooter(page)
