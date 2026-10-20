@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { readdir } from 'node:fs/promises'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const name = `srd-undo-postgres-${process.pid}-${Date.now()}`
@@ -53,9 +54,12 @@ try {
 	}
 	if (!ready) throw new Error('Disposable PostgreSQL did not become ready')
 	const databaseURL = `postgres://postgres:test@${address}/stickynotes`
-	const env = { ...process.env, DATABASE_URL: databaseURL, NOTE_UNDO_TEST_DATABASE_URL: databaseURL }
+	const env = { ...process.env, DATABASE_URL: databaseURL, NOTE_UNDO_TEST_DATABASE_URL: databaseURL, POSTGRES_TEST_DATABASE_URL: databaseURL }
 	await run(process.execPath, ['scripts/migrate.mjs'], { env })
-	await run(process.execPath, ['--test', 'test/integration/note-undo.postgres.test.js'], { env })
+	const tests = (await readdir(new URL('../test/integration/', import.meta.url)))
+		.filter((name) => name.endsWith('.postgres.test.js')).sort()
+		.map((name) => `test/integration/${name}`)
+	await run(process.execPath, ['--test', ...tests], { env })
 } catch (error) {
 	console.error(error.message)
 	process.exitCode = interrupted ? 130 : 1

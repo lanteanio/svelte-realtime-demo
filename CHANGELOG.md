@@ -141,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Durable jobs retain their W3C trace context in the versioned database schema with automatic schema changes disabled.
+
 - Alarm reconciliation awaits durable scheduling and cancellation; rejected replacement writes fail the callback while preserving the pending intent.
 
 - Shooter input validates finite bounded movement and shot angles while keeping health and score changes server-authorized.

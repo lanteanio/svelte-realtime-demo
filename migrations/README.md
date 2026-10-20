@@ -26,8 +26,12 @@ sandbox for arbitrary SQL.
 upstream extension's published column/primary-key shapes; they are
 third-party-owned integration tables rather than application schema.
 
+`005_demo_jobs_trace_context.sql` adds the nullable W3C trace context columns
+used by durable tasks. Existing rows remain valid without tracing; task writes
+run with automatic DDL disabled.
+
 Deletion undo uses `004_note_deletion_undo.sql`. The note deletion and its visitor-owned snapshot commit in one statement; restoring consumes the receipt and inserts the note in one statement. An existing note wins over the snapshot. Expired receipts are removed once a minute.
 
-Run `npm run test:integration` with Docker available to start a disposable PostgreSQL container, apply the migrations and check deletion/restore behavior, including concurrent board deletion. The command binds a random loopback port and removes its container on success or failure. CI runs it for every push and pull request.
+Run `npm run test:integration` with Docker available to start a disposable PostgreSQL container, apply the migrations and check deletion/restore behavior, concurrent board deletion, and durable task execution. The command binds a random loopback port and removes its container on success or failure. CI runs it for every push and pull request.
 
 To use an existing disposable database instead, set `NOTE_UNDO_TEST_DATABASE_URL` and run `node --test test/integration/note-undo.postgres.test.js`. The test creates and removes its own random schema and selects it through the connection's `search_path`; it does not test the deployed database's `public` schema. It applies every accepted SQL migration in the same sorted order as the deployment runner. New migrations affect the tested schema only when they follow the unqualified-name convention above. Both paths share the filename and schema-token guards, and the unit suite checks the checked-in migrations against them.
