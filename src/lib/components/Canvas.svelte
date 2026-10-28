@@ -50,6 +50,7 @@
      note instead of zooming the page (and drops the legacy tap delay). -->
 <div
 	bind:this={canvasEl}
+	data-testid="board-canvas"
 	class="relative w-full min-h-0 flex-1 overflow-auto touch-manipulation"
 	style:background
 	onpointermove={onPointerMove}

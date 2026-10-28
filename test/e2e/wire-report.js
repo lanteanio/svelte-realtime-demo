@@ -80,9 +80,9 @@ export function createWireRecord() {
 }
 
 /** Correlate one reply with the request that is waiting for it. */
-function applyReply(record, result, at) {
+function applyReply(record, result, at, envelopeId) {
 	if (!result || typeof result !== 'object') return;
-	const entry = record.rpcs.find((r) => r.id === result.id);
+	const entry = record.rpcs.find((r) => r.id === (result.id ?? envelopeId));
 	// A reply whose request is not in the list is not noise. It is proof that
 	// this record began after that request went out, which is the one thing
 	// that would turn a "never asked" verdict into a false accusation.
@@ -168,7 +168,7 @@ export function applyWireFrame(record, direction, msg, at) {
 	}
 	if (msg.topic === '__rpc') {
 		if (msg.event === '__batch') for (const result of msg.data?.batch ?? []) applyReply(record, result, at);
-		else applyReply(record, msg.data, at);
+		else applyReply(record, msg.data, at, msg.event);
 		return;
 	}
 	if (typeof msg.type === 'string') {

@@ -223,7 +223,19 @@ test.describe('/demos/schema-evolution', () => {
 	// nothing about whether anything can reach it.
 	test('a failed state fetch is explained, and withholds what it could not confirm', async ({ page }) => {
 		test.setTimeout(60_000)
-		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => ws.close())
+		await page.routeWebSocket(/\/ws(\?|$)/, (ws) => {
+			const server = ws.connectToServer()
+			ws.onMessage((message) => {
+				let request = null
+				try { request = JSON.parse(String(message)) } catch {}
+				if (request?.rpc === 'demos/schema-evolution/myCounterState') {
+					ws.send(JSON.stringify({ topic: '__rpc', event: request.id, data: { id: request.id, ok: false, code: 'DISCONNECTED', error: 'staged disconnect' } }))
+					return
+				}
+				server.send(message)
+			})
+			server.onMessage((message) => ws.send(message))
+		})
 		await page.goto('/demos/schema-evolution')
 
 		const error = page.getByTestId('state-error')

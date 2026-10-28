@@ -177,6 +177,16 @@ test('a reply carries its rows and topic back to the request that is waiting', (
 	assert.equal(built.orphanReplies, 0)
 })
 
+test('a reply can take its request id from the envelope event', () => {
+	const built = fold([
+		['out', { rpc: 'demos/a/list', id: 'a1', args: [], stream: true }],
+		['in', { topic: '__rpc', event: 'a1', data: { ok: true, data: [1, 2, 3], topic: 'demos:a' } }]
+	])
+	assert.equal(built.rpcs[0].ok, true)
+	assert.equal(built.rpcs[0].rows, 3)
+	assert.equal(built.orphanReplies, 0)
+})
+
 test('a batched reply correlates every entry, not only the first', () => {
 	const built = fold([
 		['out', { batch: [{ rpc: 'demos/a/list', id: 'a1', stream: true }, { rpc: 'demos/a/feed', id: 'a2', stream: true }] }],

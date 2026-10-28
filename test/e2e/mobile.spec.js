@@ -35,7 +35,7 @@ test.describe('Mobile Touch', () => {
 		await page.waitForTimeout(1000);
 
 		// Double-tap the canvas to create a note
-		const canvas = page.locator('[style*="height: calc"]');
+		const canvas = page.getByTestId('board-canvas');
 		const box = await canvas.boundingBox();
 		if (!box) throw new Error('Canvas not found');
 
@@ -56,7 +56,7 @@ test.describe('Mobile Touch', () => {
 		await page.waitForTimeout(1000);
 
 		// Create a note first
-		const canvas = page.locator('[style*="height: calc"]');
+		const canvas = page.getByTestId('board-canvas');
 		const box = await canvas.boundingBox();
 		if (!box) throw new Error('Canvas not found');
 
@@ -121,7 +121,7 @@ test.describe('Mobile Touch', () => {
 		await page.waitForTimeout(1000);
 
 		// Create a note
-		const canvas = page.locator('[style*="height: calc"]');
+		const canvas = page.getByTestId('board-canvas');
 		const box = await canvas.boundingBox();
 		if (!box) throw new Error('Canvas not found');
 
@@ -143,7 +143,7 @@ test.describe('Mobile Touch', () => {
 		await page.waitForTimeout(1000);
 
 		// Create a note
-		const canvas = page.locator('[style*="height: calc"]');
+		const canvas = page.getByTestId('board-canvas');
 		const box = await canvas.boundingBox();
 		if (!box) throw new Error('Canvas not found');
 

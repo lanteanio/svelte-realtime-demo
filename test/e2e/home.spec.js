@@ -43,7 +43,7 @@ test.describe('home + gallery', () => {
 		expect(await page.evaluate(() => localStorage.getItem('noteColor'))).toBe(NOTE_COLORS.at(-1))
 		await expect(page.getByLabel('Set default note color').nth(NOTE_COLORS.length - 1)).toHaveClass(/border-primary/)
 
-		const shell = page.locator('.min-h-screen')
+		const shell = page.locator('.min-h-dvh')
 		const light = await shell.evaluate((element) => getComputedStyle(element).backgroundColor)
 		const theme = page.locator('.theme-controller')
 		await page.locator('label.swap').click()
