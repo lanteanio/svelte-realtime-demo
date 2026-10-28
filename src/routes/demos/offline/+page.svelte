@@ -23,12 +23,13 @@
 -->
 <script>
 	import { pendingMutations, uploading, offlineCheckpoint } from 'svelte-realtime/client'
-	import { status } from 'svelte-adapter-uws/client'
+	import { connect, status } from 'svelte-adapter-uws/client'
 	import { connectionState, isOffline } from '$lib/offline-connection'
 	import { configureApp } from '$lib/configure-app'
 	import { entriesStream, addEntry } from '$live/demos/offline'
 	import { browser } from '$app/environment'
-	import { goOffline as blockSocket, goOnline as unblockSocket, offlineBlockActive } from '$lib/simulate-offline'
+
+	const client = connect()
 
 	let { data } = $props()
 	const me = $derived(data.identity)
@@ -104,14 +105,10 @@
 		return new Date(ts).toLocaleTimeString()
 	}
 
-	// -- In-page "simulate offline" (shared $lib/simulate-offline module:
-	// dispatches the browser offline/online events the client already
-	// reacts to, and blocks reconnects with a never-opening WebSocket
-	// stub until unblocked). This page only tracks which mode it is in.
 	let simulatedOffline = $state(false)
 
-	// What the card is allowed to claim, given the real socket AND the
-	// simulation. The mapping lives in $lib/offline-connection with unit
+	// Combine the real socket state with the simulation. The mapping lives
+	// in $lib/offline-connection with unit
 	// coverage, because its load-bearing case - the 'connecting' window on
 	// every page load being neither up nor down - is a startup state that no
 	// browser test against a warm server can reach.
@@ -120,13 +117,13 @@
 	function goOffline() {
 		if (!browser) return
 		simulatedOffline = true
-		blockSocket()
+		client.simulateOffline()
 	}
 
 	function goOnline() {
 		if (!browser) return
 		simulatedOffline = false
-		unblockSocket()
+		client.resumeOnline()
 	}
 
 	function toggleOffline() {
@@ -134,9 +131,8 @@
 		else goOffline()
 	}
 
-	// Never leave the socket blocked if the viewer navigates away mid-simulation.
 	$effect(() => () => {
-		if (offlineBlockActive()) unblockSocket()
+		if (simulatedOffline) client.resumeOnline()
 	})
 </script>
 

@@ -18,9 +18,10 @@
 <script>
 	import { count, reset } from '$live/demos/counter-resume'
 	import { confirmDestructive } from '$lib/confirm-destructive'
-	import { goOffline, goOnline, offlineBlockActive } from '$lib/simulate-offline'
-	import { status } from 'svelte-adapter-uws/client'
+	import { connect, status } from 'svelte-adapter-uws/client'
 	import { onMount } from 'svelte'
+
+	const client = connect()
 
 	let ledger = $state([])
 	// Flips true on the first stream frame so tests can gate on a real
@@ -40,13 +41,13 @@
 	function dropConnection() {
 		if (dropRemaining > 0) return
 		dropRemaining = DROP_SECONDS
-		goOffline()
+		client.simulateOffline()
 		dropTimer = setInterval(() => {
 			dropRemaining -= 1
 			if (dropRemaining <= 0) {
 				clearInterval(dropTimer)
 				dropTimer = null
-				goOnline()
+				client.resumeOnline()
 			}
 		}, 1000)
 	}
@@ -68,10 +69,8 @@
 		})
 		return () => {
 			off()
-			// Never leave the socket blocked when the page goes away
-			// mid-outage.
 			if (dropTimer) clearInterval(dropTimer)
-			if (offlineBlockActive()) goOnline()
+			if (dropRemaining > 0) client.resumeOnline()
 		}
 	})
 
