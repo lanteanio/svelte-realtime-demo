@@ -94,6 +94,11 @@ async function pushMessage(roomId, msg, ctx) {
 export const chat = live.room({
 	topic: (ctx, roomId) => TOPICS.demoChatRoom(roomId),
 	init: async (ctx, roomId) => loadMessages(roomId),
+	meta: (roomId) => ({
+		label: roomId === 'private' ? 'Private' : roomId === 'random' ? 'Random' : 'General',
+		description: roomId === 'private' ? 'Members-only.' : roomId === 'random' ? 'Unscripted conversation.' : 'The shared lobby.'
+	}),
+	enumerable: true,
 	presence: (ctx) => ({ name: ctx.user.name, color: ctx.user.color })
 })
 

@@ -6,6 +6,10 @@
 	chat surface renders a FORBIDDEN banner and shows zero messages.
 -->
 <script>
+	import { chat } from '$live/demos/chat'
+
+	const roomList = chat.rooms()
+	$effect(() => () => roomList.destroy())
 	const rooms = [
 		{ id: 'general', label: 'General', desc: 'Open to everyone.' },
 		{ id: 'random', label: 'Random', desc: 'Open to everyone.' },
@@ -28,6 +32,7 @@
 
 	<ul class="grid gap-3">
 		{#each rooms as room (room.id)}
+			{@const count = roomList.rooms.get(room.id)?.count ?? 0}
 			<li>
 				<a
 					href="/demos/chat/{room.id}"
@@ -43,6 +48,7 @@
 						<div class="min-w-0">
 							<div class="font-semibold">{room.label}</div>
 							<div class="text-xs opacity-60">{room.desc}</div>
+							<div class="text-xs" data-testid="room-count-{room.id}">{count} in the room</div>
 						</div>
 						<span class="ml-auto text-lg opacity-50" aria-hidden="true" data-testid="room-enter-{room.id}">&rarr;</span>
 					</div>

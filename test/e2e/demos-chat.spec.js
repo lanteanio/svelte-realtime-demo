@@ -65,6 +65,29 @@ test.describe('/demos/chat picker', () => {
 		await expect(page).toHaveURL(/\/demos\/chat\/general$/)
 		await expect(page.getByTestId('messages')).toBeVisible()
 	})
+
+	test('room cards show live occupancy as members join and leave', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		const ctxC = await browser.newContext()
+		const lobby = await ctxA.newPage()
+		const member = await ctxB.newPage()
+		const otherMember = await ctxC.newPage()
+		try {
+			await lobby.goto('/demos/chat')
+			await expect(lobby.getByTestId('room-count-general')).toHaveText('0 in the room')
+			await member.goto('/demos/chat/general')
+			await waitForWS(member)
+			await expect(lobby.getByTestId('room-count-general')).toHaveText('1 in the room')
+			await otherMember.goto('/demos/chat/general')
+			await waitForWS(otherMember)
+			await expect(lobby.getByTestId('room-count-general')).toHaveText('2 in the room')
+			await ctxB.close()
+			await expect(lobby.getByTestId('room-count-general')).toHaveText('1 in the room')
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close(), ctxC.close()])
+		}
+	})
 })
 
 test.describe('/demos/chat/[roomId]', () => {
