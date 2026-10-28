@@ -29,6 +29,7 @@
 
 	onMount(() => {
 		const close = () => connect().close()
+		window.addEventListener('beforeunload', close)
 		window.addEventListener('pagehide', close)
 		let cleanup
 		let mounted = true
@@ -40,6 +41,7 @@
 		return () => {
 			mounted = false
 			cleanup?.()
+			window.removeEventListener('beforeunload', close)
 			window.removeEventListener('pagehide', close)
 		}
 	})

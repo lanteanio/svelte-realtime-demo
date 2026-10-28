@@ -467,10 +467,18 @@ test.describe('WebSocket Connection', () => {
 		// fault from the document's timeline while the reload budget stays
 		// unspent. Promoting timeline evidence to the proven wording would be
 		// the retry firing on hearsay.
-		await page.route('**/_app/immutable/entry/*.js', (route) => route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' }));
-		await page.goto('/', { waitUntil: 'commit' });
+		await page.route('**/_app/immutable/entry/*.js', (route) =>
+			/\/entry\/start\./.test(route.request().url())
+				? route.abort('connectionfailed')
+				: route.fulfill({ status: 200, contentType: 'application/javascript', body: '' })
+		);
+		const importFailure = page.waitForEvent('pageerror', {
+			predicate: (error) => /dynamically imported module/.test(error.message)
+		});
+		await page.goto('/');
+		await importFailure;
 
-		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
+		const failure = await waitForWS(page, 500).then(() => null, (error) => error);
 		expect(failure, 'a page whose entry chunk never arrived must fail the wait').not.toBeNull();
 		expect(failure.message).toContain('ENTRY CHUNK FETCH FAILED');
 		expect(failure.message, 'the verdict must say it does not gate the reload').toContain('does not gate the recovery reload');
