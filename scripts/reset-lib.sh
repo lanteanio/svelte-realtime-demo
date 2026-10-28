@@ -8,7 +8,7 @@ RESET_DEMO_TABLES="demos_jobs_tasks demos_jobs_idempotency note board"
 
 # FLUSHALL, honouring REDIS_PASSWORD when the container sets one.
 flush_redis() {
-	docker compose exec -T redis sh -c \
+	docker compose -f docker-compose.yml exec -T redis sh -c \
 		'if [ -n "$REDIS_PASSWORD" ]; then exec redis-cli -a "$REDIS_PASSWORD" --no-auth-warning FLUSHALL; else exec redis-cli FLUSHALL; fi'
 }
 
@@ -21,7 +21,7 @@ truncate_demo_tables() {
 	local quoted
 	quoted=$(printf "'%s'," $RESET_DEMO_TABLES)
 	quoted=${quoted%,}
-	docker compose exec -T postgres psql -U postgres -d stickynotes -v ON_ERROR_STOP=1 -c "
+	docker compose -f docker-compose.yml exec -T postgres psql -U postgres -d stickynotes -v ON_ERROR_STOP=1 -c "
 DO \$do\$
 DECLARE t text;
 BEGIN

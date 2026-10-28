@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 
 RESET_START_TIMEOUT_SECONDS=${RESET_START_TIMEOUT_SECONDS:-180}
 app_was_stopped=0
-mapfile -t app_containers_before_reset < <(docker compose ps -a -q app)
+mapfile -t app_containers_before_reset < <(docker compose -f docker-compose.yml ps -a -q app)
 expected_app_replicas=${#app_containers_before_reset[@]}
 
 if [ "$expected_app_replicas" -eq 0 ]; then
@@ -28,8 +28,8 @@ restart_app() {
 
 	if [ "$app_was_stopped" -eq 1 ]; then
 		echo "Starting app..."
-		if docker compose start app; then
-			if wait_for_app_health "$RESET_START_TIMEOUT_SECONDS" "$expected_app_replicas"; then
+		if docker compose -f docker-compose.yml start app; then
+			if wait_for_app_health "$RESET_START_TIMEOUT_SECONDS" "$expected_app_replicas" -f docker-compose.yml; then
 				echo "App is healthy."
 				[ "$status" -ne 0 ] || echo "Done! Clean slate."
 			else
@@ -51,7 +51,7 @@ trap restart_app EXIT
 
 echo "Stopping app..."
 app_was_stopped=1
-docker compose stop app
+docker compose -f docker-compose.yml stop app
 
 echo "Flushing Redis..."
 flush_redis

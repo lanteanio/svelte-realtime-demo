@@ -153,6 +153,43 @@ class BackupShellTests(unittest.TestCase):
                     self.assertEqual(result.returncode == 0, bad_id == 'none', result.stderr)
                     self.assertEqual('reached' in result.stdout, bad_id == 'none')
 
+    def test_source_reads_select_the_base_compose_file(self):
+        identity = 'pg_id=' + between('pg_id=', 'for name in database.dump roles.sql redis.rdb configuration.tgz; do sha256sum')
+        queries = 'for query in counts ownership roles; do' + between(
+            'for query in counts ownership roles; do', "printf 'started_at='")
+        for name in ['counts', 'ownership', 'roles']:
+            (self.directory / (name + '.sql')).write_text('SELECT 1;')
+        stub = '''
+work="$FIXTURE"
+export COMPOSE_FILE=ambient.yml COMPOSE_PROJECT_NAME=maintenance-test
+docker() {
+  if [ "$1" = compose ]; then
+    printf '%s\\t' "$@" >> "$FIXTURE/commands.log"
+    printf '\\n' >> "$FIXTURE/commands.log"
+    case " $* " in
+      *" ps "*) printf '%064d\\n' 1;;
+      *'printf "%s" "$POSTGRES_DB"'*) printf 'stickynotes';;
+      *" exec "*) printf 'source-result\\n';;
+      *) return 2;;
+    esac
+  elif [ "$1" = inspect ]; then
+    case "$3" in
+      '{{.Image}}') printf 'sha256:%064d\\n' 2;;
+      *) printf 'true healthy\\n';;
+    esac
+  else
+    return 3
+  fi
+}
+'''
+        result = self.run_shell(stub + identity + queries)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [line.split('\t') for line in (self.directory / 'commands.log').read_text().splitlines()]
+        self.assertEqual(len(calls), 6)
+        for args in calls:
+            self.assertEqual(args[:3], ['compose', '-f', 'docker-compose.yml'], args)
+        self.assertEqual([args[3] for args in calls], ['ps', 'ps', 'exec', 'exec', 'exec', 'exec'])
+
 
 if __name__ == '__main__':
     unittest.main()

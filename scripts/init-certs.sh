@@ -8,7 +8,7 @@ export DOMAIN
 
 echo "Obtaining Let's Encrypt certificate for $DOMAIN..."
 
-docker compose run --rm --entrypoint certbot -p 80:80 certbot certonly \
+docker compose -f docker-compose.yml run --rm --entrypoint certbot -p 80:80 certbot certonly \
   --standalone \
   --preferred-challenges http \
   -d "$DOMAIN" \
@@ -18,4 +18,4 @@ docker compose run --rm --entrypoint certbot -p 80:80 certbot certonly \
 
 echo ""
 echo "Certificate obtained successfully!"
-echo "Now run: docker compose up -d"
+echo "Now run: docker compose -f docker-compose.yml up -d"

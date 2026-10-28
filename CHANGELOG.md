@@ -135,6 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Reset, certificate and backup operations select the same explicit Compose file as deployment, including recovery checks and the maintenance runbook.
+
 - Migration discovery rejects misnamed SQL files and standalone `public` or `search_path` tokens; the integration procedure documents its isolated-schema requirement.
 
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.

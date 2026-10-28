@@ -203,6 +203,11 @@ npm start
 
 The included `docker-compose.yml` sets up everything: app, Postgres, Redis, and a certbot container for automatic Let's Encrypt TLS. HTTPS out of the box, no reverse proxy.
 
+Run Compose commands from the repository root. The operations scripts and
+commands below select `docker-compose.yml` explicitly, so `COMPOSE_FILE`,
+automatic override files and other default filenames cannot change the service
+configuration. `COMPOSE_PROJECT_NAME` still selects the Compose project.
+
 The app runs as 4 independent replicas by default using `network_mode: host`
 and `SO_REUSEPORT`. The Linux kernel distributes incoming connections across
 the processes. Redis handles cross-process pub/sub.
@@ -221,13 +226,13 @@ DEMO_NEWS_WEBHOOK_SECRET=generate-a-long-random-secret
    the long-running certbot service itself uses a shell renewal loop:
 
 ```bash
-docker compose run --rm --entrypoint certbot -p 80:80 certbot certonly --standalone -d your-domain.com
+docker compose -f docker-compose.yml run --rm --entrypoint certbot -p 80:80 certbot certonly --standalone -d your-domain.com
 ```
 
 4. Start everything:
 
 ```bash
-docker compose up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 The `migrate` service completes before any app replica is allowed to start.
@@ -246,7 +251,7 @@ or smoke verification fails.
 To scale replicas:
 
 ```bash
-docker compose up -d --scale app=4
+docker compose -f docker-compose.yml up -d --scale app=4
 ```
 
 
@@ -404,8 +409,8 @@ if [ -f /var/run/reboot-required.pkgs ]; then cat /var/run/reboot-required.pkgs;
 ls -l /boot/vmlinuz-* /boot/initrd.img-*
 git rev-parse HEAD
 git status --short
-docker compose ps -a
-for id in $(docker compose ps -a -q app postgres redis certbot); do
+docker compose -f docker-compose.yml ps -a
+for id in $(docker compose -f docker-compose.yml ps -a -q app postgres redis certbot); do
   docker inspect --format '{{.Name}} image={{.Config.Image}} digest={{.Image}} restart={{.HostConfig.RestartPolicy.Name}} running={{.State.Running}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$id"
   docker inspect --format '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}' "$id"
 done
@@ -444,21 +449,21 @@ outside temporary storage, `MAINT_EXPECTED_REPLICAS` to the healthy app count an
   git rev-parse HEAD > "$MAINT_RECORD_DIR/source"
   printf '%s\n' "$MAINT_EXPECTED_KERNEL" > "$MAINT_RECORD_DIR/kernel"
   printf '%s\n' "$MAINT_EXPECTED_REPLICAS" > "$MAINT_RECORD_DIR/replicas"
-  maintenance_ids=$(docker compose ps -a -q app postgres redis)
+  maintenance_ids=$(docker compose -f docker-compose.yml ps -a -q app postgres redis)
   mapfile -t maintenance_health_ids <<< "$maintenance_ids"
   test "${#maintenance_health_ids[@]}" -eq "$((MAINT_EXPECTED_REPLICAS + 2))"
   for id in "${maintenance_health_ids[@]}"; do
     test "$(docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$id")" = 'true healthy'
   done
-  test "$(docker compose ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
-  maintenance_app_ids=$(docker compose ps -a -q app)
+  test "$(docker compose -f docker-compose.yml ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
+  maintenance_app_ids=$(docker compose -f docker-compose.yml ps -a -q app)
   maintenance_app_images=$(for id in $maintenance_app_ids; do docker inspect --format '{{.Image}}' "$id"; done | sort -u)
   test "$(printf '%s\n' "$maintenance_app_images" | wc -l)" -eq 1
   for service in postgres redis certbot; do
-    test "$(docker compose ps -a -q "$service" | wc -l)" -eq 1
+    test "$(docker compose -f docker-compose.yml ps -a -q "$service" | wc -l)" -eq 1
   done
-  test "$(docker inspect --format '{{.State.Running}}' "$(docker compose ps -a -q certbot)")" = true
-  maintenance_ids=$(docker compose ps -a -q app postgres redis certbot)
+  test "$(docker inspect --format '{{.State.Running}}' "$(docker compose -f docker-compose.yml ps -a -q certbot)")" = true
+  maintenance_ids=$(docker compose -f docker-compose.yml ps -a -q app postgres redis certbot)
   for id in $maintenance_ids; do
     docker inspect --format '{{.Id}} {{.Image}}' "$id"
   done | sort > "$MAINT_RECORD_DIR/images"
@@ -531,10 +536,10 @@ unhealthy dependency:
   journalctl -b -p err --no-pager
   test ! -e /var/run/reboot-required
   . scripts/compose-health.sh
-  wait_for_app_health 180 "$MAINT_EXPECTED_REPLICAS"
-  test "$(docker compose ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
+  wait_for_app_health 180 "$MAINT_EXPECTED_REPLICAS" -f docker-compose.yml
+  test "$(docker compose -f docker-compose.yml ps -a -q app | wc -l)" -eq "$MAINT_EXPECTED_REPLICAS"
   for service in postgres redis; do
-    maintenance_ids=$(docker compose ps -a -q "$service")
+    maintenance_ids=$(docker compose -f docker-compose.yml ps -a -q "$service")
     test -n "$maintenance_ids"
     mapfile -t maintenance_service_ids <<< "$maintenance_ids"
     test "${#maintenance_service_ids[@]}" -eq 1
@@ -544,9 +549,9 @@ unhealthy dependency:
       sleep 2
     done
   done
-  test "$(docker compose ps -a -q certbot | wc -l)" -eq 1
-  test "$(docker inspect --format '{{.State.Running}}' "$(docker compose ps -a -q certbot)")" = true
-  maintenance_ids=$(docker compose ps -a -q app postgres redis certbot)
+  test "$(docker compose -f docker-compose.yml ps -a -q certbot | wc -l)" -eq 1
+  test "$(docker inspect --format '{{.State.Running}}' "$(docker compose -f docker-compose.yml ps -a -q certbot)")" = true
+  maintenance_ids=$(docker compose -f docker-compose.yml ps -a -q app postgres redis certbot)
   for id in $maintenance_ids; do
     docker inspect --format '{{.Id}} {{.Image}}' "$id"
   done | sort > "$MAINT_RECORD_DIR/images-after"
@@ -657,8 +662,8 @@ uptime
 free -m
 df -h / /var/lib/docker
 df -i / /var/lib/docker
-docker compose ps --format json
-docker compose ps -q app | xargs -r docker inspect --format '{{.Name}} {{.Image}} {{.State.StartedAt}} {{.RestartCount}}'
+docker compose -f docker-compose.yml ps --format json
+docker compose -f docker-compose.yml ps -q app | xargs -r docker inspect --format '{{.Name}} {{.Image}} {{.State.StartedAt}} {{.RestartCount}}'
 ss -Htan state established '( sport = :443 )' | wc -l
 cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io
 cat /proc/net/dev
@@ -697,7 +702,7 @@ aggregate connections with:
 ```bash
 set -o pipefail
 date -u +%Y-%m-%dT%H:%M:%SZ
-docker compose ps -q app postgres redis | xargs -r docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}'
+docker compose -f docker-compose.yml ps -q app postgres redis | xargs -r docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}}'
 ss -Htan state established '( sport = :443 )' | wc -l
 date -u +%Y-%m-%dT%H:%M:%SZ
 ```

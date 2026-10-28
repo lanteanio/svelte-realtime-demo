@@ -19,8 +19,8 @@ test "$(realpath -e -- "$work")" = "$work"
 stamp=$(cat /proc/sys/kernel/random/uuid)
 pg_name=maintenance-pg-$stamp
 redis_name=maintenance-redis-$stamp
-pg_id=$(docker compose ps -q postgres)
-redis_id=$(docker compose ps -q redis)
+pg_id=$(docker compose -f docker-compose.yml ps -q postgres)
+redis_id=$(docker compose -f docker-compose.yml ps -q redis)
 [[ "$pg_id" =~ ^[a-f0-9]{64}$ && "$redis_id" =~ ^[a-f0-9]{64}$ ]]
 pg_image=$(docker inspect --format '{{.Image}}' "$pg_id")
 redis_image=$(docker inspect --format '{{.Image}}' "$redis_id")
@@ -28,7 +28,7 @@ redis_image=$(docker inspect --format '{{.Image}}' "$redis_id")
 for id in "$pg_id" "$redis_id"; do
   test "$(docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$id")" = 'true healthy'
 done
-source_db=$(docker compose exec -T postgres sh -c 'printf "%s" "$POSTGRES_DB"' </dev/null)
+source_db=$(docker compose -f docker-compose.yml exec -T postgres sh -c 'printf "%s" "$POSTGRES_DB"' </dev/null)
 [[ "$source_db" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]
 for name in database.dump roles.sql redis.rdb configuration.tgz; do sha256sum -- "$backup/$name"; done > "$work/input-sha256.txt"
 printf 'postgres_image=%s\nredis_image=%s\n' "$pg_image" "$redis_image" > "$work/images.txt"
@@ -64,7 +64,7 @@ SELECT r.rolname,r.rolsuper,r.rolinherit,r.rolcreaterole,r.rolcreatedb,r.rolcanl
 SELECT 'membership', pg_get_userbyid(m.roleid), pg_get_userbyid(m.member), pg_get_userbyid(m.grantor), m.admin_option, coalesce(to_jsonb(m)->>'inherit_option',''), coalesce(to_jsonb(m)->>'set_option','') FROM pg_auth_members m WHERE pg_get_userbyid(m.roleid) <> 'restore_verifier' AND pg_get_userbyid(m.member) <> 'restore_verifier' AND NOT (left(pg_get_userbyid(m.roleid),3) = 'pg_' AND left(pg_get_userbyid(m.member),3) = 'pg_') ORDER BY 2,3,4;
 ROLES
 for query in counts ownership roles; do
-  docker compose exec -T postgres sh -c 'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB"' < "$work/$query.sql" | { if [ "$query" = roles ]; then sha256sum; else cat; fi; } > "$work/source-$query.tsv"
+  docker compose -f docker-compose.yml exec -T postgres sh -c 'exec psql -X -qAt -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "$POSTGRES_DB"' < "$work/$query.sql" | { if [ "$query" = roles ]; then sha256sum; else cat; fi; } > "$work/source-$query.tsv"
 done
 printf 'started_at='; date -u +%Y-%m-%dT%H:%M:%SZ
 printf 'private_evidence=%s\n' "$work"
