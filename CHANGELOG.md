@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- An offline field-performance export validator reports segmented metric p75, eligibility and missing coverage without individual navigation records or production collection.
+- Optional field-performance collection uses native browser metrics and shared Redis aggregates with a 32-day expiry and no visitor identifiers, URLs, content, raw IPs or per-visit timestamps. It is disabled by default and exports daily LCP, INP and CLS distributions with device, connection and missing-geography coverage. The offline validator reports segmented p75, eligibility and missing coverage.
 
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
 

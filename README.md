@@ -786,15 +786,30 @@ approved cleanup, rerun the same measurements and record actual reclaimed space.
 
 ---
 
-## Offline field performance exports
+## Field performance collection and exports
 
 `node scripts/field-performance.mjs export.json` validates a local aggregate
-export and writes its summary to stdout. The command opens no network
-connections and installs no browser collector. Collection is opt-in: production
-instrumentation, deployment and retention require a separate operator decision.
-Use this format for origin-wide hard-navigation measurements from the canonical
-demo origin. Keep soft navigations, laboratory runs and generated traffic out of
-field exports; mark all local fixtures as `datasetKind: "test"`.
+export and writes its summary to stdout. Use this format for origin-wide
+hard-navigation measurements from the canonical demo origin. Keep soft
+navigations, laboratory runs and generated traffic out of field exports; mark
+all local fixtures as `datasetKind: "test"`.
+
+Collection is disabled by default and requires an operator-approved deployment
+and retention decision. Set `FIELD_PERFORMANCE_COLLECTION=1` at runtime; it
+enables both the endpoint and the browser collector. The browser
+uses native PerformanceObserver entries for LCP, INP and CLS and sends one
+sample on pagehide or the first hidden transition. Redis retains only aggregate
+counts and value distributions for 32 days. No visitor or metric IDs, content,
+URLs, raw IPs or per-visit timestamps are collected. Geography is always
+`unknown` until a trustworthy classification source is configured. Collection
+across replicas shares the same daily Redis aggregates.
+
+`POST /api/field-performance` accepts bounded JSON samples. `GET
+/api/field-performance?date=YYYY-MM-DD` returns that UTC day's raw aggregate
+export and accepts the same `X-Scrape-Token` protection as `/metrics`. The
+existing offline validator summarizes either a downloaded export or a local
+fixture. Production collection must remain off until its deployment and
+retention are separately authorized.
 
 The schema has exactly these top-level fields:
 

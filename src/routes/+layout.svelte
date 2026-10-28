@@ -20,11 +20,25 @@
 	import { health } from 'svelte-realtime/client'
 	import { configureApp } from '$lib/configure-app'
 	import { browser } from '$app/environment'
+	import { onMount } from 'svelte'
 	import { Wifi, WifiOff, Sun, Moon, User, Globe, Github, AlertTriangle } from 'lucide-svelte'
 
 	// The app-wide options (resume grace, protocol version) and their
 	// rationale live in $lib/configure-app.js.
 	configureApp()
+
+	onMount(() => {
+		if (!data.fieldPerformance) return
+		let cleanup
+		let mounted = true
+		void import('$lib/field-performance').then(({ collectFieldPerformance }) => {
+			if (mounted) cleanup = collectFieldPerformance(window)
+		})
+		return () => {
+			mounted = false
+			cleanup?.()
+		}
+	})
 
 	let { children, data } = $props()
 	const identity = $derived(data.identity)

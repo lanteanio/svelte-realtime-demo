@@ -92,6 +92,10 @@ services:
       # endpoint stays open - no behavior change for existing deployments
       # scraping without auth.
       METRICS_SCRAPE_TOKEN: ${METRICS_SCRAPE_TOKEN:-}
+      # Optional aggregate browser performance collection. Keep unset unless
+      # the operator has approved collection and the 32-day retention. Enables
+      # both the endpoint and the browser collector.
+      FIELD_PERFORMANCE_COLLECTION: ${FIELD_PERFORMANCE_COLLECTION:-}
       # Bearer token for the fail-closed /__realtime/* admin plane (introspect,
       # DLQ inspect/replay, lifeline metrics). Unset = every admin request is
       # denied. Generate with `openssl rand -hex 32`.

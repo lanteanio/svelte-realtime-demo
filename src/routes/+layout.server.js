@@ -18,6 +18,7 @@ import {
 	tryParseLegacyJsonCookie,
 	SESSION_COOKIE_MAX_AGE
 } from '$lib/server/identity-session'
+import { fieldPerformanceEnabled } from '$lib/server/field-performance'
 
 const COOKIE_OPTS = {
 	path: '/',
@@ -28,16 +29,17 @@ const COOKIE_OPTS = {
 }
 
 export async function load({ cookies }) {
+	const fieldPerformance = fieldPerformanceEnabled()
 	const raw = cookies.get('identity')
 
 	// Fast path: cookie holds a valid session-id and the session exists.
 	const existing = await lookupSession(raw)
-	if (existing) return { identity: existing }
+	if (existing) return { identity: existing, fieldPerformance }
 
 	// Legacy cookies supply display-profile hints only. Mint a fresh
 	// server-owned identity, then use its opaque session on later requests.
 	const legacy = tryParseLegacyJsonCookie(raw)
 	const { sessionId, identity } = await createSession(legacy)
 	cookies.set('identity', sessionId, COOKIE_OPTS)
-	return { identity }
+	return { identity, fieldPerformance }
 }
