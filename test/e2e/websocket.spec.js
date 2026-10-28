@@ -288,23 +288,22 @@ test.describe('WebSocket Connection', () => {
 		const afterBoard = wsConnections.filter((c) => !c.closed).length;
 		console.log(`After board navigation: ${wsConnections.length} total, ${afterBoard} open`);
 
-		// Should still be just 1 open connection (the original may have been
-		// replaced, but we should NOT have multiple open simultaneously)
-		expect(afterBoard).toBeLessThanOrEqual(1);
+		// A replaced document's close handshake can complete after the new one opens.
+		await expect.poll(() => wsConnections.filter((c) => !c.closed).length, { timeout: 15000 }).toBeLessThanOrEqual(1);
 
 		// Navigate back to home
 		await page.goto('/');
 		await page.waitForTimeout(2000);
 		const afterReturn = wsConnections.filter((c) => !c.closed).length;
 		console.log(`After return to home: ${wsConnections.length} total, ${afterReturn} open`);
-		expect(afterReturn).toBeLessThanOrEqual(1);
+		await expect.poll(() => wsConnections.filter((c) => !c.closed).length, { timeout: 15000 }).toBeLessThanOrEqual(1);
 
 		// Refresh the page
 		await page.reload();
 		await page.waitForTimeout(2000);
 		const afterRefresh = wsConnections.filter((c) => !c.closed).length;
 		console.log(`After page refresh: ${wsConnections.length} total, ${afterRefresh} open`);
-		expect(afterRefresh).toBeLessThanOrEqual(1);
+		await expect.poll(() => wsConnections.filter((c) => !c.closed).length, { timeout: 15000 }).toBeLessThanOrEqual(1);
 
 		console.log(`\nAll WS connections:`);
 		wsConnections.forEach((c, i) => {
@@ -341,8 +340,8 @@ test.describe('WebSocket Connection', () => {
 		const openCount = wsConnections.filter((c) => !c.closed).length;
 		console.log(`\nAfter visiting 3 boards: ${wsConnections.length} total WS, ${openCount} still open`);
 
-		// Should not have more than 1 open connection
-		expect(openCount).toBeLessThanOrEqual(1);
+		// Wait for replaced documents to finish their close handshakes.
+		await expect.poll(() => wsConnections.filter((c) => !c.closed).length, { timeout: 15000 }).toBeLessThanOrEqual(1);
 
 		// Total connections should be reasonable (1 original + maybe reconnects on nav)
 		// but definitely not 3x or more
@@ -468,8 +467,8 @@ test.describe('WebSocket Connection', () => {
 		// fault from the document's timeline while the reload budget stays
 		// unspent. Promoting timeline evidence to the proven wording would be
 		// the retry firing on hearsay.
-		await page.route('**/_app/immutable/entry/*.js', (route) => route.abort());
-		await page.goto('/');
+		await page.route('**/_app/immutable/entry/*.js', (route) => route.fulfill({ status: 404, contentType: 'text/plain', body: 'Not found' }));
+		await page.goto('/', { waitUntil: 'commit' });
 
 		const failure = await waitForWS(page, 3000).then(() => null, (error) => error);
 		expect(failure, 'a page whose entry chunk never arrived must fail the wait').not.toBeNull();

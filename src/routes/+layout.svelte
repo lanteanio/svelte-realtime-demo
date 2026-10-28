@@ -15,7 +15,7 @@
 -->
 <script>
 	import '../app.css'
-	import { status, failure } from 'svelte-adapter-uws/client'
+	import { connect, status, failure } from 'svelte-adapter-uws/client'
 	import { presence } from 'svelte-adapter-uws/plugins/presence/client'
 	import { health } from 'svelte-realtime/client'
 	import { configureApp } from '$lib/configure-app'
@@ -28,15 +28,19 @@
 	configureApp()
 
 	onMount(() => {
-		if (!data.fieldPerformance) return
+		const close = () => connect().close()
+		window.addEventListener('pagehide', close)
 		let cleanup
 		let mounted = true
-		void import('$lib/field-performance').then(({ collectFieldPerformance }) => {
-			if (mounted) cleanup = collectFieldPerformance(window)
-		})
+		if (data.fieldPerformance) {
+			void import('$lib/field-performance').then(({ collectFieldPerformance }) => {
+				if (mounted) cleanup = collectFieldPerformance(window)
+			})
+		}
 		return () => {
 			mounted = false
 			cleanup?.()
+			window.removeEventListener('pagehide', close)
 		}
 	})
 

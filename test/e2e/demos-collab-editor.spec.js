@@ -189,13 +189,14 @@ test.describe('/demos/collab-editor', () => {
 		const b = await ctxB.newPage()
 		try {
 			await Promise.all([open(a), open(b)])
+			const nameA = await a.locator('.navbar .font-medium').textContent()
 			await clear(a)
 			await expectDocument(b, '')
 			const value = 'alpha TARGET omega'
 			await a.getByTestId('collab-offset-textarea').fill(value)
 			await Promise.all([expectDocument(a, value), expectDocument(b, value)])
 			await selectRange(a.getByTestId('collab-offset-textarea'), 6, 12)
-			const remoteRow = b.locator('[data-testid="collab-offset-selection-row"][data-local="false"]')
+			const remoteRow = b.locator('[data-testid="collab-offset-selection-row"][data-local="false"]').filter({ hasText: nameA })
 			await expect(remoteRow).toContainText('[6, 12)')
 
 			await b.getByTestId('collab-crdt-textarea').fill(`XX ${value}`)
