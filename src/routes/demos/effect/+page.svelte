@@ -173,17 +173,14 @@
 					<span class="opacity-70 text-xs">Qty</span>
 					<input type="number" class="input input-bordered input-sm pointer-coarse:min-h-11" min="1" max="20" step="1" required bind:value={qty} disabled={busy} data-testid="place-qty" />
 				</label>
-				<!-- One wrapping unit for the actions: on a phone the inputs may
-				     reflow, but the two publish buttons never separate and Clear
-				     keeps its distance on the right. -->
-				<div class="flex flex-wrap gap-2 items-end grow">
-					<button type="submit" class="btn btn-sm btn-primary pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="place-submit">
+				<div class="grid grid-cols-3 gap-2 items-end grow">
+					<button type="submit" class="btn btn-sm btn-primary w-full px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11" disabled={busy} data-testid="place-submit">
 						{busy ? 'Placing...' : 'Place order'}
 					</button>
-					<button type="button" class="btn btn-sm btn-warning pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
+					<button type="button" class="btn btn-sm btn-warning w-full px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleBurst} disabled={burstBusy} data-testid="burst">
 						{burstBusy ? 'Bursting...' : 'Burst (5)'}
 					</button>
-					<button type="button" class="btn btn-sm btn-outline btn-error ml-auto pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={clearing} data-testid="clear">
+					<button type="button" class="btn btn-sm btn-outline btn-error w-full px-1 pointer-coarse:min-h-11 pointer-coarse:min-w-11" onclick={handleClear} disabled={clearing} data-testid="clear">
 						Clear feeds
 					</button>
 				</div>
