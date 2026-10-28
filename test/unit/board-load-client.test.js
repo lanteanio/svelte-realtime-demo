@@ -50,6 +50,7 @@ for (const file of ['stress.spec.js', 'destroyer.spec.js', 'destroyer-standalone
 		const declaration = (/** @type {any} */ (parseAst(source))).body.find((node) => node.type === 'FunctionDeclaration' && node.id.name === name)
 		const frames = []
 		const ws = { readyState: 1, send: (message) => frames.push(JSON.parse(message)) }
+		/** @type {(() => void) | undefined} */
 		let interval
 		const context = {
 			WebSocket: { OPEN: 1 }, CURSOR_INTERVAL_MS: 32, nextId: () => 'legacy',
@@ -58,6 +59,7 @@ for (const file of ['stress.spec.js', 'destroyer.spec.js', 'destroyer-standalone
 		const start = vm.runInNewContext(`(${source.slice(declaration.start, declaration.end)})`, context)
 		const topic = '@t/acme/board:board-id'
 		start(file === 'destroyer-standalone.js' ? ws : { ws }, topic)
+		assert.ok(interval)
 		interval()
 		assert.equal(frames.length, 1)
 		assert.equal(frames[0].type, 'cursor')
