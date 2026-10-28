@@ -81,7 +81,7 @@ test.describe('Theme Toggle', () => {
 		await waitForWS(page);
 
 		const bgBefore = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 
 		// Click the label (swap) that wraps the hidden checkbox
@@ -89,7 +89,7 @@ test.describe('Theme Toggle', () => {
 		await page.waitForTimeout(500);
 
 		const bgAfter = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 
 		// Background should have changed (dark theme has different bg)
@@ -103,14 +103,14 @@ test.describe('Theme Toggle', () => {
 		await waitForWS(page);
 
 		const bgBefore = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 
 		await page.locator('label.swap').click();
 		await page.waitForTimeout(500);
 
 		const bgAfter = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 
 		expect(bgAfter).not.toBe(bgBefore);
@@ -121,14 +121,14 @@ test.describe('Theme Toggle', () => {
 		await waitForWS(page);
 
 		const bgOriginal = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 
 		// Toggle dark
 		await page.locator('label.swap').click();
 		await page.waitForTimeout(300);
 		const bgDark = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 		expect(bgDark).not.toBe(bgOriginal);
 
@@ -136,7 +136,7 @@ test.describe('Theme Toggle', () => {
 		await page.locator('label.swap').click();
 		await page.waitForTimeout(300);
 		const bgLight = await page.evaluate(() =>
-			getComputedStyle(document.querySelector('.min-h-screen')).backgroundColor
+			getComputedStyle(document.querySelector('.min-h-dvh')).backgroundColor
 		);
 		expect(bgLight).toBe(bgOriginal);
 	});
