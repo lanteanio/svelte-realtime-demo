@@ -115,6 +115,14 @@ Countdown timers are visible on every board card (home page) and in the board he
 
 Stress-tested with 1000 simultaneous bot users on a single board, all moving cursors.
 
+Deployable builds allow 100 WebSocket upgrades and 300 auth preflights per source
+address per 10 seconds. Each worker admits at most 128 concurrent handshakes and
+2000 reserved or live sockets, with 64 upgrades per tick and 128 deferred upgrades.
+Excess traffic receives an admission refusal; a closed socket frees its permit.
+The local E2E harness uses a separate build under `build-runs/` with higher finite
+limits for its synthetic load. Those settings are not used by `npm run build` or
+the production image.
+
 | Metric | Result |
 |---|---|
 | Connections | 1000/1000 (100%) |

@@ -5,19 +5,11 @@
  * us native WebSocket support via uWebSockets.js -- the fastest WebSocket
  * library available for Node.
  *
- * upgradeRateLimit: 0 disables the per-IP WebSocket upgrade rate limit.
- * This is needed for stress testing (1000 connections from one IP).
- * For production, set this to a reasonable value (e.g. 100).
- *
- * upgradeAdmission caps in-flight WebSocket upgrades at the handshake
- * layer. Surplus get a 503 BEFORE TLS / cookie / hook work, so a 10K
- * connection storm sheds cheap instead of burning CPU on doomed
- * upgrades. perTickBudget paces res.upgrade() calls so a synchronous
- * burst does not starve other I/O. 1000 / 64 lets the 1000-cursor
- * stress test pass through and trips the shed only past that.
+ * Upgrade admission bounds handshake work and live sockets per worker.
  */
 import adapter from 'svelte-adapter-uws'
 import { buildOutDir } from './scripts/build-output.mjs'
+import { websocketAdmission } from './scripts/websocket-admission.mjs'
 
 // Optional multi-hostname allowlist, for a deployment reachable under more
 // than one name (an apex plus www, a staging alias). Comma-separated, each
@@ -78,21 +70,7 @@ const config = {
 				// Present only when ALLOWED_ORIGINS was set at build time;
 				// otherwise the adapter keeps its 'same-origin' default.
 				...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-				upgradeRateLimit: 0,
-				// Same rationale as upgradeRateLimit: the stress harness drives
-				// 1000+ connections from one IP, and the auth-preflight door
-				// (default 30 per 10s per IP since adapter next.87) would refuse
-				// most of them. For production behind real client IPs, set both
-				// to reasonable values instead.
-				authPathRateLimit: 0,
-				upgradeAdmission: {
-					// Cap in-flight upgrades. 4000 keeps the 1000-bot stress harness
-					// (plus 4x burst-room above it) entirely on the cheap shed path.
-					// perTickBudget scales to drain that pool within ~1s of event-
-					// loop time on a 60Hz tick (4000 / 256 = ~16 ticks).
-					maxConcurrent: 4000,
-					perTickBudget: 256
-				},
+				...websocketAdmission(),
 				// Demo pressure thresholds. publishRatePerSec matches the
 				// adapter's production-tuned default (10000) -- the prior
 				// 500 was tuned for /demos/pressure to artificially trip

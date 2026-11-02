@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deployable builds enforce per-address WebSocket upgrade and preflight budgets and a finite per-worker live-connection ceiling. Local load-test builds keep separate admission limits.
+
 ### Added
 
 - Optional field-performance collection uses native browser metrics and shared Redis aggregates with a 32-day expiry and no visitor identifiers, URLs, content, raw IPs or per-visit timestamps. It is disabled by default and exports daily LCP, INP and CLS distributions with device, connection and missing-geography coverage. The offline validator reports segmented p75, eligibility and missing coverage.

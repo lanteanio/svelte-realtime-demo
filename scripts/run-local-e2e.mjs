@@ -176,6 +176,7 @@ async function ensureProductionBuild() {
 	await runChecked('production build', process.execPath, ['scripts/build.mjs'], {
 		...process.env,
 		DEMO_NEWS_WEBHOOK_SECRET: 'local-e2e-webhook-secret',
+		SRD_LOCAL_LOAD_TEST: '1',
 		BUILD_OUT_DIR: buildDir
 	})
 }
