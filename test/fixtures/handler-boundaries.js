@@ -5,6 +5,7 @@ export const defineTopics = topics => topics
 live.effect = () => ({})
 live.stream = () => ({})
 live.flag = () => ({ set: value => flags.push(value) })
+live.smooth = options => options
 export class LiveError extends Error {
 	constructor(code, message) { super(message); this.code = code }
 }

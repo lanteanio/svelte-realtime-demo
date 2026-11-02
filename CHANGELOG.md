@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Shooter input validates finite bounded movement and shot angles while keeping health and score changes server-authorized.
+
 - The monitoring scraper verifies the HTTPS peer before sending its token and reports failed scrapes without exposing credentials. Private trust roots can be supplied through `METRICS_CA_BUNDLE`.
 
 - Order products and feature flags accept only their own catalog keys, rejecting inherited object members before any state is written.

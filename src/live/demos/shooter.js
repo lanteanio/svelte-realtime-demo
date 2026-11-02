@@ -30,6 +30,7 @@
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 import { apply, spawnFor, hash01, RANGE_W, RANGE_H, HITBOX_R, SHOT_MAX_DIST } from './shooter.shared.js'
+import { clientCommandCodec } from './shooter-wire.js'
 
 const TICK_MS = 50
 const TARGET_COUNT = 8
@@ -57,6 +58,7 @@ const ORBITS = Array.from({ length: TARGET_COUNT }, (_, i) => orbitFor(i))
 export const shooter = live.smooth({
 	topic: TOPICS.demoShooterRange,
 	apply,
+	wire: { command: clientCommandCodec },
 	initial: (key) => spawnFor(key),
 	tickMs: TICK_MS,
 	onTick(world, t) {
