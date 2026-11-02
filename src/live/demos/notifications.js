@@ -46,11 +46,25 @@
 import { live, LiveError } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 import { leader, redis, registry } from '$lib/server/redis'
+import { metrics } from '$lib/server/metrics'
 
 const PUSH_TIMEOUT_MS = 8000
 const ACTIVITY_CAP = 50
 const MAX_TEXT_LEN = 200
 const MAX_SCHEDULE_SEC = 120
+
+const deliveryFailures = metrics.counter(
+	'demo_notification_delivery_failures_total',
+	'Notification delivery failures by public outcome.',
+	['outcome']
+)
+
+function publicFailure(err) {
+	const code = err instanceof LiveError ? err.code : null
+	if (code === 'NOT_FOUND') return { kind: 'offline', code: 'OFFLINE', error: 'Recipient is offline' }
+	if (code === 'TIMEOUT') return { kind: 'timeout', code: 'TIMEOUT', error: 'Notification timed out' }
+	return { kind: 'error', code: 'DELIVERY_FAILED', error: 'Notification could not be delivered' }
+}
 
 const SCHEDULED_KEY = 'demos:notifications:scheduled'
 const ACTIVITY_KEY = 'demos:notifications:activity'
@@ -176,21 +190,22 @@ async function deliverPush(entry, ctx) {
 		}, ctx)
 		return { ok: true, ack, via: path.via, toInstance: path.toInstance }
 	} catch (err) {
-		const code = err instanceof LiveError ? err.code : null
-		const kind = code === 'NOT_FOUND' ? 'offline' : (code === 'TIMEOUT' ? 'timeout' : 'error')
+		const failure = publicFailure(err)
+		deliveryFailures.inc({ outcome: failure.kind })
 		await appendActivity({
 			id: crypto.randomUUID(),
 			ts: Date.now(),
-			kind,
+			kind: failure.kind,
 			pushId: id,
 			fromUserName,
 			toUserName,
 			text,
 			via: path.via,
 			toInstance: path.toInstance,
-			error: err?.message ?? String(err)
+			code: failure.code,
+			error: failure.error
 		}, ctx)
-		return { ok: false, kind, via: path.via, toInstance: path.toInstance, error: err?.message ?? String(err) }
+		return { ok: false, ...failure, via: path.via, toInstance: path.toInstance }
 	}
 }
 

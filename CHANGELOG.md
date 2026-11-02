@@ -9,22 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Shooter input validates finite bounded movement and shot angles while keeping health and score changes server-authorized.
-
-- The monitoring scraper verifies the HTTPS peer before sending its token and reports failed scrapes without exposing credentials. Private trust roots can be supplied through `METRICS_CA_BUNDLE`.
-
-- Order products and feature flags accept only their own catalog keys, rejecting inherited object members before any state is written.
-
-- Development checks include explicit Node 22 type declarations, and the dependency lock uses patched Vite, Undici, devalue and source-map-js releases.
-
-- Anonymous HTTP visits share atomic session-issuance and retained-session limits across replicas. Capacity refusal and storage failures issue no bearer cookie.
-
-- Cookie-less WebSocket reconnects share an anonymous abuse budget instead of receiving a fresh RPC allowance with each ephemeral identity.
-
-- Deployable builds enforce per-address WebSocket upgrade and preflight budgets and a finite per-worker live-connection ceiling. Local load-test builds keep separate admission limits.
-
 ### Added
 
 - `npm run test:redis` runs session-capacity integration tests in a disposable pinned Redis container with an isolated loopback port.
@@ -156,6 +140,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/demos/effect` shows the causality it claims, on every viewport and to every reader.** Audit and notification rows now wear the order that caused them: the short order id and the buyer's dot travel into both downstream feeds (the wire always carried `orderId`; the page never showed it), so correlating the three columns no longer means reading timestamps, and the dot names its buyer via `title`/`aria-label` instead of being color-only. On short viewports the feeds sit below the fold and a publish looked like nothing happening; a successful publish now leaves a receipt naming what was placed, with a jump that scrolls the feeds into view. The three action buttons wrap as one group below the inputs instead of scattering between them, the qty field is `required` so an emptied field can no longer silently place a 1x order (the server clamps a missing qty to 1, and the old page leaned on it), the column subtitles and empty states rise to readable contrast (the closing aside was already lifted layout-wide), and the title names the API once: `live.effect`: one publish, three streams.
 
 ### Fixed
+
+- Shooter input validates finite bounded movement and shot angles while keeping health and score changes server-authorized.
+
+- Notification failures use fixed public messages and bounded outcome metrics, keeping backend exception text out of replies and shared activity.
+
+- The monitoring scraper verifies the HTTPS peer before sending its token and reports failed scrapes without exposing credentials. Private trust roots can be supplied through `METRICS_CA_BUNDLE`.
+
+- Order products and feature flags accept only their own catalog keys, rejecting inherited object members before any state is written.
+
+- Development checks include explicit Node 22 type declarations, and the dependency lock uses patched Vite, Undici, devalue and source-map-js releases.
+
+- Anonymous HTTP visits share atomic session-issuance and retained-session limits across replicas. Capacity refusal and storage failures issue no bearer cookie.
+
+- Cookie-less WebSocket reconnects share an anonymous abuse budget instead of receiving a fresh RPC allowance with each ephemeral identity.
+
+- Deployable builds enforce per-address WebSocket upgrade and preflight budgets and a finite per-worker live-connection ceiling. Local load-test builds keep separate admission limits.
 
 - Reset, certificate and backup operations select the same explicit Compose file as deployment, including recovery checks and the maintenance runbook.
 
