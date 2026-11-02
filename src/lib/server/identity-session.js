@@ -30,6 +30,7 @@ import { redis } from '$lib/server/redis'
 import { sessionBreaker } from '$lib/server/redis-breakers'
 import { generateIdentity } from '$lib/names'
 import { boundedIntEnv } from '$lib/server/env-int'
+import { CREATE_SESSION, REFRESH_SESSION, SESSION_CAPACITY, SESSION_ISSUANCE_PER_MINUTE } from '$lib/server/session-admission'
 
 const SESSION_TTL_SEC = 60 * 60 * 24 * 30
 export const SESSION_COOKIE_MAX_AGE = SESSION_TTL_SEC
@@ -76,13 +77,6 @@ async function withSessionStore(operation) {
 	}
 }
 
-function assertTransaction(results) {
-	for (const [err] of results ?? []) {
-		if (err) throw err
-	}
-	return results
-}
-
 function fullKey(sessionId) {
 	return redis.key(KEY_PREFIX + sessionId)
 }
@@ -117,12 +111,10 @@ function validate(hash) {
 export async function lookupSession(sessionId) {
 	if (!sessionId || typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return null
 	try {
-		const results = assertTransaction(await withSessionStore((client) => client
-			.multi()
-			.hgetall(fullKey(sessionId))
-			.expire(fullKey(sessionId), SESSION_TTL_SEC)
-			.exec()))
-		const hash = results[0][1]
+		const values = await withSessionStore((client) => client.eval(
+			REFRESH_SESSION, 2, fullKey(sessionId), redis.key('identity-session-slots'), SESSION_TTL_SEC, sessionId, SESSION_CAPACITY
+		))
+		const hash = Object.fromEntries(Array.from({ length: values.length / 2 }, (_, i) => [values[i * 2], values[i * 2 + 1]]))
 		if (!hash || Object.keys(hash).length === 0) return null
 		const identity = validate(hash)
 		if (!identity) return null
@@ -154,7 +146,7 @@ export function createEphemeralIdentity(overrides) {
 /**
  * Persist a fresh identity for an HTTP response that can issue its cookie.
  * @param {{ name?: string, color?: string, org?: string } | null} [overrides]
- * @returns {Promise<{ sessionId: string, identity: { id: string, name: string, color: string, org: string, tenant: null } }>}
+ * @returns {Promise<{ sessionId: string | null, identity: { id: string, name: string, color: string, org: string, tenant: null } }>}
  */
 export async function createSession(overrides) {
 	const identity = createEphemeralIdentity(overrides)
@@ -163,18 +155,18 @@ export async function createSession(overrides) {
 	// tenant is never seeded at creation; it exists only after an explicit
 	// opt-in from /demos/tenants (updateSessionField). Fresh identities are
 	// unscoped.
-	const hash = { id, name, color, org }
 	try {
-		assertTransaction(await withSessionStore((client) => client
-			.multi()
-			.hset(fullKey(sessionId), hash)
-			.expire(fullKey(sessionId), SESSION_TTL_SEC)
-			.exec()))
+		const admitted = await withSessionStore((client) => client.eval(
+			CREATE_SESSION, 3, fullKey(sessionId), redis.key('identity-session-slots'), redis.key('identity-session-issuance'),
+			SESSION_CAPACITY, SESSION_ISSUANCE_PER_MINUTE, SESSION_TTL_SEC, sessionId, id, name, color, org
+		))
+		if (admitted !== 1) return { sessionId: null, identity }
 	} catch {
 		// Redis breaker tripped - return the identity anyway so the page
 		// can still render. The session will not persist; the next request
 		// will mint another identity, without access to the previous one's
 		// visitor-scoped state.
+		return { sessionId: null, identity }
 	}
 	return { sessionId, identity }
 }
@@ -196,10 +188,16 @@ export async function updateSessionField(sessionId, field, value) {
 		// the mutation, and refreshes the sliding TTL.
 		const updated = await withSessionStore((client) => client.eval(`
 			if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+			local time = redis.call('TIME')
+			local now = tonumber(time[1]) * 1000 + math.floor(tonumber(time[2]) / 1000)
+			redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', now)
+			if not redis.call('ZSCORE', KEYS[2], ARGV[4]) and redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[5]) then return 0 end
 			redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
 			redis.call('EXPIRE', KEYS[1], ARGV[3])
+			redis.call('ZADD', KEYS[2], now + tonumber(ARGV[3]) * 1000, ARGV[4])
+			redis.call('EXPIRE', KEYS[2], ARGV[3])
 			return 1
-		`, 1, key, field, value, SESSION_TTL_SEC))
+		`, 2, key, redis.key('identity-session-slots'), field, value, SESSION_TTL_SEC, sessionId, SESSION_CAPACITY))
 		return updated === 1
 	} catch {
 		return false

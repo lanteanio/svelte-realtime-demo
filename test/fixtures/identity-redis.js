@@ -1,9 +1,18 @@
 export const hashes = new Map()
-export const availability = { failed: false }
+export const availability = { failed: false, full: false }
 
 export const redis = {
 	key: key => `test:${key}`,
 	redis: {
+		async eval(script, keyCount, ...args) {
+			if (availability.failed) throw new Error('Session store unavailable')
+			const [key] = args
+			if (keyCount === 2) return Object.entries(hashes.get(key) ?? {}).flat()
+			if (availability.full) return 0
+			const [, , , , , , , id, name, color, org] = args
+			hashes.set(key, { id, name, color, org })
+			return 1
+		},
 		multi() {
 			const commands = []
 			return {

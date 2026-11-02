@@ -40,6 +40,6 @@ export async function load({ cookies }) {
 	// server-owned identity, then use its opaque session on later requests.
 	const legacy = tryParseLegacyJsonCookie(raw)
 	const { sessionId, identity } = await createSession(legacy)
-	cookies.set('identity', sessionId, COOKIE_OPTS)
+	if (sessionId) cookies.set('identity', sessionId, COOKIE_OPTS)
 	return { identity, fieldPerformance }
 }

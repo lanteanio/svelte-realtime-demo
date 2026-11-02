@@ -128,6 +128,15 @@ keep separate budgets. Cookie-less WebSocket connections share an anonymous
 source-address budget across reconnects on each worker (IPv6 uses a /64).
 Redis receives a worker-lifetime keyed digest rather than the source address.
 
+Identity persistence admits at most 600 new sessions per Redis minute and
+10000 active persisted sessions across the deployment. Existing sessions keep their
+30-day sliding lifetime; reads and profile updates extend the corresponding
+capacity reservation atomically. A full or unavailable session store leaves a
+new page visitor ephemeral and issues no unusable cookie. Capacity reservations
+expire with their sessions, and session admission never scans profile keys.
+Sessions created by older versions acquire a reservation before their next
+refresh; when capacity is full their original expiry is left unchanged.
+
 | Metric | Result |
 |---|---|
 | Connections | 1000/1000 (100%) |
