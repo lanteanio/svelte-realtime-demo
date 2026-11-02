@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { after, test } from 'node:test'
-import Redis from 'ioredis'
+import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
 import { CREATE_SESSION, REFRESH_SESSION } from '../../src/lib/server/session-admission.js'
 
 if (!process.env.REDIS_TEST_URL) throw new Error('REDIS_TEST_URL must name an isolated test Redis')
-const redis = new Redis(process.env.REDIS_TEST_URL)
+const redis = createRedisClient({ url: process.env.REDIS_TEST_URL }).redis
 const prefix = `session-test:${randomUUID()}:`
 const keys = new Set()
 after(async () => {

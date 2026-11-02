@@ -8,6 +8,7 @@ const aliases = { 'svelte-realtime/server': fixture, '$lib/server/topics': new U
 const hooks = registerHooks({ resolve(specifier, context, next) {
 	return aliases[specifier] ? { url: aliases[specifier], shortCircuit: true } : next(specifier, context)
 } })
+/** @type {any} Registration is stubbed to capture the declaration. */
 let shooter
 try { ({ shooter } = await import('../../src/live/demos/shooter.js')) }
 finally { hooks.deregister() }

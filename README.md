@@ -943,6 +943,9 @@ npm test
 npm run test:e2e:isolated
 npm run test:e2e:cluster
 npm run test:e2e:stress
+
+# Real Redis boundaries in a disposable container (requires Docker)
+npm run test:redis
 npm run test:e2e:diagnostics
 npm run test:e2e:destroyer
 

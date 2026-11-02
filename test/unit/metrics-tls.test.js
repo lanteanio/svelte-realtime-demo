@@ -22,7 +22,7 @@ test('metrics scraping verifies TLS before sending credentials and accepts expli
 		response.end('sample_metric 1\n')
 	})
 	try {
-		await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+		await new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(undefined)))
 		const port = /** @type {import('node:net').AddressInfo} */ (server.address()).port
 		const helper = fileURLToPath(new URL('../../scripts/scrape-metrics.sh', import.meta.url)).replaceAll('\\', '/')
 		const url = `https://127.0.0.1:${port}/metrics`

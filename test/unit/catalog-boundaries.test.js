@@ -18,7 +18,7 @@ try {
 	featureFlags = await import('../../src/live/demos/flags.js')
 } finally { hooks.deregister() }
 
-const ctx = { user: { name: 'Visitor', color: '#112233' }, publish() {} }
+const ctx = /** @type {any} */ ({ user: { name: 'Visitor', color: '#112233' }, publish() {} })
 
 test('orders persist finite totals for catalog products only', async () => {
 	writes.length = 0
