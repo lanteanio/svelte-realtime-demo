@@ -82,18 +82,21 @@ export const myEffectState = live(async () => ({
 }))
 
 export const placeOrder = live(async (ctx, args) => {
-	const productName = typeof args?.productName === 'string' && PRODUCT_PRICES[args.productName] !== undefined
+	const productName = typeof args?.productName === 'string' && Object.hasOwn(PRODUCT_PRICES, args.productName)
 		? args.productName
 		: null
 	if (!productName) {
 		throw new LiveError('VALIDATION', 'unknown product')
 	}
 	const qty = Math.max(1, Math.min(20, Math.floor(Number(args?.qty) || 1)))
+	const price = PRODUCT_PRICES[productName]
+	const total = price * qty
+	if (!Number.isFinite(price) || !Number.isFinite(total)) throw new LiveError('VALIDATION', 'invalid order total')
 	const order = {
 		id: 'ord-' + crypto.randomUUID().slice(0, 8),
 		productName,
 		qty,
-		total: PRODUCT_PRICES[productName] * qty,
+		total,
 		ts: Date.now(),
 		buyerName: ctx.user?.name ?? '(unknown)',
 		buyerColor: ctx.user?.color ?? '#888888'

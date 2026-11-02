@@ -76,8 +76,8 @@ const FLAGS = {
  * gate this behind admin auth.
  */
 export const setFlag = live(async (ctx, name, value) => {
+	if (typeof name !== 'string' || !Object.hasOwn(FLAGS, name)) throw new LiveError('VALIDATION', 'Unknown flag')
 	const entry = FLAGS[name]
-	if (!entry) throw new LiveError('VALIDATION', `Unknown flag: ${String(name).slice(0, 40)}`)
 	const clean = entry.validate(value)
 	entry.flag.set(clean)
 	return { name, value: clean }
