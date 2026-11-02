@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Development checks include explicit Node 22 type declarations, and the dependency lock uses patched Vite, Undici, devalue and source-map-js releases.
+
 - Anonymous HTTP visits share atomic session-issuance and retained-session limits across replicas. Capacity refusal and storage failures issue no bearer cookie.
 
 - Cookie-less WebSocket reconnects share an anonymous abuse budget instead of receiving a fresh RPC allowance with each ephemeral identity.
