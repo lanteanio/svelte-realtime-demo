@@ -28,6 +28,7 @@
 #   stream_subs    -- svelte_realtime_stream_subscriptions gauge
 
 set -u
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/scrape-metrics.sh"
 INTERVAL=${INTERVAL:-2}
 DURATION=${DURATION:-300}
 
@@ -90,8 +91,7 @@ sample() {
 
   metrics=""
   if [ -n "$TOKEN" ]; then
-    metrics=$(curl -sk --max-time 1 -H "X-Scrape-Token: $TOKEN" \
-      "https://svelte-realtime-demo.lantean.io/metrics" 2>/dev/null)
+    metrics=$(scrape_metrics "https://svelte-realtime-demo.lantean.io/metrics" "$TOKEN") || metrics=""
   fi
   pub_rate=""
   if [ -n "$metrics" ]; then

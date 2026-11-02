@@ -736,6 +736,10 @@ with its actual capacity, and retain kernel/device error counts from available
 host logs and counters. Write down which counters were unavailable. Low CPU or a
 healthy container on its own does not mean the host is healthy.
 
+`scripts/observe.sh` verifies TLS before sending the metrics scrape token. For a
+private CA, set `METRICS_CA_BUNDLE` to its PEM bundle; failed HTTP or TLS checks
+emit a diagnostic without printing credentials.
+
 `scripts/observe.sh` remains a supplementary stress-run streamer. Its listener
 metrics scrape can reach a different worker on each request under SO_REUSEPORT:
 do not sum those samples or subtract successive counter values as fleet totals.

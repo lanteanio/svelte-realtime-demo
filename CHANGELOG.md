@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The monitoring scraper verifies the HTTPS peer before sending its token and reports failed scrapes without exposing credentials. Private trust roots can be supplied through `METRICS_CA_BUNDLE`.
+
 - Order products and feature flags accept only their own catalog keys, rejecting inherited object members before any state is written.
 
 - Development checks include explicit Node 22 type declarations, and the dependency lock uses patched Vite, Undici, devalue and source-map-js releases.
