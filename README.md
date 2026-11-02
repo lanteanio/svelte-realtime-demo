@@ -123,6 +123,11 @@ The local E2E harness uses a separate build under `build-runs/` with higher fini
 limits for its synthetic load. Those settings are not used by `npm run build` or
 the production image.
 
+Ordinary RPCs have a 100-call budget per 10 seconds. HTTP-issued identities
+keep separate budgets. Cookie-less WebSocket connections share an anonymous
+source-address budget across reconnects on each worker (IPv6 uses a /64).
+Redis receives a worker-lifetime keyed digest rather than the source address.
+
 | Metric | Result |
 |---|---|
 | Connections | 1000/1000 (100%) |

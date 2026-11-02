@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm'
 import { registerHooks } from 'node:module'
 import { test } from 'node:test'
 import { availability, hashes } from '../fixtures/identity-redis.js'
+import { rpcBudgetKey } from '../../src/lib/server/rpc-budget-key.js'
 
 // Keep the production session implementation and replace only Redis transport.
 const aliases = {
@@ -76,6 +77,7 @@ test('cookie-less and legacy upgrades leave no stored sessions or mutated cookie
 	const victim = randomUUID()
 	const legacy = JSON.stringify({ id: victim, ...profile, tenant: 'globex' })
 	const ids = new Set()
+	const budgets = new Set()
 	for (const raw of [undefined, '', 'invalid', legacy, 'A'.repeat(22)]) {
 		for (let i = 0; i < 20; i++) {
 			const cookies = raw === undefined ? {} : { identity: raw }
@@ -85,11 +87,14 @@ test('cookie-less and legacy upgrades leave no stored sessions or mutated cookie
 			assert.match(identity.id, /^[0-9a-f-]{36}$/)
 			assert.notEqual(identity.id, victim)
 			assert.equal(identity.tenant, null)
-			if (raw === legacy) assert.deepEqual(identity, { id: identity.id, ...profile, tenant: null })
+			assert.equal(identity.anonymous, true)
+			if (raw === legacy) assert.deepEqual({ ...identity }, { id: identity.id, ...profile, tenant: null, anonymous: true })
 			ids.add(identity.id)
+			budgets.add(rpcBudgetKey({ getUserData: () => ({ ...identity, remoteAddress: '192.0.2.1' }) }))
 		}
 	}
 	assert.equal(ids.size, 100)
+	assert.equal(budgets.size, 1)
 	assert.deepEqual(hashes, before)
 })
 

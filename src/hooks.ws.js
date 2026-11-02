@@ -266,7 +266,7 @@ export async function upgrade({ headers, cookies, remoteAddress }) {
 	// An upgrade cannot issue a cookie. Keep fresh identities on this socket;
 	// only HTTP creates persistent sessions. Legacy values are profile hints.
 	const legacy = tryParseLegacyJsonCookie(raw)
-	return createEphemeralIdentity(legacy)
+	return { ...createEphemeralIdentity(legacy), anonymous: true }
 }
 
 /**

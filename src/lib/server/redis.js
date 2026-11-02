@@ -37,6 +37,7 @@ import { metrics } from '$lib/server/metrics'
 import { redisConnectionOptions } from '$lib/server/redis-options'
 import { observeRedisCommandRejections } from '$lib/server/redis-command-safety'
 import { realtimeBreaker } from '$lib/server/redis-breakers'
+import { rpcBudgetKey } from '$lib/server/rpc-budget-key'
 
 /** Shared Redis connection. All utilities below share this client. */
 export const redis = createRedisClient({
@@ -75,17 +76,15 @@ export const bus = createPubSubBus(redis, { breaker })
  * keyBy: the default 'ip' mode would hand every visitor behind one NAT a
  * single shared budget (and locally, every test context shares 127.0.0.1,
  * which surfaced as spurious RATE_LIMITED denials in serial e2e runs).
- * Every connection carries a session identity from the upgrade hook, so
- * key on it; the address stands in only for the pre-identity edge case.
+ * HTTP-issued identities retain independent budgets. Anonymous sockets share
+ * an address-derived budget across reconnects on each worker; IPv6 addresses
+ * share their /64. Only a worker-lifetime HMAC reaches Redis, never an address.
  */
 export const limiter = createRateLimit(redis, {
 	points: 100,
 	interval: 10000,
 	breaker,
-	keyBy: (ws) => {
-		const ud = typeof ws.getUserData === 'function' ? ws.getUserData() : null
-		return String(ud?.id ?? ud?.remoteAddress ?? 'unknown')
-	}
+	keyBy: rpcBudgetKey
 })
 
 /**
