@@ -271,6 +271,9 @@ test.describe('/demos/topk', () => {
 				// taking the baseline. Both samples then span the same seven ticks.
 				await page.waitForTimeout(2_000)
 				const before = await events()
+				// A lifetime value not yet delivered reads as 0, and growth measured
+				// from it would be the whole lifetime total, whatever the speed.
+				expect(before).toBeGreaterThan(0)
 				await page.waitForTimeout(7_000)
 				return (await events()) - before
 			}
