@@ -84,7 +84,7 @@ test.describe('/demos/from-seq', () => {
 
 	test('renders the complete subscribed state with conserved tier counters and valid event rows', async ({ page }) => {
 		await open(page)
-		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Reconnect: three-tier gap fill via delta.fromSeq')
+		await expect(page.getByRole('heading', { level: 1 })).toHaveText('Reconnect: replay buffer or delta.fromSeq gap fill')
 		await expect(page.getByTestId('controls-section')).toBeVisible()
 		await expect(page.getByTestId('events-section')).toBeVisible()
 		await expect(page.getByTestId('toggle-subscribe')).toHaveText('Pause subscription')
@@ -134,16 +134,16 @@ test.describe('/demos/from-seq', () => {
 		await expectIntegrity(page)
 	})
 
-	test('demo-scoped fast path reaches the real fromSeq tier after a two-second pause', async ({ page }) => {
+	test('the fromSeq stream fills a two-second gap through delta.fromSeq', async ({ page }) => {
 		await open(page)
 		const before = await readCount(page, 'tier-fromseq')
 		await page.getByTestId('fromseq-fast-path').click()
 		await expect(page.getByTestId('fromseq-fast-path')).toHaveAttribute('aria-pressed', 'true')
-		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('Fast path ready', { timeout: 5_000 })
+		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream ready', { timeout: 5_000 })
 		await expect(page.getByTestId('toggle-subscribe')).toBeEnabled()
 
 		await page.getByTestId('toggle-subscribe').click()
-		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('Fast path paused')
+		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream paused')
 		await page.waitForTimeout(2_200)
 		await page.getByTestId('toggle-subscribe').click()
 		await expect.poll(() => readCount(page, 'tier-fromseq'), { timeout: 8_000 }).toBeGreaterThan(before)

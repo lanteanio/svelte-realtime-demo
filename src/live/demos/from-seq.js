@@ -1,33 +1,29 @@
 // realtime-allow-public -- this gallery demo is intentionally public.
 /**
- * /demos/from-seq: three-tier reconnect via delta.fromSeq.
+ * /demos/from-seq: two reconnect ladders, a replay buffer and delta.fromSeq.
  *
- * The pitch. A 1Hz cron publishes events on a topic, each with an
- * incrementing `seq`. The stream's loader returns the recent
- * window from a cluster-shared durable store and tags every entry
- * `tier: 'rehydrate'`. Live publishes (the cron) tag `tier: 'live'`.
- * `delta.fromSeq(sinceSeq)` is wired to the same durable store and
- * tags `tier: 'fromSeq'` on every event it returns. The page
- * renders all events with their tier as a badge, so you can see
- * which path delivered each one.
+ * A 1Hz cron publishes numbered events on two topics. Each stream's loader
+ * returns the recent window from a cluster-shared durable store and tags
+ * every entry `tier: 'rehydrate'`; live publishes tag `tier: 'live'`. The
+ * page renders every event with its tier as a badge, so you can see which
+ * path delivered it.
  *
- * Demo flow: the page subscribes; live events arrive tagged
- * `live`. Click Pause; the page unsubscribes from this stream
- * (subCount hits 0, SDK drops the subscription). The server's cron
- * keeps publishing; events are stored in the durable Redis hash. Click
- * Resume; the page re-subscribes, the SDK sends its cached
- * `_lastSeq` on the wire, and once the pause outruns the bounded replay
- * buffer the framework falls through to `delta.fromSeq`, which reads from
- * the durable hash and returns the missed entries tagged `fromSeq`.
+ * Pause drops the subscription while the cron keeps publishing; Resume
+ * subscribes again and the SDK sends the last seq it saw. What answers the
+ * gap depends on the stream, because a stream resumes from a replay buffer
+ * or through `delta.fromSeq`, never both:
  *
- * The headline primitive: `delta.fromSeq(sinceSeq)` - the
- * user-provided bridge for older-than-buffer reconnects, the third
- * tier of the reconnect resolution chain (replay buffer ->
- * fromSeq -> rehydrate via loader).
+ * - `eventStream` declares `replay`. A gap the bounded buffer still covers
+ *   is replayed; a longer one reloads the recent window through the loader.
+ * - `eventStreamFast` declares `delta.fromSeq` and no buffer. Its cron
+ *   publish stamps the application seq as the wire seq, so the cursor the
+ *   client resumes from is the store's own index, and `delta.fromSeq` reads
+ *   the missed entries from the durable hash tagged `fromSeq`. A gap older
+ *   than the store reloads through the loader.
  *
- * Storage is cluster-shared via Redis (INCR counter + HASH keyed by
- * seq). The leader-gated cron is the only writer; every replica reads
- * the same view from its loader and delta.fromSeq paths.
+ * Storage is cluster-shared via Redis (INCR counter + HASH keyed by seq).
+ * The leader-gated cron is the only writer; every replica reads the same
+ * view from its loader and delta.fromSeq paths.
  */
 
 import { live } from 'svelte-realtime/server'
@@ -71,15 +67,11 @@ async function pruneStore(currentSeq, key = DURABLE_KEY) {
 /**
  * True when this store can actually answer for `sinceSeq`.
  *
- * The cursor the framework hands `delta.fromSeq` is the replay extension's
- * protocol seq, while this store is indexed by the application counter the
- * cron increments. The single publisher advances both together, but they are
- * distinct Redis counters with different lifetimes - the protocol counter
- * carries the replay buffer's TTL, the application counter has none - so a
- * publish gap longer than that TTL restarts one and not the other. Rather
- * than return a confidently wrong slice, report a miss and let the framework
- * fall through to the loader, which is the reconnect ladder's honest last
- * tier. The same guard covers an ordinary pause that outruns STORE_RETAIN.
+ * The cursor `delta.fromSeq` receives is the seq the cron stamped on the
+ * wire, which is this store's index. A cursor ahead of the counter (the
+ * store was reset while a client kept its old cursor) or behind the retained
+ * window has no honest answer here, so report a miss and let the framework
+ * reload through the loader.
  */
 function canAnswerFromSeq(sinceSeq, nextSeq) {
 	if (sinceSeq > nextSeq) return false
@@ -135,9 +127,11 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 	await pruneStore(seq)
 	ctx.publish(TOPICS.demoFromSeqEvents, 'created', entry)
 
-	// The accelerant has its own aligned durable sequence domain. That keeps
-	// delta.fromSeq's application sequence equal to the replay protocol cursor
-	// even when this topic is introduced into an already-running deployment.
+	// The fromSeq stream has no replay buffer, so the application counter is
+	// the wire seq. One leader allocates and publishes each tick, in order.
+	// The extensions bus carries the explicit seq to every replica and marks
+	// each local delivery relay:false itself; passing relay:false here would
+	// keep the event on this replica.
 	const fastSeq = await redis.redis.incr(FAST_NEXT_SEQ_KEY)
 	const fastEntry = {
 		id: 'fast-evt-' + fastSeq,
@@ -148,42 +142,24 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 	}
 	await redis.redis.hset(FAST_DURABLE_KEY, String(fastSeq), JSON.stringify(fastEntry))
 	await pruneStore(fastSeq, FAST_DURABLE_KEY)
-	ctx.publish(TOPICS.demoFromSeqFastEvents, 'created', fastEntry)
+	ctx.publish(TOPICS.demoFromSeqFastEvents, 'created', fastEntry, { seq: fastSeq })
 })
 
 /**
- * Stream with `delta.fromSeq`. The loader returns the recent window
- * (last RECENT_WINDOW entries) tagged `rehydrate`. On reconnect
- * with a stale `lastSeq`, the framework checks the replay buffer
- * first and falls through to `delta.fromSeq` once the gap outruns
- * it; the bridge reads the durable hash and returns the missed
- * entries tagged `fromSeq`.
+ * Loaders return the recent window (last RECENT_WINDOW entries) tagged
+ * `rehydrate`. The fromSeq bridge returns `{ event, data, seq }` envelopes,
+ * not bare rows: a `replay: true` array response is fed straight into the
+ * client's `_applyMerge`, which dispatches on `envelope.event`. Bare rows
+ * carry no `event`, so they silently fail to merge.
  *
- * The bridge returns `{ event, data, seq }` envelopes, not bare rows:
- * a `replay: true` array response is fed straight into the client's
- * `_applyMerge`, which dispatches on `envelope.event`. Bare rows carry
- * no `event`, so they silently fail to merge.
- *
- * Live publishes from `tickEvents` arrive as 'created' events
- * tagged `live`; they merge into the existing list by id.
+ * Live publishes from `tickEvents` arrive as 'created' events tagged `live`;
+ * they merge into the existing list by id.
  */
 async function loadRecentEvents() {
 	const nextSeq = await getNextSeq()
 	const startSeq = Math.max(1, nextSeq - RECENT_WINDOW + 1)
 	const entries = await readRange(startSeq, nextSeq)
 	return entries.map((e) => ({ ...e, tier: 'rehydrate' }))
-}
-
-async function loadEventsFromSeq(sinceSeq) {
-	if (typeof sinceSeq !== 'number' || sinceSeq < 0) return null
-	const nextSeq = await getNextSeq()
-	if (!canAnswerFromSeq(sinceSeq, nextSeq)) return null
-	const entries = await readRange(sinceSeq + 1, nextSeq)
-	return entries.map((e) => ({
-		event: 'created',
-		data: { ...e, tier: 'fromSeq' },
-		seq: e.seq
-	}))
 }
 
 async function loadRecentFastEvents() {
@@ -215,23 +191,18 @@ export const eventStream = live.stream(
 		// `replay: true` opts this stream into the platform's bounded
 		// replay buffer (configured in src/lib/server/redis.js). The
 		// buffer covers gaps within its size (200 events at 1Hz =
-		// roughly 3 minutes); for older gaps the framework falls
-		// through to `delta.fromSeq` below. The flag also routes cron
-		// publishes through `replay.publish` so they pick up the
-		// wire-level seq numbers the resume cursor is expressed in.
-		replay: true,
-		delta: {
-			fromSeq: loadEventsFromSeq
-		}
+		// roughly 3 minutes); an older gap reloads through the loader.
+		// The flag also routes cron publishes through `replay.publish`
+		// so they pick up the wire-level seq numbers the resume cursor
+		// is expressed in.
+		replay: true
 	}
 )
 
 /**
- * Demo accelerant with a small, independent durable sequence domain. Its
- * adapter replay seam reports a buffer miss on resume, so realtime proceeds
- * through the real delta.fromSeq handler immediately. The normal eventStream
- * above remains the production three-tier ladder; visitors opt into this
- * stream only long enough to witness the named tier without a 200-second wait.
+ * The delta.fromSeq ladder: no replay buffer, so a resume goes straight to
+ * the durable store. A gap of up to STORE_RETAIN events fills tagged
+ * `fromSeq`; anything older reloads through the loader.
  */
 export const eventStreamFast = live.stream(
 	TOPICS.demoFromSeqFastEvents,
@@ -240,7 +211,6 @@ export const eventStreamFast = live.stream(
 		merge: 'crud',
 		key: 'id',
 		max: STORE_RETAIN,
-		replay: true,
 		delta: {
 			fromSeq: loadFastEventsFromSeq
 		}

@@ -1,20 +1,18 @@
 <!--
-	/demos/from-seq: three-tier reconnect via delta.fromSeq.
+	/demos/from-seq: two reconnect ladders, a replay buffer and delta.fromSeq.
 
-	A 1Hz cron publishes events on a topic, each with an
-	incrementing seq. The page renders received events with a tier
-	badge: `rehydrate` (loader), `live` (cron tick during your
-	subscription), or `fromSeq` (gap-fill via the
-	`delta.fromSeq(sinceSeq)` bridge after a long pause that
-	overflowed the bounded replay buffer).
+	A 1Hz cron publishes numbered events. The page renders received events
+	with a tier badge: `rehydrate` (loader), `live` (cron tick during your
+	subscription), or `fromSeq` (gap-fill through the `delta.fromSeq(sinceSeq)`
+	bridge).
 
-	Click Pause to drop the subscription. The cron keeps publishing
-	server-side. Click Resume to re-subscribe; for short pauses the
-	platform's replay buffer fills the gap silently (events arrive
-	tagged `live`, their original tier from when they were
-	published). For long pauses past the buffer size, the framework
-	falls through to `delta.fromSeq`, which reads from the durable
-	store and tags each missed entry `fromSeq`.
+	Click Pause to drop the subscription; the cron keeps publishing. Click
+	Resume to subscribe again. The default stream declares a replay buffer:
+	a short gap fills from it (events keep their original `live` tag and get
+	a replay badge), and a gap longer than the buffer reloads through the
+	loader. The fromSeq stream declares no buffer: its gap fills from the
+	durable store through `delta.fromSeq`, tagged `fromSeq`. A stream
+	resumes one way or the other, never both.
 -->
 <script>
 	import { onMount, untrack } from 'svelte'
@@ -40,14 +38,14 @@
 	let pausedAt = $state(/** @type {number | null} */ (null))
 	let fastPath = $state(false)
 	let fastPathReady = $state(false)
-	// Live events seen since the fast path was armed. A local count, not a
+	// Live events seen since the fromSeq stream was selected. A local count, not a
 	// timestamp comparison, so the gate cannot depend on client/server clock
 	// agreement. Not $state: it is only ever read to set fastPathReady.
 	let liveSinceArm = 0
 
 	// Replay-buffer gap-fill detection. The framework delivers buffered
 	// events with their ORIGINAL `tier: 'live'` tag, indistinguishable
-	// on the wire from real-time ticks. To make tier-1 visible in the
+	// on the wire from real-time ticks. To make that fill visible in the
 	// UI we capture (pausedAtSeq, resumedAt) on each pause/resume cycle
 	// and locally tag any incoming event whose seq overshoots
 	// pausedAtSeq AND whose server-side ts predates the resume as
@@ -146,9 +144,9 @@
 	function toggleFastPath() {
 		if (!subscribed) return
 		fastPath = !fastPath
-		// Normal and accelerated streams intentionally use independent
-		// sequence domains; reset the rendered projection when switching so
-		// equal sequence numbers from the two domains cannot look duplicated.
+		// The two streams use independent sequence domains; reset the
+		// rendered projection when switching so equal sequence numbers from
+		// the two domains cannot look duplicated.
 		entries = []
 		replayFillSeqs.clear()
 		pausedAtSeq = 0
@@ -177,16 +175,16 @@
 		(nowMs - resumedAt) < 5000
 	)
 
-	// Live countdown while paused: how many more seconds until the
-	// replay buffer overflows, surfacing the fromSeq tier on resume.
+	// Live countdown while paused: how many more seconds until the gap
+	// outruns the replay buffer and the resume reloads through the loader.
 	const fromSeqHint = $derived.by(() => {
 		if (subscribed) return null
 		const elapsed = pausedFor()
 		const remaining = state.storeRetain - elapsed
 		if (remaining > 0) {
-			return `Pause ${remaining}s more (${remaining + elapsed}s total) to overflow the replay buffer and surface the fromSeq tier on resume.`
+			return `Pause ${remaining}s more (${remaining + elapsed}s total) to outrun the replay buffer; resuming then reloads through the loader.`
 		}
-		return `Buffer overflowed (${elapsed}s paused). Resume to see the fromSeq tier fill the oldest missed events.`
+		return `Buffer outrun (${elapsed}s paused). Resume reloads the recent window through the loader.`
 	})
 
 	function timeOf(ts) {
@@ -212,12 +210,14 @@
 <div class="max-w-4xl mx-auto p-8 space-y-4">
 	<header>
 
-		<h1 class="page-title mt-2">Reconnect: three-tier gap fill via delta.fromSeq</h1>
+		<h1 class="page-title mt-2">Reconnect: replay buffer or delta.fromSeq gap fill</h1>
 		<p class="text-sm opacity-70 mt-1">
 			A 1Hz <code>live.cron</code> publishes numbered events and each row's
 			badge names the path that delivered it. Pause, wait, then resume:
-			short gaps fill from the replay buffer, longer ones through the
-			<code>delta.fromSeq</code> durable bridge.
+			the default stream fills short gaps from its replay buffer, and the
+			fromSeq stream fills them from the durable store through
+			<code>delta.fromSeq</code>. Gaps older than either reload through
+			the loader.
 		</p>
 		{#if me}
 			<p class="text-xs opacity-50 mt-1">
@@ -249,7 +249,7 @@
 					aria-pressed={fastPath}
 					data-testid="fromseq-fast-path"
 				>
-					{fastPath ? 'Fast fromSeq armed' : 'Arm fast fromSeq'}
+					{fastPath ? 'fromSeq stream' : 'Use the fromSeq stream'}
 				</button>
 				<span class="text-xs opacity-60" data-testid="status">
 					status: <strong>{displayStatus}</strong>
@@ -274,11 +274,11 @@
 			{#if fastPath}
 				<p class="text-xs opacity-70" data-testid="fromseq-fast-hint">
 					{#if !fastPathReady && subscribed}
-						Arming on the next live tick so the fast stream has a real resume cursor...
+						Waiting for the first live event so the fromSeq stream has a resume cursor...
 					{:else if !subscribed}
-						Fast path paused. Wait at least 2 seconds, then resume; this demo-scoped stream reports a bounded-buffer miss and calls the real <code>delta.fromSeq</code> bridge.
+						fromSeq stream paused. Wait at least 2 seconds, then resume; the missed events come from the durable store through <code>delta.fromSeq</code>.
 					{:else}
-						Fast path ready. Pause for 2 seconds, then resume to surface <code>fromSeq</code> without the 200-second replay-buffer wait.
+						fromSeq stream ready. Pause for 2 seconds, then resume to see the gap fill tagged <code>fromSeq</code>.
 					{/if}
 				</p>
 			{:else if fromSeqHint}
@@ -286,8 +286,9 @@
 			{:else}
 				<p class="text-xs opacity-60">
 					Replay buffer covers up to {state.storeRetain} events
-					(roughly {state.storeRetain} seconds at 1Hz). Pause longer
-					than that to surface the <code>fromSeq</code> tier.
+					(roughly {state.storeRetain} seconds at 1Hz); a longer pause
+					reloads through the loader. Switch to the fromSeq stream to
+					fill gaps through <code>delta.fromSeq</code>.
 				</p>
 			{/if}
 		</div>
@@ -296,7 +297,7 @@
 	{#if showReplayBanner}
 		<div class="alert alert-info py-2 text-sm" data-testid="replay-banner">
 			Filled <strong>{replayBurstCount}</strong> event{replayBurstCount === 1 ? '' : 's'}
-			from the replay buffer (tier 1). Server-side <code>tier: 'live'</code> is preserved;
+			from the replay buffer. Server-side <code>tier: 'live'</code> is preserved;
 			the <span class="badge badge-secondary badge-xs">replay</span> badge below marks
 			which rows arrived via gap-fill rather than real-time.
 		</div>

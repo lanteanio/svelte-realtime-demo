@@ -116,4 +116,34 @@ test.describe('cluster: /demos/from-seq', () => {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
 	})
+
+	test('the fromSeq stream carries one sequence to both replicas and fills a gap on the other one', async ({ browser }) => {
+		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
+		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
+		const a = await ctxA.newPage()
+		const b = await ctxB.newPage()
+		try {
+			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
+			for (const page of [a, b]) {
+				await page.getByTestId('fromseq-fast-path').click()
+				await expect(page.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream ready', { timeout: 5_000 })
+			}
+			// The cron publishes on one replica; B's rows prove the bus delivered
+			// the application seq, not a local counter, as B's wire seq.
+			const newestA = Math.max(...(await rows(a)).map((entry) => entry.seq))
+			await expect.poll(async () => (await rows(b)).some((entry) => entry.seq === newestA), { timeout: 4_000 }).toBe(true)
+
+			const before = await readCount(b, 'tier-fromseq')
+			await b.getByTestId('toggle-subscribe').click()
+			await expect(b.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream paused')
+			const frozen = Math.max(...(await rows(b)).map((entry) => entry.seq))
+			await expect.poll(async () => Math.max(...(await rows(a)).map((entry) => entry.seq)), { timeout: 6_000 })
+				.toBeGreaterThan(frozen + 1)
+			await b.getByTestId('toggle-subscribe').click()
+			await expect.poll(() => readCount(b, 'tier-fromseq'), { timeout: 8_000 }).toBeGreaterThan(before)
+			assertIntegrity(await rows(b))
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
+	})
 })

@@ -32,7 +32,6 @@ import { metrics } from '$lib/server/metrics'
 import { PROTOCOL_VERSION } from '$lib/protocol-version'
 import { activateTaskInfrastructure, destroyTaskInfrastructure, idempotencyStore } from '$lib/server/tasks'
 import { forgetDraftIdempotency } from '$lib/server/forget-demo'
-import { TOPICS } from '$lib/server/topics'
 import { startLocalHealthServer, stopLocalHealthServer } from '$lib/server/local-health'
 import { lookupSession, createEphemeralIdentity, tryParseLegacyJsonCookie } from '$lib/server/identity-session'
 import { evaluateUpgradeOrigin, upgradeOriginPolicy } from '$lib/server/origin-policy'
@@ -64,26 +63,6 @@ process.on('SIGUSR2', () => {
 
 const _asyncWarningAt = new Map()
 let stopPressureTicker = () => {}
-
-// Teaching accelerant for the from-seq demo. The fast stream still publishes
-// through the real replay extension so a fresh subscription receives a
-// protocol sequence cursor. On resume, this one topic deliberately reports a
-// bounded-buffer miss; realtime treats a falsy `since()` as a miss and
-// continues through its native delta.fromSeq tier. Without it a visitor would
-// have to idle past the 200-event buffer to see that tier at all.
-// The normal from-seq topic keeps the production replay behavior unchanged.
-//
-// The comparison is on the topic SUFFIX because a tenant-scoped connection is
-// served the rewritten `@t/<tenant>/<topic>` form. A visitor who tours
-// /demos/tenants first carries a tenant on the session, and a strict equality
-// check would silently stop matching for exactly those visitors - the page
-// would promise a buffer miss and quietly get the ordinary replay tier.
-const FAST_FROM_SEQ_TOPIC_RE = new RegExp(`(^|/)${TOPICS.demoFromSeqFastEvents.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`)
-const demoReplay = Object.create(replay)
-demoReplay.since = (topic, sinceSeq) => {
-	if (typeof topic === 'string' && FAST_FROM_SEQ_TOPIC_RE.test(topic) && typeof sinceSeq === 'number') return null
-	return replay.since(topic, sinceSeq)
-}
 
 function reportAsyncFailure(label, error) {
 	const now = Date.now()
@@ -311,7 +290,7 @@ export async function init({ platform }) {
 	// on every wrapped seam. `bus.wrap()` (extensions next.15) forwards
 	// `.replay` via a live getter, so any per-tick / per-message
 	// re-wrap also sees it.
-	platform.replay = demoReplay
+	platform.replay = replay
 	// Stash the raw ioredis client so realtime's `live.room({ presence })`
 	// uses its Redis-backed cluster-shared roster path instead of the
 	// per-process _presenceRef Map. Without this, a room's "Online" list
