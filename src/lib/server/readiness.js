@@ -8,12 +8,8 @@ import { env } from '$env/dynamic/private'
 import { databasePool } from '$lib/server/db'
 import { breaker, redis } from '$lib/server/redis'
 import { boundedIntEnv } from '$lib/server/env-int'
+import { REQUIRED_MIGRATIONS } from '$lib/server/required-migrations'
 
-const REQUIRED_MIGRATIONS = [
-	'001_application_schema.sql',
-	'002_demo_jobs.sql',
-	'003_demo_jobs_erasure_columns.sql'
-]
 const DEFAULT_TIMEOUT_MS = 2500
 const READINESS_TIMEOUT_MS = boundedIntEnv(process.env.READINESS_TIMEOUT_MS, { min: 250, max: 10_000, fallback: DEFAULT_TIMEOUT_MS })
 
@@ -45,6 +41,7 @@ async function checkPostgres() {
 				   AND to_regclass('public.note') IS NOT NULL
 				   AND to_regclass('public.demos_jobs_tasks') IS NOT NULL
 				   AND to_regclass('public.demos_jobs_idempotency') IS NOT NULL
+				   AND to_regclass('public.demos_jobs_tasks_receipts') IS NOT NULL
 			`,
 			values: [REQUIRED_MIGRATIONS],
 			query_timeout: READINESS_TIMEOUT_MS

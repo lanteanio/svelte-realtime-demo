@@ -4,7 +4,7 @@
 # add a new demo table here only, and the three scripts stay in sync.
 
 # Demo tables a database reset empties. Add new demo tables to this list.
-RESET_DEMO_TABLES="demos_jobs_tasks demos_jobs_idempotency note board"
+RESET_DEMO_TABLES="demos_jobs_tasks demos_jobs_tasks_receipts demos_jobs_idempotency note board"
 
 # FLUSHALL, honouring REDIS_PASSWORD when the container sets one.
 flush_redis() {

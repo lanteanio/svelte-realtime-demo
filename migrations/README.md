@@ -30,6 +30,14 @@ third-party-owned integration tables rather than application schema.
 used by durable tasks. Existing rows remain valid without tracing; task writes
 run with automatic DDL disabled.
 
+`006_demo_jobs_identity_receipts.sql` brings both tables to the extension's
+current schema: task status and attempt checks, the tenant identity stamp and
+its per-tenant dispatch index, the `demos_jobs_tasks_receipts` enqueue receipt
+table and idempotency owner tokens. Workers of the earlier release can keep
+serving while it is applied and after a rollback: the demo's task runner sets
+no erasure identity, so every task row stays unstamped. The integration suite
+checks the migrated tables with the extension's schema validator.
+
 Deletion undo uses `004_note_deletion_undo.sql`. The note deletion and its visitor-owned snapshot commit in one statement; restoring consumes the receipt and inserts the note in one statement. An existing note wins over the snapshot. Expired receipts are removed once a minute.
 
 Run `npm run test:integration` with Docker available to start a disposable PostgreSQL container, apply the migrations and check deletion/restore behavior, concurrent board deletion, and durable task execution. The command binds a random loopback port and removes its container on success or failure. CI runs it for every push and pull request.

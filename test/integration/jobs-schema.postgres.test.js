@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import pg from 'pg'
-import { createPgClient } from 'svelte-adapter-uws-extensions/postgres'
+import { createPgClient, validateSchema } from 'svelte-adapter-uws-extensions/postgres'
 import { createTaskRunner } from 'svelte-adapter-uws-extensions/postgres/tasks'
 import { loadMigrations } from '../../scripts/migration-files.mjs'
 
@@ -40,4 +40,10 @@ test('the migrated jobs schema runs a traced task with automatic DDL disabled', 
 	assert.deepEqual(row.result, { value: 37 })
 	assert.equal(row.traceparent, traceContext.traceparent)
 	assert.equal(row.tracestate, traceContext.tracestate)
+})
+
+test('the migrated job tables match the extension schema', async () => {
+	const client = createPgClient({ pool })
+	await validateSchema(client, { store: 'tasks', table: 'demos_jobs_tasks' })
+	await validateSchema(client, { store: 'idempotency', table: 'demos_jobs_idempotency' })
 })
