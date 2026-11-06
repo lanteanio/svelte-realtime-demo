@@ -13,6 +13,7 @@ const aliases = {
 	'$lib/server/redis-breakers': new URL('../../src/lib/server/redis-breakers.js', import.meta.url).href,
 	'$lib/server/env-int': new URL('../../src/lib/server/env-int.js', import.meta.url).href,
 	'$lib/server/session-admission': new URL('../../src/lib/server/session-admission.js', import.meta.url).href,
+	'$lib/server/tenants': new URL('../../src/lib/server/tenants.js', import.meta.url).href,
 	'$lib/names': new URL('../../src/lib/names.js', import.meta.url).href
 }
 const hooks = registerHooks({ resolve(specifier, context, next) {

@@ -29,6 +29,7 @@
 import { live } from 'svelte-realtime/server'
 import { TOPICS } from '$lib/server/topics'
 import { redis } from '$lib/server/redis'
+import { publishToEveryScope } from '$lib/server/tenants'
 
 const STORE_RETAIN = 200
 const RECENT_WINDOW = 20
@@ -124,7 +125,9 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 	}
 	await redis.redis.hset(DURABLE_KEY, String(seq), JSON.stringify(entry))
 	await pruneStore(seq)
-	ctx.publish(TOPICS.demoFromSeqEvents, 'created', entry)
+	// One public ticker for every visitor: a session with a tenant subscribes
+	// inside its tenant's namespace, so each tick goes to every scope.
+	publishToEveryScope(ctx, TOPICS.demoFromSeqEvents, 'created', entry)
 
 	// The fromSeq stream has no replay buffer, so the application counter is
 	// the wire seq. One leader allocates and publishes each tick, in order.
@@ -141,7 +144,7 @@ export const tickEvents = live.cron('* * * * * *', TOPICS.demoFromSeqEvents, asy
 	}
 	await redis.redis.hset(FAST_DURABLE_KEY, String(fastSeq), JSON.stringify(fastEntry))
 	await pruneStore(fastSeq, FAST_DURABLE_KEY)
-	ctx.publish(TOPICS.demoFromSeqFastEvents, 'created', fastEntry, { seq: fastSeq })
+	publishToEveryScope(ctx, TOPICS.demoFromSeqFastEvents, 'created', fastEntry, { seq: fastSeq })
 })
 
 /**

@@ -161,6 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Visitors whose session carries a tenant get `/demos/from-seq`'s live ticks, replay fill and fromSeq gap fill. The cron publishes each tick unscoped and into every tenant's scope, from one shared list of the demo's tenants.
+
 - Managed board roles share the server-resolved tenant topic while releasing observers and participants independently. Read-only roster access holds an explicit grant, and participation retains background pressure admission.
 
 - Alarm schedules, fired records and retention use separate Redis keys for each tenant and the public scope.

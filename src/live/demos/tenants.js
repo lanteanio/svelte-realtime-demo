@@ -33,9 +33,9 @@
 import { live, LiveError } from 'svelte-realtime/server'
 import { redis } from '$lib/server/redis'
 import { TOPICS } from '$lib/server/topics'
+import { DEMO_TENANTS } from '$lib/server/tenants'
 
 const MAX_NOTES = 20
-const TENANTS = ['acme', 'globex']
 
 /**
  * App-owned storage is NOT auto-scoped - the framework prefixes wire
@@ -115,7 +115,7 @@ export const whoami = live(async (ctx) => ({ tenantId: ctx.tenantId ?? null }))
  */
 export async function purge(ctx) {
 	const counts = {}
-	for (const tenantId of [...TENANTS, null]) {
+	for (const tenantId of [...DEMO_TENANTS, null]) {
 		const key = padKey(tenantId)
 		const raws = await redis.redis.lrange(key, 0, -1)
 		await redis.redis.del(key)

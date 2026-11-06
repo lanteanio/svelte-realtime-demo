@@ -30,6 +30,7 @@ import { redis } from '$lib/server/redis'
 import { sessionBreaker } from '$lib/server/redis-breakers'
 import { generateIdentity } from '$lib/names'
 import { boundedIntEnv } from '$lib/server/env-int'
+import { isDemoTenant } from '$lib/server/tenants'
 import { CREATE_SESSION, REFRESH_SESSION, SESSION_CAPACITY, SESSION_ISSUANCE_PER_MINUTE } from '$lib/server/session-admission'
 
 const SESSION_TTL_SEC = 60 * 60 * 24 * 30
@@ -94,9 +95,9 @@ function validate(hash) {
 	const org = VALID_ORGS.has(hash.org) ? hash.org : null
 	// Optional strict-isolation tenant (set only from /demos/tenants). The
 	// realtime tenant resolver reads this; null keeps the connection on the
-	// unscoped single-tenant fast path. Same value set as org - the demo
-	// reuses the two fictional companies as tenants.
-	const tenant = VALID_ORGS.has(hash.tenant) ? hash.tenant : null
+	// unscoped single-tenant fast path. The demo reuses the two fictional
+	// companies as tenants.
+	const tenant = isDemoTenant(hash.tenant) ? hash.tenant : null
 	return { id: hash.id, name: hash.name, color: hash.color, org, tenant }
 }
 

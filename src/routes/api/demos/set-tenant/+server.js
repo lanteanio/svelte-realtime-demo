@@ -19,8 +19,7 @@
 
 import { json, error } from '@sveltejs/kit'
 import { updateSessionField } from '$lib/server/identity-session'
-
-const VALID_TENANTS = new Set(['acme', 'globex'])
+import { isDemoTenant } from '$lib/server/tenants'
 
 export async function POST({ request, url, cookies }) {
 	// CSRF defense-in-depth. SvelteKit's built-in CSRF check fires only on
@@ -42,7 +41,7 @@ export async function POST({ request, url, cookies }) {
 		error(400, 'Invalid tenant')
 	}
 	const tenant = body.tenant
-	if (tenant !== null && !VALID_TENANTS.has(tenant)) error(400, 'Invalid tenant')
+	if (tenant !== null && !isDemoTenant(tenant)) error(400, 'Invalid tenant')
 
 	const sessionId = cookies.get('identity')
 	const ok = await updateSessionField(sessionId, 'tenant', tenant ?? '')

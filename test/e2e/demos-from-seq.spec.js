@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
 import { openTouchPage } from './helpers.js'
+import { switchTenant, waitForWsConfirmed } from './tenants-helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -322,6 +323,46 @@ test.describe('/demos/from-seq', () => {
 		await armFastStream(page)
 		const cursor = await pauseAfterEmptyResume(page, wire)
 		await expectResumeFrom(page, wire, cursor)
+	})
+
+	// A session with a tenant subscribes inside `@t/<tenant>/...`. The ticker
+	// is public, so both streams must tick and resume there too, and the frames
+	// must arrive on the tenant's own wire topics: without that, a session that
+	// never took the tenant would pass this test on the unscoped topics.
+	test('a visitor whose session carries a tenant gets live ticks and both gap fills', async ({ page }) => {
+		test.setTimeout(90_000)
+		const created = []
+		page.on('websocket', (ws) => ws.on('framereceived', ({ payload }) => {
+			const frame = parseFrame(payload)
+			const envelopes = frame?.type === 'batch' && Array.isArray(frame.events) ? frame.events : [frame]
+			for (const envelope of envelopes) if (envelope?.event === 'created' && typeof envelope.topic === 'string') created.push(envelope.topic)
+		}))
+		await page.goto('/demos/tenants')
+		await waitForWsConfirmed(page)
+		await switchTenant(page, 'acme')
+
+		await open(page)
+		await expect.poll(() => readCount(page, 'tier-live'), { timeout: 8_000 }).toBeGreaterThan(0)
+		expect(created).toContain('@t/acme/demos:fromseq:events')
+		expect(created).not.toContain('demos:fromseq:events')
+		await setPaused(page, true)
+		await page.waitForTimeout(3_200)
+		await setPaused(page, false)
+		await expect(page.getByTestId('replay-banner')).toBeVisible({ timeout: 4_000 })
+		await expect.poll(() => readCount(page, 'tier-replay'), { timeout: 4_000 }).toBeGreaterThanOrEqual(2)
+		await expectIntegrity(page)
+
+		await armFastStream(page)
+		expect(created).toContain('@t/acme/' + FAST_TOPIC)
+		expect(created).not.toContain(FAST_TOPIC)
+		const before = await readCount(page, 'tier-fromseq')
+		await setPaused(page, true)
+		const frozen = await lastSeq(page)
+		await page.waitForTimeout(2_200)
+		await setPaused(page, false)
+		await expect.poll(() => readCount(page, 'tier-fromseq'), { timeout: 8_000 }).toBeGreaterThan(before)
+		await expectGapFilledFrom(page, frozen)
+		await expectIntegrity(page)
 	})
 
 	// A buffer counter above the application's seq is the silent case: from
