@@ -13,12 +13,11 @@
  *   releases its WS handle but retains the in-memory data model
  *   (currentValue, _lastSeq, _lastVersion, _cursor) for this long. A resub
  *   within the window rides the retained seq into the subscribe envelope and
- *   the server gap-fills from its replay buffer (or via delta.fromSeq for
- *   older gaps) instead of cold-rehydrating. Default is 60s. /demos/from-seq's
- *   replay buffer is 200 events at 1Hz (~200s of coverage); we extend grace
- *   to 10 min so a user can pause past the buffer boundary and still observe
- *   the `fromSeq` tier surface on resume, instead of falling off the cliff
- *   into a cold rehydrate.
+ *   the server gap-fills (from a stream's replay buffer, or through its
+ *   delta.fromSeq) instead of cold-rehydrating. Default is 60s. /demos/from-seq
+ *   retains 200 events at 1Hz (~200s) in both its replay buffer and its
+ *   durable store; we extend grace to 10 min so a pause anywhere inside that
+ *   span still resumes through the stream's gap fill rather than a reload.
  *
  * - protocolVersion: pairs with realtime({ protocolVersion }) in hooks.ws.js
  *   (one shared constant). A tab whose baked version is older than a

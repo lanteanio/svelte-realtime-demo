@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
@@ -32,6 +33,36 @@ async function readCount(page, id) {
 	// stopped rendering tier counters entirely.
 	const match = ((await page.getByTestId(id).textContent()) ?? '').match(/(\d+)/)
 	return match ? Number(match[1]) : Number.NaN
+}
+
+// Every row the bridge delivered is one the paused page had not seen, and
+// together they cover the gap from the pause point without a hole. A cursor
+// behind the pause point would re-tag rows the page already had and fail here.
+async function expectGapFilledFrom(page, frozen) {
+	const filled = (await page.getByTestId('event-row').evaluateAll((rows) => rows.map((row) => ({
+		seq: Number(row.textContent?.match(/#(\d+)/)?.[1] ?? NaN),
+		tier: row.querySelector('[data-testid^="event-tier-"]')?.textContent?.trim() ?? ''
+	})))).filter((row) => row.tier === 'fromSeq').map((row) => row.seq).sort((a, b) => a - b)
+	expect(filled.length).toBeGreaterThan(0)
+	expect(filled).toEqual(filled.map((_, i) => frozen + 1 + i))
+}
+
+// Live frames of the fromSeq topic as this page's socket received them: the
+// wire seq the client resumes from, next to the seq the cron put in the event.
+function captureFastFrames(page) {
+	const frames = []
+	page.on('websocket', (ws) => ws.on('framereceived', ({ payload }) => {
+		if (typeof payload !== 'string') return
+		let frame
+		try { frame = JSON.parse(payload) } catch { return }
+		const events = frame?.type === 'batch' && Array.isArray(frame.events) ? frame.events : [frame]
+		for (const event of events) {
+			if (typeof event?.topic === 'string' && event.topic.endsWith('demos:fromseq:events:fast') && event.event === 'created') {
+				frames.push({ seq: event.seq, dataSeq: event.data?.seq })
+			}
+		}
+	}))
+	return frames
 }
 
 function assertIntegrity(entries) {
@@ -97,7 +128,6 @@ test.describe('cluster: /demos/from-seq', () => {
 		const b = await ctxB.newPage()
 		try {
 			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
-			const fromSeqBefore = await readCount(a, 'tier-fromseq')
 			await a.getByTestId('toggle-subscribe').click()
 			await expect(a.getByTestId('status')).toContainText('paused')
 			const frozen = await rows(a)
@@ -110,7 +140,6 @@ test.describe('cluster: /demos/from-seq', () => {
 			await expect.poll(() => readCount(a, 'tier-replay'), { timeout: 4_000 }).toBeGreaterThanOrEqual(2)
 			await expect.poll(async () => Math.max(...(await rows(a)).map((entry) => entry.seq)), { timeout: 4_000 })
 				.toBeGreaterThanOrEqual(target)
-			expect(await readCount(a, 'tier-fromseq')).toBe(fromSeqBefore)
 			assertIntegrity(await rows(a))
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
@@ -118,20 +147,41 @@ test.describe('cluster: /demos/from-seq', () => {
 	})
 
 	test('the fromSeq stream carries one sequence to both replicas and fills a gap on the other one', async ({ browser }) => {
+		test.skip(process.env.LOCAL_E2E !== '1', 'seeds the harness Redis, which only the local e2e harness provides')
+		const raw = process.env.REDIS_URL
+		if (!raw) throw new Error('REDIS_URL is not set; the local e2e harness provides it')
+		if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(raw).hostname)) throw new Error(`refusing a non-loopback Redis: ${new URL(raw).host}`)
+		// Move the application counter far past anything an adapter's own
+		// per-topic counter reaches in one run, so a wire seq equal to the
+		// event's seq can only be the one the cron stamped explicitly.
+		const SEED = 1_000_000
+		const redis = createRedisClient({ url: raw, autoShutdown: false })
+		try {
+			await redis.redis.incrby('demos:fromseq:fast:next', SEED)
+		} finally {
+			await redis.quit().catch(() => {})
+		}
+
 		const ctxA = await browser.newContext({ baseURL: INSTANCE_A })
 		const ctxB = await browser.newContext({ baseURL: INSTANCE_B })
 		const a = await ctxA.newPage()
 		const b = await ctxB.newPage()
+		const framesA = captureFastFrames(a)
+		const framesB = captureFastFrames(b)
 		try {
 			await Promise.all([openAt(a, INSTANCE_A), openAt(b, INSTANCE_B)])
 			for (const page of [a, b]) {
 				await page.getByTestId('fromseq-fast-path').click()
 				await expect(page.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream ready', { timeout: 5_000 })
 			}
-			// The cron publishes on one replica; B's rows prove the bus delivered
-			// the application seq, not a local counter, as B's wire seq.
-			const newestA = Math.max(...(await rows(a)).map((entry) => entry.seq))
-			await expect.poll(async () => (await rows(b)).some((entry) => entry.seq === newestA), { timeout: 4_000 }).toBe(true)
+			// Live frames past the seed on both replicas, each stamped with the
+			// event's own seq, and the same events seen on both.
+			await expect.poll(() => framesB.filter((frame) => frame.dataSeq > SEED).length, { timeout: 6_000 }).toBeGreaterThanOrEqual(2)
+			const seeded = [...framesA, ...framesB].filter((frame) => frame.dataSeq > SEED)
+			expect(seeded.length).toBeGreaterThan(0)
+			for (const frame of seeded) expect(frame.seq).toBe(frame.dataSeq)
+			const seenOnA = new Set(framesA.map((frame) => frame.dataSeq))
+			expect(framesB.some((frame) => frame.dataSeq > SEED && seenOnA.has(frame.dataSeq))).toBe(true)
 
 			const before = await readCount(b, 'tier-fromseq')
 			await b.getByTestId('toggle-subscribe').click()
@@ -141,6 +191,7 @@ test.describe('cluster: /demos/from-seq', () => {
 				.toBeGreaterThan(frozen + 1)
 			await b.getByTestId('toggle-subscribe').click()
 			await expect.poll(() => readCount(b, 'tier-fromseq'), { timeout: 8_000 }).toBeGreaterThan(before)
+			await expectGapFilledFrom(b, frozen)
 			assertIntegrity(await rows(b))
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])

@@ -82,10 +82,9 @@ async function readRange(startSeq, endSeq, key = DURABLE_KEY) {
 	if (endSeq < startSeq) return []
 	// `pruneStore` only ever retains the last STORE_RETAIN seqs, so a request
 	// reaching further back can only yield nulls. Clamp instead of expanding
-	// the field list: a resume cursor can lag the store arbitrarily far (a very
-	// long pause, or a replay-buffer TTL expiry that restarts the wire seq
-	// while the durable counter keeps climbing), and an unclamped range would
-	// build one HMGET with tens of thousands of guaranteed-miss fields.
+	// the field list: a resume cursor can lag the store arbitrarily far after
+	// a very long pause, and an unclamped range would build one HMGET with
+	// tens of thousands of guaranteed-miss fields.
 	const from = Math.max(startSeq, endSeq - STORE_RETAIN + 1)
 	const fields = []
 	for (let s = from; s <= endSeq; s++) fields.push(String(s))
@@ -107,8 +106,8 @@ export const myFromSeqState = live(async () => ({
 /**
  * The headline. Cron tick at 1Hz publishes one event per tick. The
  * event is stored in the durable Redis hash AND broadcast as a live
- * publish. Stored events feed both the loader's recent-window
- * rehydrate and `delta.fromSeq`'s gap-fill on reconnect.
+ * publish. Stored events feed the loaders' recent-window rehydrate, and
+ * the fromSeq stream's store also answers its `delta.fromSeq` gap-fill.
  *
  * INCR is atomic across replicas, so even though the cron is leader-
  * singleton (configureCron({ leader })) any handover to a new leader

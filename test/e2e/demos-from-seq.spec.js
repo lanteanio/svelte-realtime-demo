@@ -15,6 +15,18 @@ async function sequences(page) {
 	}))
 }
 
+// Every row the bridge delivered is one the paused page had not seen, and
+// together they cover the gap from the pause point without a hole. A cursor
+// behind the pause point would re-tag rows the page already had and fail here.
+async function expectGapFilledFrom(page, frozen) {
+	const filled = (await page.getByTestId('event-row').evaluateAll((rows) => rows.map((row) => ({
+		seq: Number(row.textContent?.match(/#(\d+)/)?.[1] ?? NaN),
+		tier: row.querySelector('[data-testid^="event-tier-"]')?.textContent?.trim() ?? ''
+	})))).filter((row) => row.tier === 'fromSeq').map((row) => row.seq).sort((a, b) => a - b)
+	expect(filled.length).toBeGreaterThan(0)
+	expect(filled).toEqual(filled.map((_, i) => frozen + 1 + i))
+}
+
 async function expectIntegrity(page) {
 	const entries = await page.getByTestId('event-row').evaluateAll((rows) => rows.map((row) => ({
 		seq: Number(row.textContent?.match(/#(\d+)/)?.[1] ?? NaN),
@@ -110,7 +122,6 @@ test.describe('/demos/from-seq', () => {
 		await open(page)
 		await expect.poll(() => readCount(page, 'tier-live'), { timeout: 8_000 }).toBeGreaterThan(0)
 		const beforeRehydrate = await readCount(page, 'tier-rehydrate')
-		const beforeFromSeq = await readCount(page, 'tier-fromseq')
 
 		await page.getByTestId('toggle-subscribe').click()
 		await expect(page.getByTestId('toggle-subscribe')).toHaveText('Resume subscription')
@@ -129,7 +140,6 @@ test.describe('/demos/from-seq', () => {
 		const replayCount = await readCount(page, 'tier-replay')
 		await expect(page.locator('[data-testid^="event-replay-"]')).toHaveCount(replayCount)
 		expect(await readCount(page, 'tier-rehydrate')).toBe(beforeRehydrate)
-		expect(await readCount(page, 'tier-fromseq')).toBe(beforeFromSeq)
 		await expect.poll(() => page.getByTestId('event-row').count()).toBeGreaterThan(beforeSeqs.length)
 		await expectIntegrity(page)
 	})
@@ -144,9 +154,11 @@ test.describe('/demos/from-seq', () => {
 
 		await page.getByTestId('toggle-subscribe').click()
 		await expect(page.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream paused')
+		const frozen = Math.max(...(await sequences(page)))
 		await page.waitForTimeout(2_200)
 		await page.getByTestId('toggle-subscribe').click()
 		await expect.poll(() => readCount(page, 'tier-fromseq'), { timeout: 8_000 }).toBeGreaterThan(before)
+		await expectGapFilledFrom(page, frozen)
 		await expect(page.locator('[data-testid^="event-tier-"]').filter({ hasText: 'fromSeq' }).first()).toBeVisible()
 		await expectIntegrity(page)
 	})

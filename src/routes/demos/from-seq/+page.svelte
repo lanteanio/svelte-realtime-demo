@@ -54,6 +54,13 @@
 	let resumedAt = $state(0)
 	let replayFillSeqs = new SvelteSet()
 	let replayBurstCount = $state(0)
+	// Server clock minus browser clock, estimated from live events as they
+	// arrive: the largest `e.ts - Date.now()` seen is the offset less the
+	// smallest delivery latency. Replayed events are old, so they never raise
+	// it. Replay-fill detection reads the resume time on the server's clock
+	// through this, so a browser clock that runs ahead or behind cannot turn
+	// live ticks into fill or fill into live ticks.
+	let serverClockOffset = null
 
 	// Merge incoming SDK values into the local display list by id rather
 	// than replacing wholesale. Without this, a pause+resume cycle that
@@ -93,11 +100,18 @@
 					// disabled forever with no way to diagnose it.
 					if (armed && e.tier === 'live') liveSinceArm++
 					if (armed && liveSinceArm > 0) fastPathReady = true
+					if (e.tier === 'live') {
+						const offset = e.ts - Date.now()
+						if (serverClockOffset === null || offset > serverClockOffset) serverClockOffset = offset
+					}
+					// Only the default stream has a replay buffer to fill from.
 					if (
+						!armed &&
 						resumedAt > 0 &&
+						serverClockOffset !== null &&
 						e.tier === 'live' &&
 						e.seq > pausedAtSeq &&
-						e.ts < resumedAt
+						e.ts < resumedAt + serverClockOffset
 					) {
 						if (!replayFillSeqs.has(e.seq)) {
 							replayFillSeqs.add(e.seq)
@@ -150,6 +164,7 @@
 		entries = []
 		replayFillSeqs.clear()
 		pausedAtSeq = 0
+		liveSinceArm = 0
 		fastPathReady = false
 		resumedAt = 0
 		replayBurstCount = 0
@@ -342,22 +357,25 @@
 
 	<aside class="text-xs opacity-50 leading-relaxed space-y-2">
 		<p>
-			Server: <code>live.stream(topic, loader, &#123; replay: true, delta: &#123; fromSeq &#125; &#125;)</code>.
-			The loader returns the recent window tagged <code>rehydrate</code>;
-			the cron's live publishes pick up the original <code>live</code>
-			tag and ride the platform's replay buffer for short-gap
-			coverage; <code>delta.fromSeq(sinceSeq)</code> reads from the
-			durable store and tags missed entries <code>fromSeq</code>.
+			Default stream:
+			<code>live.stream(topic, loader, &#123; replay: true &#125;)</code>.
+			On resume, a gap the bounded replay buffer still covers is replayed
+			(events keep the <code>live</code> tag they were published with);
+			a longer gap reloads the recent window through the loader, tagged
+			<code>rehydrate</code>.
 		</p>
 		<p>
-			Resolution chain on reconnect:
-			<strong>1.</strong> bounded replay buffer (events tagged with
-			whatever they were published as);
-			<strong>2.</strong> <code>delta.fromSeq</code> (events tagged
-			<code>fromSeq</code>);
-			<strong>3.</strong> full rehydrate via the loader (events
-			tagged <code>rehydrate</code>). The page renders each tier
-			distinctly so you can see which path delivered each event.
+			fromSeq stream:
+			<code>live.stream(topic, loader, &#123; delta: &#123; fromSeq &#125; &#125;)</code>,
+			published with <code>&#123; seq &#125;</code> from the durable store's
+			own counter. On resume, <code>delta.fromSeq(sinceSeq)</code> reads
+			the missed events from that store and tags them <code>fromSeq</code>;
+			a gap older than the store reloads through the loader.
+		</p>
+		<p>
+			A stream resumes from its buffer or through <code>delta.fromSeq</code>,
+			never both. The page renders each tag distinctly so you can see which
+			path delivered each event.
 		</p>
 	</aside>
 </div>

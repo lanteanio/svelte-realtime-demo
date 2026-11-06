@@ -68,7 +68,7 @@ Every page lives at `/demos/<slug>`, backed by one module in
 | `flash-sales` | Atomic inventory under contention (live.lock) |
 | `pagination` | Cursor-based load-more with live merges |
 | `effect` | Server-side reactive side effects |
-| `from-seq` | Three-tier reconnect gap fill |
+| `from-seq` | Replay buffer or delta.fromSeq gap fill |
 | `collab-editor` | CRDT-anchored selections vs raw offsets |
 | `multiplayer` | Full-surface room: cursors, locks, typing, reactions |
 | `kanban` | Shared CRDT document, zero RPC handlers |
