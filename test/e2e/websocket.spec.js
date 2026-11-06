@@ -513,4 +513,19 @@ test.describe('WebSocket Connection', () => {
 		expect(failure.rehydrateReloads).toBe(0);
 	});
 
+	test('a page hidden and shown again reconnects in the same document', async ({ page }) => {
+		// The back/forward cache path: the adapter drops the socket on pagehide and
+		// resumes it on pageshow. Playwright's Chromium never caches a page, so the
+		// two lifecycle events are dispatched directly.
+		await page.goto('/');
+		await waitForWS(page);
+		await page.evaluate(() => { window.__sameDocument = true; });
+		await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })));
+		await expect(page.locator('.text-success')).toHaveCount(0);
+		await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));
+		// Not waitForWS: it may reload, and a reload would hide a page that stayed down.
+		await expect(page.locator('.text-success').first()).toBeVisible({ timeout: 10_000 });
+		expect(await page.evaluate(() => window.__sameDocument)).toBe(true);
+	});
+
 });
