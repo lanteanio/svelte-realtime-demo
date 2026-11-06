@@ -1,9 +1,12 @@
 import { test, expect } from '@playwright/test'
 import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
 import { assertSafeE2ETarget } from '../../scripts/test-target.mjs'
+import { switchTenant, waitForWsConfirmed } from './tenants-helpers.js'
 
 const INSTANCE_A = assertSafeE2ETarget(process.env.BASE_URL || 'http://localhost:3091').href.replace(/\/$/, '')
 const INSTANCE_B = assertSafeE2ETarget(process.env.INSTANCE_B || 'http://localhost:3092').href.replace(/\/$/, '')
+const INSTANCES = [INSTANCE_A, INSTANCE_B, process.env.INSTANCE_C, process.env.INSTANCE_D]
+	.filter(Boolean).map((origin) => assertSafeE2ETarget(origin).href.replace(/\/$/, ''))
 
 test.skip(!process.env.INSTANCE_B, 'from-seq cluster coverage requires two explicit replica targets')
 test.describe.configure({ mode: 'serial' })
@@ -63,6 +66,27 @@ function captureFastFrames(page) {
 		}
 	}))
 	return frames
+}
+
+// Which replica serves each origin and which one holds the cron lease, read
+// from /demos/cluster-cron: each page names the replica serving it, and its
+// newest tick row names the replica that ran the cron.
+async function readReplica(browser, origin) {
+	const context = await browser.newContext({ baseURL: origin })
+	try {
+		const page = await context.newPage()
+		await page.goto(`${origin}/demos/cluster-cron`)
+		await expect.poll(async () => (await page.getByTestId('self-instance-id').textContent())?.trim(), { timeout: 12_000 })
+			.toMatch(/^[0-9a-f]{16}$/)
+		await expect(page.getByTestId('cluster-cron-tick-row').first()).toBeVisible({ timeout: 12_000 })
+		return {
+			origin,
+			self: (await page.getByTestId('self-instance-id').textContent())?.trim(),
+			leader: await page.getByTestId('cluster-cron-tick-row').first().getAttribute('data-instance-id')
+		}
+	} finally {
+		await context.close()
+	}
 }
 
 function assertIntegrity(entries) {
@@ -196,5 +220,55 @@ test.describe('cluster: /demos/from-seq', () => {
 		} finally {
 			await Promise.allSettled([ctxA.close(), ctxB.close()])
 		}
+	})
+
+	// The cron publishes the tenant's copy of each tick on the replica holding
+	// the lease, where no visitor of that tenant may be connected. The copy must
+	// still go through the replay buffer: a tick sent around it never enters
+	// the buffer, and a resume on the visitor's replica has nothing to fill from.
+	test('a tenant visitor on a replica without the cron lease resumes from the replay buffer', async ({ browser }) => {
+		test.setTimeout(120_000)
+		const replicas = []
+		for (const origin of INSTANCES) replicas.push(await readReplica(browser, origin))
+		const leader = replicas[0].leader
+		expect(replicas.every((replica) => replica.leader === leader), JSON.stringify(replicas)).toBe(true)
+		const target = replicas.find((replica) => replica.self !== leader)
+		expect(target, `a replica serving without the cron lease: ${JSON.stringify(replicas)}`).toBeTruthy()
+
+		const context = await browser.newContext({ baseURL: target.origin })
+		const page = await context.newPage()
+		// Ticks on the tenant's own wire topic: without them the visitor would be
+		// watching the unscoped ticker and the resume below would prove nothing.
+		let ticks = 0
+		page.on('websocket', (ws) => ws.on('framereceived', ({ payload }) => {
+			if (typeof payload !== 'string') return
+			let frame
+			try { frame = JSON.parse(payload) } catch { return }
+			const events = frame?.type === 'batch' && Array.isArray(frame.events) ? frame.events : [frame]
+			for (const event of events) {
+				if (event?.topic === '@t/acme/demos:fromseq:events' && event.event === 'created') ticks++
+			}
+		}))
+		try {
+			await page.goto(`${target.origin}/demos/tenants`)
+			await waitForWsConfirmed(page)
+			await switchTenant(page, 'acme')
+			await openAt(page, target.origin)
+			await expect.poll(() => ticks, { timeout: 8_000 }).toBeGreaterThanOrEqual(2)
+
+			await page.getByTestId('toggle-subscribe').click()
+			await expect(page.getByTestId('status')).toContainText('paused')
+			const frozen = await rows(page)
+			await page.waitForTimeout(3_200)
+			expect(await rows(page)).toEqual(frozen)
+			await page.getByTestId('toggle-subscribe').click()
+			await expect(page.getByTestId('replay-banner')).toBeVisible({ timeout: 4_000 })
+			await expect.poll(() => readCount(page, 'tier-replay'), { timeout: 4_000 }).toBeGreaterThanOrEqual(2)
+			assertIntegrity(await rows(page))
+		} finally {
+			await context.close()
+		}
+		const after = await readReplica(browser, target.origin)
+		expect(after.leader, 'the cron lease stayed off the visitor replica').toBe(leader)
 	})
 })
