@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { captureAttachedTopics, setSessionTenant } from './tenants-helpers.js'
 
 async function setOrg(page, org) {
 	await page.goto('/')
@@ -59,6 +60,24 @@ test.describe('/demos/denials', () => {
 			await expect(page.getByTestId(`switch-${ownOrg}`)).toHaveClass(/btn-primary/)
 			await expect(page.getByTestId(`switch-${deniedOrg}`)).toBeEnabled()
 			await expect(page.getByTestId(`switch-${deniedOrg}`)).toHaveAttribute('aria-pressed', 'false')
+		})
+	}
+
+	// A session with a tenant subscribes to `@t/<tenant>/audit:<org>`. The org
+	// gate must still hold there, whichever tenant the session carries.
+	for (const tenant of ['acme', 'globex']) {
+		test(`an acme identity with tenant ${tenant} still sees only its own log`, async ({ page }) => {
+			await setOrg(page, 'acme')
+			await setSessionTenant(page, tenant)
+			const attached = captureAttachedTopics(page)
+			await page.goto('/demos/denials')
+			await waitForWS(page)
+			await expect(page.getByTestId('my-org')).toHaveText('acme')
+			await expectAccessShape(page, 'acme', 'globex')
+			// The admitted log was subscribed on the tenant's wire topic, so the
+			// refusal above came from a tenant connection, not an unscoped one.
+			expect(attached).toContain(`@t/${tenant}/audit:acme`)
+			expect(attached.filter((topic) => topic.startsWith('audit:'))).toEqual([])
 		})
 	}
 

@@ -37,6 +37,7 @@ import { lookupSession, createEphemeralIdentity, tryParseLegacyJsonCookie } from
 import { evaluateUpgradeOrigin, upgradeOriginPolicy } from '$lib/server/origin-policy'
 import { isPerFrameRpc } from '$lib/server/rpc-limits'
 import { usesExplicitBoardPresenceLifecycle } from '$lib/server/board-presence'
+import { requireSubscribeHooks } from '$lib/server/subscribe-hooks'
 import { onClose as chaosOnClose } from '$live/demos/chaos'
 import { armPressureTicker } from '$live/demos/pressure'
 // Side-effect import: eagerly loads every demo with a purge surface at boot.
@@ -137,6 +138,9 @@ live.admission({
  *   everyone else resolves null = unscoped, zero-cost. While a tenant is
  *   active, EVERY topic the connection touches is server-side scoped to
  *   `@t/<id>/...` - the demo page says so out loud.
+ * - subscribe / subscribeBatch: the app's topic gates (defined below,
+ *   hoisted). realtime() returns the adapter hooks that run them, which
+ *   are exported further down.
  * - admin: fail-closed observability plane at /__realtime/* (introspect,
  *   DLQ inspect + replay, lifeline metrics). Only admitted with a
  *   matching bearer ADMIN_TOKEN; unset token = nothing is ever admitted.
@@ -152,6 +156,8 @@ live.admission({
  */
 const realtimeConfig = realtime({
 	tenant: (user) => user?.tenant ?? null,
+	subscribe: subscribeGate,
+	subscribeBatch: subscribeBatchGate,
 	privacySecret: env.DEMO_PRIVACY_SECRET || 'demo-privacy-noise-secret',
 	admin: {
 		requires: (request) =>
@@ -451,8 +457,13 @@ export function open(ws, ctx) {
  *   the adapter's top-level `denials` Readable, which the page renders
  *   as a recent-denials list.
  *
- * The gate is sync (the wire-level subscribe-batch hook is sync); both
- * checks are pure topic + ws.userData lookups, no I/O.
+ * Both checks are pure topic + ws.userData lookups, no I/O.
+ *
+ * The checks see the logical topic. The gates below run inside the
+ * subscribe hooks realtime() returns, which refuse any topic outside the
+ * connection's own tenant first and then pass the topic as handlers name
+ * it, with the subscribed wire topic on `ctx.wireTopic`
+ * (`ctx.wireTopics[i]` in a batch).
  */
 const PRIVATE_CHAT_RE = /^demos:chat:private(:presence)?$/
 const AUDIT_TOPIC_RE = /^audit:(acme|globex)$/
@@ -472,51 +483,60 @@ function denialFor(topic, ws) {
 }
 
 /**
- * Called when a client subscribes to a live stream topic.
- * We delegate to the presence and cursor plugins so they can track
- * who's watching what and send cursor snapshots to new joiners.
- *
- * Fires for solo subscribes only. Multi-topic subscribes (initial mount,
- * reconnect resume) land in `subscribeBatch` below as one wire frame.
+ * Join the presence and cursor plugins for an allowed subscribe, so they
+ * track who's watching what and send cursor snapshots to new joiners.
+ * They key rosters and snapshots by topic, so they get the wire topic: a
+ * connection with a tenant joins `@t/<tenant>/<topic>`, its tenant's own.
+ */
+function joinPlugins(ws, wireTopic, ctx, label) {
+	if (usesExplicitBoardPresenceLifecycle(wireTopic)) return
+	bestEffort(`presence ${label} hook`, () => presence.hooks.subscribe(ws, wireTopic, ctx))
+	bestEffort(`cursor ${label} hook`, () => cursor.hooks.subscribe(ws, wireTopic, ctx))
+}
+
+/**
+ * Gate for a solo subscribe. Multi-topic subscribes (initial mount,
+ * reconnect resume) arrive as one wire frame at `subscribeBatchGate`.
  *
  * Returning a string denies the subscribe with that reason; return
  * undefined to allow.
  */
-export function subscribe(ws, topic, ctx) {
+function subscribeGate(ws, topic, ctx) {
 	const reason = denialFor(topic, ws)
 	if (reason) return reason
-	if (usesExplicitBoardPresenceLifecycle(topic)) return
-	bestEffort('presence subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
-	bestEffort('cursor subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
+	joinPlugins(ws, ctx.wireTopic, ctx, 'subscribe')
 }
 
 /**
- * Called once per subscribe-batch wire frame. Microtask-batched initial
+ * Gate for one subscribe-batch wire frame. Microtask-batched initial
  * mounts coalesce N subscribes into one frame, so a board page that
  * subscribes to notes / settings / activity / presence / cursor topics
- * triggers this hook once instead of the per-topic `subscribe` hook
- * five times.
+ * runs this once instead of the solo gate five times.
  *
  * Returning a record of `{ topic: reason }` denies those topics with a
  * structured reason the client renders via the `denials` store. Returning
  * undefined or {} allows everything.
- *
- * Sync only. For async grants, pre-cache them on userData during upgrade.
  */
-export function subscribeBatch(ws, topics, ctx) {
+function subscribeBatchGate(ws, topics, ctx) {
 	let denials
-	for (const topic of topics) {
-		const reason = denialFor(topic, ws)
+	for (let i = 0; i < topics.length; i++) {
+		const reason = denialFor(topics[i], ws)
 		if (reason) {
-			(denials ??= {})[topic] = reason
+			(denials ??= {})[topics[i]] = reason
 			continue
 		}
-		if (usesExplicitBoardPresenceLifecycle(topic)) continue
-		bestEffort('presence batch-subscribe hook', () => presence.hooks.subscribe(ws, topic, ctx))
-		bestEffort('cursor batch-subscribe hook', () => cursor.hooks.subscribe(ws, topic, ctx))
+		joinPlugins(ws, ctx.wireTopics[i], ctx, 'batch-subscribe')
 	}
 	return denials
 }
+
+/**
+ * The adapter's subscribe hooks. realtime() builds them around the gates
+ * above: they refuse another tenant's topics, hand the gates the logical
+ * topic, and are the path tenant-scoped stream subscribes must take.
+ * Missing hooks stop startup rather than leave every subscribe admitted.
+ */
+export const { subscribe, subscribeBatch } = requireSubscribeHooks(realtimeConfig)
 
 /**
  * Called when a client's topic reference count reaches zero.

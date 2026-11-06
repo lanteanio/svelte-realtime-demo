@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { waitForWS } from './helpers.js'
+import { captureAttachedTopics, setSessionTenant } from './tenants-helpers.js'
 
 // Exhaustive human-like coverage for /demos/chat and /demos/chat/[roomId] on
 // a single instance. Drives every interactive element - room links, message
@@ -98,6 +99,27 @@ test.describe('/demos/chat/[roomId]', () => {
 		await expect(page.getByTestId('retry-five-button')).toBeDisabled()
 		await expect(page.getByTestId('message-input')).toBeDisabled()
 		await expect(page.getByTestId('message-input')).toHaveAttribute('placeholder', /denied room/i)
+	})
+
+	// A session with a tenant subscribes to `@t/<tenant>/demos:chat:private`;
+	// the members-only gate must hold on that topic as well.
+	test('private room still denies the subscribe when the session carries a tenant', async ({ page }) => {
+		await setSessionTenant(page, 'acme')
+		const attached = captureAttachedTopics(page)
+		let sockets = 0
+		page.on('websocket', () => { sockets++ })
+		// A refused subscribe announces no topic, so the lobby's admitted
+		// subscribes show the socket is the tenant's; the room opens on that
+		// same socket through client-side navigation.
+		await page.goto('/demos/chat')
+		await waitForWS(page)
+		await expect.poll(() => attached.some((topic) => topic.startsWith('@t/acme/'))).toBe(true)
+		await page.getByTestId('room-link-private').click()
+		await expect(page.getByTestId('forbidden-banner')).toBeVisible({ timeout: 10_000 })
+		await expect(page.getByTestId('send-button')).toBeDisabled()
+		await expect(page.getByTestId('message-input')).toBeDisabled()
+		expect(sockets).toBe(1)
+		expect(attached.some((topic) => topic.includes('demos:chat:private'))).toBe(false)
 	})
 
 	test('a fresh room starts empty and reports one participant (self)', async ({ page }) => {

@@ -21,6 +21,50 @@ export async function waitForWsConfirmed(page) {
 }
 
 /**
+ * Wire topics realtime announced in attach frames on this page's sockets.
+ * An admitted stream subscribe names its wire topic before its loader runs,
+ * so a session with a tenant shows its `@t/<tenant>/...` topics here. A
+ * refused subscribe announces nothing. Start it before navigating.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @returns {string[]}
+ */
+export function captureAttachedTopics(page) {
+	const topics = []
+	page.on('websocket', (ws) => ws.on('framereceived', ({ payload }) => {
+		if (typeof payload !== 'string') return
+		let frame
+		try { frame = JSON.parse(payload) } catch { return }
+		const envelopes = frame?.type === 'batch' && Array.isArray(frame.events) ? frame.events : [frame]
+		for (const envelope of envelopes) {
+			if (envelope?.topic === '__rpc' && envelope.data?.attach === true && typeof envelope.data.topic === 'string') topics.push(envelope.data.topic)
+		}
+	}))
+	return topics
+}
+
+/**
+ * Give the session a tenant (or clear it) without visiting /demos/tenants.
+ * The tenant applies from the next WebSocket handshake, so navigate after
+ * this rather than expecting the current page's connection to change.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {'acme' | 'globex' | null} tenant
+ */
+export async function setSessionTenant(page, tenant) {
+	await page.goto('/')
+	const result = await page.evaluate(async (next) => {
+		const response = await fetch('/api/demos/set-tenant', {
+			method: 'POST',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ tenant: next })
+		})
+		return { status: response.status, body: await response.text() }
+	}, tenant)
+	expect(result.status, result.body).toBe(200)
+}
+
+/**
  * Switch the connection's tenant and wait for the page it lands on.
  *
  * Switching reloads: the tenant resolver runs once per connection at upgrade,

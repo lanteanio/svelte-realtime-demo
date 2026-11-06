@@ -41,9 +41,8 @@ for (const tenant of [null, 'acme']) {
 			const presence = createPresence(redis, { prefix, key: 'id', heartbeat: 30000, select: (user) => ({ id: user.id }) })
 			const cursor = createCursor(redis, { prefix, select: (user) => ({ id: user.id }) })
 			const env = createTestEnv()
-			realtime({ tenant: (user) => user?.tenant ?? null })
+			const hooks = boardHooks(presence, cursor, (user) => user?.tenant ?? null)
 			env.register('boards', boardStreams(presence, cursor, async (id) => id === BOARD_ID ? { board_id: id } : null))
-			const hooks = boardHooks(presence, cursor)
 			const server = await createTestServer({
 				authorizeWireSubscribe: 'strict',
 				handler: {
@@ -129,10 +128,10 @@ for (const role of ['observer', 'participant']) {
 			await gate
 		}
 		const env = createTestEnv()
-		realtime({ tenant: (user) => user?.tenant ?? null })
+		const hooks = boardHooks(presence, cursor, (user) => user?.tenant ?? null)
 		env.register('boards', boardStreams(presence, cursor, async () => ({ board_id: BOARD_ID })))
 		const server = await createTestServer({ authorizeWireSubscribe: 'strict', handler: {
-			...boardHooks(presence, cursor), upgrade: () => ({ id: 'closing', tenant: 'acme' }), message: createMessage()
+			...hooks, upgrade: () => ({ id: 'closing', tenant: 'acme' }), message: createMessage()
 		} })
 		const revoked = []
 		const unsubscribe = server.platform.unsubscribe.bind(server.platform)
