@@ -20,6 +20,7 @@ import {
 	setNoteColor
 } from './board-helpers.js'
 import { expectTouchTarget, openTouchPage, waitForWS } from './helpers.js'
+import { captureAttachedTopics, setSessionTenant } from './tenants-helpers.js'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -108,6 +109,34 @@ test.describe('/board/[slug]', () => {
 		await deleteNote(noteWithText(page, 'Beta note'))
 		await expect(boardNotes(page)).toHaveCount(1)
 		await expect(activityTicker(page)).toContainText('removed a note')
+	})
+
+	// Visitors whose sessions carry a tenant share `@t/<tenant>/...` topics, and
+	// an arrangement by one of them must land there too. The note created first
+	// shows the two pages share a scope at all; the attach frames show it is
+	// the tenant's.
+	test('an arrangement by a visitor with a tenant reaches another visitor of that tenant', async ({ browser }) => {
+		const ctxA = await browser.newContext()
+		const ctxB = await browser.newContext()
+		try {
+			const a = await ctxA.newPage()
+			const b = await ctxB.newPage()
+			await setSessionTenant(a, 'acme')
+			await setSessionTenant(b, 'acme')
+			const attachedB = captureAttachedTopics(b)
+			const path = await createFreshBoard(a, `Board tenant arrange ${Date.now()}`)
+			await openBoard(b, path)
+			await expect.poll(() => attachedB.some((topic) => topic.startsWith('@t/acme/board:'))).toBe(true)
+			expect(attachedB.some((topic) => topic.startsWith('board:'))).toBe(false)
+			const note = await createNoteAt(a, 100, 120)
+			await editNote(note, 'Tenant arrange')
+			await expect(noteWithText(b, 'Tenant arrange')).toHaveCount(1, { timeout: 15_000 })
+			await clickFabAction(a, 'Tidy z-order')
+			await expect(activityTicker(a)).toContainText('tidied the board')
+			await expect(activityTicker(b)).toContainText('tidied the board', { timeout: 10_000 })
+		} finally {
+			await Promise.allSettled([ctxA.close(), ctxB.close()])
+		}
 	})
 
 	test('all four arrangement actions produce bounded deterministic layouts and the menu closes', async ({ page }) => {

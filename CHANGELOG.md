@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - From-seq tests resume the fromSeq stream through an answer with nothing missed, then require the next resume to ask from the page's own cursor and fill the gap without delivering a row twice, also with the replay buffer's counter for that topic set ahead of the application seq.
 
+- Unit tests run the app's subscribe gates inside the hooks `realtime()` returns, for a connection with a tenant and one without, and check what is refused and which topic the presence and cursor plugins join. The tenant tests for the audit logs, the private chat room and board arrangements also check that the socket subscribed on the tenant's wire topics.
+
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
 
 - Shooter timing tests verify click-time stamps on the real transport and cancellation of queued shots on navigation.
@@ -162,6 +164,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Visitors whose session carries a tenant get `/demos/from-seq`'s live ticks, replay fill and fromSeq gap fill. The cron publishes each tick unscoped and into every tenant's scope, from one shared list of the demo's tenants.
+
+- Board arrangements (tidy, rearrange, shuffle, group by author) by a visitor whose session carries a tenant reach the other visitors of that tenant, and the arrangement and its activity entry no longer reach unscoped visitors of the same board. Unscoped visitors keep receiving arrangements as one batch frame.
 
 - Managed board roles share the server-resolved tenant topic while releasing observers and participants independently. Read-only roster access holds an explicit grant, and participation retains background pressure admission.
 

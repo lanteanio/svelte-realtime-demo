@@ -339,6 +339,19 @@ export const purgeNoteDeletions = live.cron('* * * * *', 'board-note-undo-cleanu
 // All of these read all notes, compute new positions, then write
 // everything back in a single SQL query using batchUpdateNotes().
 
+/**
+ * Publish an arrangement: every moved note plus one activity entry.
+ *
+ * Unscoped connections send it as one wire batch per subscriber. The raw
+ * `platform.publishBatched` applies no tenant scope, so a connection with a
+ * tenant publishes the same events through `ctx.batch`, which maps each topic
+ * into that tenant (one frame per event).
+ */
+function publishArrangement(ctx, messages) {
+	if (ctx.tenantId == null) ctx.platform.publishBatched(messages)
+	else ctx.batch(messages)
+}
+
 /** Sort notes by position (top-left to bottom-right) and reset z-order. */
 export const tidyNotes = live(async (ctx, boardId) => {
 	validateBoardId(boardId)
@@ -354,7 +367,7 @@ export const tidyNotes = live(async (ctx, boardId) => {
 
 	const persisted = await dbBatchUpdateNotes(updates)
 	const updated = _reconcileBatchCache(persisted, versions)
-	ctx.platform.publishBatched([
+	publishArrangement(ctx, [
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'tidied the board') }
 	])
@@ -379,7 +392,7 @@ export const rearrangeNotes = live(async (ctx, boardId) => {
 
 	const persisted = await dbBatchUpdateNotes(cascadeColumns(groups.values()))
 	const updated = _reconcileBatchCache(persisted, versions)
-	ctx.platform.publishBatched([
+	publishArrangement(ctx, [
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'rearranged the board') }
 	])
@@ -409,7 +422,7 @@ export const shuffleNotes = live(async (ctx, boardId) => {
 
 	const persisted = await dbBatchUpdateNotes(updates)
 	const updated = _reconcileBatchCache(persisted, versions)
-	ctx.platform.publishBatched([
+	publishArrangement(ctx, [
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'shuffled the board') }
 	])
@@ -434,7 +447,7 @@ export const groupByAuthor = live(async (ctx, boardId) => {
 
 	const persisted = await dbBatchUpdateNotes(cascadeColumns(groups.values()))
 	const updated = _reconcileBatchCache(persisted, versions)
-	ctx.platform.publishBatched([
+	publishArrangement(ctx, [
 		...updated.map(note => ({ topic: TOPICS.notes(boardId), event: 'updated', data: note })),
 		{ topic: TOPICS.activity(boardId), event: 'created', data: activityEvent(ctx, 'grouped notes by author') }
 	])
