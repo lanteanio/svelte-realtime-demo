@@ -131,6 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The demo runs on `svelte-adapter-uws` 0.6.0-next.97, `svelte-adapter-uws-extensions` 0.6.0-next.65 and `svelte-realtime` 0.6.0-next.92.
+
 - The upgrade instructions require stopping older workers before durable alarm and Redis idempotency schema transitions.
 
 - The topk rate check counts every lifetime event instead of the five rows shown, so its samples no longer depend on which items happen to rank in the top five.

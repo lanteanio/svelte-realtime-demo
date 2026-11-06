@@ -52,9 +52,9 @@
 	"dependencies": {
 		"lucide-svelte": "^0.577.0",
 		"pg": "^8.16.2",
-		"svelte-adapter-uws": "^0.6.0-next.96",
-		"svelte-adapter-uws-extensions": "^0.6.0-next.64",
-		"svelte-realtime": "^0.6.0-next.91",
+		"svelte-adapter-uws": "^0.6.0-next.97",
+		"svelte-adapter-uws-extensions": "^0.6.0-next.65",
+		"svelte-realtime": "^0.6.0-next.92",
 		"uWebSockets.js": "https://github.com/uNetworking/uWebSockets.js/archive/refs/tags/v20.69.0.tar.gz"
 	},
 	"overrides": {

@@ -3,24 +3,24 @@
 
 declare module "$live/boards/activity" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
-  export const activity: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const activity: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/boards/cursors" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
-  export const observeBoard: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const participateBoard: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const observeBoard: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const participateBoard: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/boards/notes" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const moveNote: (...args: any[]) => Promise<any>;
   export const focusNote: (...args: any[]) => Promise<any>;
@@ -32,382 +32,382 @@ declare module "$live/boards/notes" {
   export const shuffleNotes: (...args: any[]) => Promise<any>;
   export const groupByAuthor: (...args: any[]) => Promise<any>;
   export type ErrorCode = "CONFLICT" | "FORBIDDEN" | "NOT_FOUND" | "VALIDATION";
-  export const notes: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const notes: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const editNote: (...args: any[]) => Promise<any>;
   export const createNote: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/boards/settings" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const updateSettings: (...args: any[]) => Promise<any>;
   export type ErrorCode = "NOT_FOUND" | "VALIDATION";
-  export const settings: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const settings: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/boards" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export type ErrorCode = "SERVER_ERROR";
-  export const boards: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const boards: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const createBoard: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/alarms" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const schedule: (...args: any[]) => Promise<any>;
   export const cancel: (...args: any[]) => Promise<any>;
   export const pendingAlarm: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const timers: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const timers: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/arena" {
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
   export const population: (...args: any[]) => Promise<any>;
-  export const arena: { status: import('svelte/store').Readable<string>, smooth: (...args: any[]) => import('svelte-realtime/smooth').SmoothEntity, [member: string]: any };
-  export const empty: Readable<undefined>;
+  export const arena: { status: import('svelte-realtime/client').CurrentReadable<string>, smooth: (...args: any[]) => import('svelte-realtime/smooth').SmoothEntity, [member: string]: any };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/auctions" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myAuctionsState: (...args: any[]) => Promise<any>;
   export const createAuction: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const activeAuctions: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const recentResults: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const activeAuctions: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const recentResults: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/chaos" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const startChaos: (...args: any[]) => Promise<any>;
   export const stopChaos: (...args: any[]) => Promise<any>;
   export const myChaosState: (...args: any[]) => Promise<any>;
-  export const chaosTicks: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const chaosTicks: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/chat" {
   import type { StreamStore } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const sendMessage: (...args: any[]) => Promise<any>;
   export const chat: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, [action: string]: (...args: any[]) => Promise<any> | ((...args: any[]) => StreamStore<any>) };
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/checkout" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const reset: (...args: any[]) => Promise<any>;
-  export const count: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const count: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const placeOrder: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/cluster-cron" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myClusterCronState: (...args: any[]) => Promise<any>;
-  export const clusterTicks: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const clusterTicks: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/collab-editor" {
   import type { StreamStore } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
-  export const editorDoc: { status: import('svelte/store').Readable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
-  export const offsetRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
-  export const crdtRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
-  export const empty: Readable<undefined>;
+  export const editorDoc: { status: import('svelte-realtime/client').CurrentReadable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
+  export const offsetRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte-realtime/client').CurrentReadable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
+  export const crdtRoom: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte-realtime/client').CurrentReadable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/counter-resume" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const reset: (...args: any[]) => Promise<any>;
-  export const count: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const count: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/denials" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myOrg: (...args: any[]) => Promise<any>;
   export const appendEntry: (...args: any[]) => Promise<any>;
   export type ErrorCode = "FORBIDDEN" | "UNAUTHENTICATED" | "VALIDATION";
-  export const auditLog: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const auditLog: ((...args: any[]) => StreamStore<any>) & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/effect" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myEffectState: (...args: any[]) => Promise<any>;
   export const placeOrder: (...args: any[]) => Promise<any>;
   export const clearFeeds: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const ordersStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const auditStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const notificationsStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const ordersStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const auditStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const notificationsStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/flags" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const setFlag: (...args: any[]) => Promise<any>;
   export type ErrorCode = "FORBIDDEN" | "VALIDATION";
-  export const banner: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const darkLaunch: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const banner: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const darkLaunch: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/flash-sales" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myFlashState: (...args: any[]) => Promise<any>;
   export const resetSale: (...args: any[]) => Promise<any>;
   export type ErrorCode = "SOLD_OUT" | "VALIDATION";
-  export const couponPool: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const productList: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const recentSales: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const couponPool: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const productList: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const recentSales: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const buyProduct: (...args: any[]) => Promise<any>;
   export const claimCoupon: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/forget" {
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
   export const leaveTraces: (...args: any[]) => Promise<any>;
   export const auditTraces: (...args: any[]) => Promise<any>;
   export const forgetMe: (...args: any[]) => Promise<any>;
   export const saveDraft: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/from-seq" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myFromSeqState: (...args: any[]) => Promise<any>;
-  export const eventStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const eventStreamFast: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const eventStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const eventStreamFast: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/jobs" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myJobsState: (...args: any[]) => Promise<any>;
   export const enqueueJob: (...args: any[]) => Promise<any>;
   export const forceTakeover: (...args: any[]) => Promise<any>;
   export const clearJobs: (...args: any[]) => Promise<any>;
   export type ErrorCode = "UNAVAILABLE" | "VALIDATION";
-  export const jobsList: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const jobsStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const jobsList: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const jobsStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/kanban" {
-  import type { Readable } from 'svelte/store';
-  export const kanban: { status: import('svelte/store').Readable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
-  export const empty: Readable<undefined>;
+  import type { CurrentReadable } from 'svelte-realtime/client';
+  export const kanban: { status: import('svelte-realtime/client').CurrentReadable<string>, doc: (...args: any[]) => import('svelte-realtime/doc').DocHandle, [member: string]: any };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/lobbies" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const resolveCode: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
   export const lobby: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, [action: string]: (...args: any[]) => Promise<any> | ((...args: any[]) => StreamStore<any>) };
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/multiplayer" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export type ErrorCode = "VALIDATION";
-  export const lounge: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, status: import('svelte/store').Readable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
-  export const empty: Readable<undefined>;
+  export const lounge: { data: (...args: any[]) => StreamStore<any>, presence?: (...args: any[]) => StreamStore<any>, cursors?: (...args: any[]) => StreamStore<any>, owner?: (...args: any[]) => StreamStore<any>, reactions: (...args: any[]) => StreamStore<any>, status: import('svelte-realtime/client').CurrentReadable<string>, move: (...args: any[]) => void, reportViewport: (...args: any[]) => void, identify: (key: import('svelte-realtime/multiplayer').LocalKey) => void, room: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerRoom, watch: (...args: any[]) => import('svelte-realtime/multiplayer').MultiplayerView, [action: string]: any };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/news" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myNewsState: (...args: any[]) => Promise<any>;
   export const readNewsSpeed: (...args: any[]) => Promise<any>;
   export const setSpeed: (...args: any[]) => Promise<any>;
   export const signPublish: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const newsControls: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const newsStories: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const newsStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const newsControls: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const newsStories: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const newsStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const trending: {
-    "last30s": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-    "thisMinute": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-    "lifetime": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "last30s": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "thisMinute": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "lifetime": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   };
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/notifications" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const sendNotification: (...args: any[]) => Promise<any>;
   export const cancelScheduled: (...args: any[]) => Promise<any>;
   export type ErrorCode = "NOT_FOUND" | "VALIDATION";
-  export const scheduledNotifications: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const recentActivity: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const scheduledNotifications: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const recentActivity: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/offline" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export type ErrorCode = "VALIDATION";
-  export const entriesStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const entriesStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const addEntry: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/ops" {
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
   export const snapshot: (...args: any[]) => Promise<any>;
   export const dlqSummary: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/outbound-webhooks" {
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
   export const placeOrder: (...args: any[]) => Promise<any>;
   export const recentReceipts: (...args: any[]) => Promise<any>;
   export const deadLetters: (...args: any[]) => Promise<any>;
   export const replayOrders: (...args: any[]) => Promise<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/pagination" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myPaginationState: (...args: any[]) => Promise<any>;
   export const appendLogEntry: (...args: any[]) => Promise<any>;
-  export const logFeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const logFeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/phases" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const postTwo: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const feed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const feed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/pressure" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const generateLoad: (...args: any[]) => Promise<any>;
   export const simulateShed: (...args: any[]) => Promise<any>;
   export const clearShedLog: (...args: any[]) => Promise<any>;
-  export const pressureSnapshot: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const shedEvents: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const pressureSnapshot: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const shedEvents: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/privacy" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const submitMood: (...args: any[]) => Promise<any>;
   export const roundInfo: (...args: any[]) => Promise<any>;
   export const inviteCompanions: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
   export const rawMood: {
-    "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   };
   export const privateMood: {
-    "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "round": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   };
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/schema-evolution" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myCounterState: (...args: any[]) => Promise<any>;
   export const incrementCounter: (...args: any[]) => Promise<any>;
   export const resetCounters: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const counter: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const counter: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/shooter" {
-  import type { Readable } from 'svelte/store';
-  export const shooter: { status: import('svelte/store').Readable<string>, smooth: (...args: any[]) => import('svelte-realtime/smooth').SmoothEntity, [member: string]: any };
-  export const empty: Readable<undefined>;
+  import type { CurrentReadable } from 'svelte-realtime/client';
+  export const shooter: { status: import('svelte-realtime/client').CurrentReadable<string>, smooth: (...args: any[]) => import('svelte-realtime/smooth').SmoothEntity, [member: string]: any };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/tenants" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const addNote: (...args: any[]) => Promise<any>;
   export const whoami: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const pad: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const pad: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/todos-rollback" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const addTodo: (...args: any[]) => Promise<any>;
   export const toggleTodo: (...args: any[]) => Promise<any>;
   export const removeTodo: (...args: any[]) => Promise<any>;
   export const clearAll: (...args: any[]) => Promise<any>;
   export type ErrorCode = "FORCED" | "FULL" | "NOT_FOUND" | "VALIDATION";
-  export const todosStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const empty: Readable<undefined>;
+  export const todosStream: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/topk" {
   import type { StreamStore, RpcError } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const setSpeed: (...args: any[]) => Promise<any>;
   export const setBias: (...args: any[]) => Promise<any>;
@@ -415,26 +415,26 @@ declare module "$live/demos/topk" {
   export const readTopkBias: (...args: any[]) => Promise<any>;
   export const myTopkState: (...args: any[]) => Promise<any>;
   export type ErrorCode = "VALIDATION";
-  export const topkSpeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const topkBias: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const topkSpeed: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const topkBias: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const trending: {
-    "last10s": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-    "last1min": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-    "thisMinute": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-    "lifetime": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "last10s": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "last1min": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "thisMinute": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+    "lifetime": StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   };
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
 
 declare module "$live/demos/upload" {
   import type { StreamStore, RpcError, UploadHandle } from 'svelte-realtime/client';
-  import type { Readable } from 'svelte/store';
+  import type { CurrentReadable } from 'svelte-realtime/client';
 
   export const myUploadState: (...args: any[]) => Promise<any>;
   export const clearFiles: (...args: any[]) => Promise<any>;
   export type ErrorCode = "CANCELLED" | "VALIDATION";
-  export const uploadedFiles: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
-  export const uploadStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: any; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const uploadedFiles: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
+  export const uploadStats: StreamStore<any> & { load(platform: any, options?: { args?: any[]; user?: import('svelte-realtime/server').RegisteredUser; fallback?: any; onError?: (err: any) => void }): Promise<any> };
   export const uploadFile: (source: Blob | ArrayBuffer | ArrayBufferView | ReadableStream<Uint8Array>, ...args: any[]) => UploadHandle<any>;
-  export const empty: Readable<undefined>;
+  export const empty: CurrentReadable<undefined>;
 }
