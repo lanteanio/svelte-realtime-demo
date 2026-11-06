@@ -254,6 +254,10 @@ test.describe('/demos/topk', () => {
 	test('the speed value controls the firehose event rate', async ({ page }) => {
 		// Two 7s samples plus settling time leave several cron ticks on both
 		// sides while keeping this much cheaper than the window-decay coverage.
+		// The samples count every lifetime event, not the five rows shown: which
+		// items rank in the top five is random, and summing only those put the
+		// low-speed sample within one tick of the 3x boundary.
+		const events = async () => Number(await page.getByTestId('lb-lifetime').getAttribute('data-events'))
 		test.setTimeout(120_000)
 		await open(page)
 		try {
@@ -266,18 +270,18 @@ test.describe('/demos/topk', () => {
 				// Let an in-flight 1 Hz tick finish under the preceding speed before
 				// taking the baseline. Both samples then span the same seven ticks.
 				await page.waitForTimeout(2_000)
-				const before = await total(page, 'lb-lifetime')
+				const before = await events()
 				await page.waitForTimeout(7_000)
-				return (await total(page, 'lb-lifetime')) - before
+				return (await events()) - before
 			}
 
 			const lowGrowth = await growthAt(5)
 			const highGrowth = await growthAt(25)
-			// Lifetime never resets. Its rendered top five receive roughly 5/12
-			// of all events, so a 5x input should comfortably clear this included
-			// 3x boundary despite cron phase and random item selection.
-			expect(lowGrowth).toBeGreaterThanOrEqual(5)
-			expect(highGrowth).toBeGreaterThanOrEqual(30)
+			// Lifetime never resets. Seven ticks at 5 and at 25 events each leave
+			// only cron phase between the two samples, so a 5x input clears this
+			// included 3x boundary with whole ticks to spare.
+			expect(lowGrowth).toBeGreaterThanOrEqual(25)
+			expect(highGrowth).toBeGreaterThanOrEqual(125)
 			expect(highGrowth).toBeGreaterThanOrEqual(lowGrowth * 3)
 		} finally {
 			await restoreDefaults(page)

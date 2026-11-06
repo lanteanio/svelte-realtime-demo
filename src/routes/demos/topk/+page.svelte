@@ -149,7 +149,12 @@
 			{ key: 'thisMinute', title: 'This minute',      subtitle: 'tumbling, resets each min', data: thisMinute, testid: 'lb-thisMinute' },
 			{ key: 'lifetime',   title: 'Lifetime',         subtitle: 'never resets',             data: lifetime,   testid: 'lb-lifetime' }
 		] as panel (panel.key)}
-			<div class="card bg-base-100 border border-base-300" data-testid={panel.testid}>
+			<!-- data-events: every item's count, not only the five shown. -->
+			<div
+				class="card bg-base-100 border border-base-300"
+				data-testid={panel.testid}
+				data-events={Object.values(panel.data?.counts ?? {}).reduce((sum, n) => sum + n, 0)}
+			>
 				<div class="card-body py-3 space-y-2">
 					<div class="flex flex-wrap justify-between items-baseline gap-x-3 gap-y-1">
 						<h2 class="section-title card-title">{panel.title}</h2>

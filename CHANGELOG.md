@@ -133,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The upgrade instructions require stopping older workers before durable alarm and Redis idempotency schema transitions.
 
+- The topk rate check counts every lifetime event instead of the five rows shown, so its samples no longer depend on which items happen to rank in the top five.
+
 - `/demos/from-seq` shows two reconnect ladders. The default stream resumes from its replay buffer and reloads through its loader once a pause outruns it; the fromSeq stream has no buffer and fills gaps from the durable store through `delta.fromSeq`, with the cron stamping its application sequence on the wire.
 
 - Migration `006_demo_jobs_identity_receipts.sql` brings the durable task tables to the extension's current schema: the tenant identity stamp, per-tenant dispatch, enqueue receipts and idempotency owner tokens. Readiness now requires every checked-in migration, including this one.
