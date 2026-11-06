@@ -1,7 +1,155 @@
 import { test, expect } from '@playwright/test'
+import { createRedisClient } from 'svelte-adapter-uws-extensions/redis'
 import { openTouchPage } from './helpers.js'
 
 test.describe.configure({ mode: 'serial' })
+
+const FAST_TOPIC = 'demos:fromseq:events:fast'
+
+function parseFrame(payload) {
+	if (typeof payload !== 'string') return null
+	try { return JSON.parse(payload) } catch { return null }
+}
+
+// The fromSeq stream's subscribes, the answers to them and the live frames of
+// its topic, in the order this page's socket carried them. A subscribe records
+// the cursor it resumes from; an answer records the seq it hands back and how
+// many events it filled.
+function captureFastWire(page) {
+	const log = []
+	const subscribes = new Map()
+	page.on('websocket', (ws) => {
+		ws.on('framesent', ({ payload }) => {
+			const frame = parseFrame(payload)
+			const calls = Array.isArray(frame?.batch) ? frame.batch : [frame]
+			for (const call of calls) {
+				if (call?.stream !== true || typeof call.rpc !== 'string' || !call.rpc.endsWith('eventStreamFast')) continue
+				const entry = { kind: 'subscribe', id: call.id, seq: call.seq ?? null }
+				subscribes.set(call.id, entry)
+				log.push(entry)
+			}
+		})
+		ws.on('framereceived', ({ payload }) => {
+			const frame = parseFrame(payload)
+			const envelopes = frame?.type === 'batch' && Array.isArray(frame.events) ? frame.events : [frame]
+			for (const envelope of envelopes) {
+				if (envelope?.topic === '__rpc') {
+					const results = envelope.event === '__batch' && Array.isArray(envelope.data?.batch)
+						? envelope.data.batch
+						: [{ ...envelope.data, id: envelope.event }]
+					for (const result of results) {
+						const entry = subscribes.get(result?.id)
+						// The attach notice precedes the answer for the same id.
+						if (!entry || result.attach === true || entry.answered) continue
+						entry.answered = true
+						log.push({
+							kind: 'answer',
+							id: result.id,
+							ok: result.ok === true,
+							seq: result.seq ?? null,
+							fromSeq: result.fromSeq === true,
+							count: Array.isArray(result.data) ? result.data.length : null
+						})
+					}
+				} else if (envelope?.topic?.endsWith?.(FAST_TOPIC) && envelope.event === 'created') {
+					log.push({ kind: 'live', seq: envelope.seq ?? null, dataSeq: envelope.data?.seq })
+				}
+			}
+		})
+	})
+	return log
+}
+
+async function lastSeq(page) {
+	return Math.max(...(await sequences(page)))
+}
+
+async function armFastStream(page) {
+	await page.getByTestId('fromseq-fast-path').click()
+	await expect(page.getByTestId('fromseq-fast-path')).toHaveAttribute('aria-pressed', 'true')
+	await expect(page.getByTestId('fromseq-fast-hint')).toContainText('fromSeq stream ready', { timeout: 5_000 })
+}
+
+async function setPaused(page, paused) {
+	await page.getByTestId('toggle-subscribe').click()
+	await expect(page.getByTestId('toggle-subscribe')).toHaveText(paused ? 'Resume subscription' : 'Pause subscription')
+}
+
+async function tiersBySeq(page) {
+	const rows = await page.getByTestId('event-row').evaluateAll((nodes) => nodes.map((node) => [
+		Number(node.textContent?.match(/#(\d+)/)?.[1] ?? NaN),
+		node.querySelector('[data-testid^="event-tier-"]')?.textContent?.trim() ?? ''
+	]))
+	return new Map(rows)
+}
+
+// Pause and resume inside one cron tick so the resume misses nothing, then
+// pause again before the next tick reaches the page, and return the cursor the
+// page held through it. A live event moves the client's cursor forward on its
+// own, so an attempt a tick lands in proves nothing about the empty answer and
+// is retried.
+async function pauseAfterEmptyResume(page, wire) {
+	for (let attempt = 1; attempt <= 6; attempt++) {
+		const seen = await lastSeq(page)
+		// Start right behind a tick, which leaves most of a second for the clicks.
+		// A tight interval notices the tick at once; the default backoff can
+		// see it up to a second late, with the next tick already close.
+		await expect.poll(() => lastSeq(page), { timeout: 4_000, intervals: [25] }).toBeGreaterThan(seen)
+		const cursor = await lastSeq(page)
+		const filled = await readCount(page, 'tier-fromseq')
+		await setPaused(page, true)
+		const mark = wire.length
+		await setPaused(page, false)
+		await expect.poll(() => wire.slice(mark).some((entry) => entry.kind === 'answer'), { timeout: 4_000 }).toBe(true)
+		await setPaused(page, true)
+		const span = wire.slice(mark)
+		const subscribe = span.find((entry) => entry.kind === 'subscribe')
+		const answer = span.find((entry) => entry.kind === 'answer')
+		const ticked = span.some((entry) => entry.kind === 'live' && entry.dataSeq > cursor)
+		if (subscribe?.seq === cursor && answer.ok && answer.fromSeq && answer.count === 0 && !ticked && await lastSeq(page) === cursor) {
+			expect(await readCount(page, 'tier-fromseq'), 'an empty answer fills nothing').toBe(filled)
+			return cursor
+		}
+		await setPaused(page, false)
+	}
+	throw new Error(`no resume inside one tick came back empty: ${JSON.stringify(wire.slice(-16))}`)
+}
+
+// After a real gap the resume asks from the cursor the empty answer left in
+// place, the bridge fills exactly the events missed since then, and no row the
+// page already had is delivered again. A resume from 0 would re-tag the rows
+// it already had; one from a counter ahead of the store would fill nothing.
+async function expectResumeFrom(page, wire, cursor) {
+	await page.waitForTimeout(2_200)
+	const had = await tiersBySeq(page)
+	const mark = wire.length
+	await setPaused(page, false)
+	await expect.poll(() => wire.slice(mark).some((entry) => entry.kind === 'answer'), { timeout: 4_000 }).toBe(true)
+	const subscribe = wire.slice(mark).find((entry) => entry.kind === 'subscribe')
+	const answer = wire.slice(mark).find((entry) => entry.kind === 'answer')
+	const trail = JSON.stringify(wire.slice(-16))
+	expect(subscribe?.seq, `resume cursor after an empty answer; wire: ${trail}`).toBe(cursor)
+	expect(answer.fromSeq && answer.count > 0, `the gap fills through delta.fromSeq; wire: ${trail}`).toBe(true)
+	// The answer's seq is its last event. A live event published while the
+	// subscribe was in flight can arrive in the answer and again live, and the
+	// live copy lands last, so the newest filled row may carry `live`.
+	const end = answer.seq
+	expect(Number.isSafeInteger(end) && end > cursor, `the fill ends past the cursor; wire: ${trail}`).toBe(true)
+	await expect.poll(async () => {
+		const now = await tiersBySeq(page)
+		for (let seq = cursor + 1; seq <= end; seq++) if (!now.has(seq)) return seq
+		return 0
+	}, { timeout: 8_000, message: 'first missing seq of the fill' }).toBe(0)
+	const filled = [...(await tiersBySeq(page))]
+		.filter(([seq, tier]) => tier === 'fromSeq' && !had.has(seq))
+		.map(([seq]) => seq)
+		.sort((a, b) => a - b)
+	expect(filled.length).toBeGreaterThan(0)
+	expect(filled).toEqual(filled.map((_, i) => cursor + 1 + i))
+	const now = await tiersBySeq(page)
+	for (const [seq, tier] of had) expect(now.get(seq), `row #${seq} delivered again`).toBe(tier)
+	await expectIntegrity(page)
+}
 
 async function readCount(page, testid) {
 	const text = (await page.getByTestId(testid).textContent()) ?? ''
@@ -161,6 +309,47 @@ test.describe('/demos/from-seq', () => {
 		await expectGapFilledFrom(page, frozen)
 		await expect(page.locator('[data-testid^="event-tier-"]').filter({ hasText: 'fromSeq' }).first()).toBeVisible()
 		await expectIntegrity(page)
+	})
+
+	// The topic is never published through the replay buffer, so the buffer's
+	// counter for it reads 0. A resume that misses nothing must leave the
+	// cursor where it was rather than take that counter; from 0, the next
+	// resume would ask for the whole store again.
+	test('a resume that misses nothing keeps the fromSeq cursor for the next gap', async ({ page }) => {
+		test.setTimeout(90_000)
+		const wire = captureFastWire(page)
+		await open(page)
+		await armFastStream(page)
+		const cursor = await pauseAfterEmptyResume(page, wire)
+		await expectResumeFrom(page, wire, cursor)
+	})
+
+	// A buffer counter above the application's seq is the silent case: from
+	// there the bridge has nothing to answer, and the events between the real
+	// cursor and that counter would never arrive. Live events cannot correct
+	// it, since the cursor only moves forward.
+	test('a replay counter above the application seq never becomes the fromSeq cursor', async ({ page }) => {
+		test.skip(process.env.LOCAL_E2E !== '1', 'seeds the harness Redis, which only the local e2e harness provides')
+		const raw = process.env.REDIS_URL
+		if (!raw) throw new Error('REDIS_URL is not set; the local e2e harness provides it')
+		if (!['127.0.0.1', 'localhost', '[::1]'].includes(new URL(raw).hostname)) throw new Error(`refusing a non-loopback Redis: ${new URL(raw).host}`)
+		test.setTimeout(90_000)
+		const redis = createRedisClient({ url: raw, autoShutdown: false })
+		const counterKey = redis.key('replay:seq:{' + FAST_TOPIC + '}')
+		try {
+			const appSeq = Number(await redis.redis.get('demos:fromseq:fast:next'))
+			expect(Number.isSafeInteger(appSeq) && appSeq > 0).toBe(true)
+			await redis.redis.set(counterKey, String(appSeq + 500))
+			const wire = captureFastWire(page)
+			await open(page)
+			await armFastStream(page)
+			const cursor = await pauseAfterEmptyResume(page, wire)
+			expect(cursor).toBeLessThan(appSeq + 500)
+			await expectResumeFrom(page, wire, cursor)
+		} finally {
+			await redis.redis.del(counterKey).catch(() => {})
+			await redis.quit().catch(() => {})
+		}
 	})
 
 	test('a second tab observes the same sequence while the paused tab catches up without duplicates', async ({ browser }) => {

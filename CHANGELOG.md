@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Cluster coverage checks cursor delivery to an idle board visitor before their first pointer move.
 
+- From-seq tests resume the fromSeq stream through an answer with nothing missed, then require the next resume to ask from the page's own cursor and fill the gap without delivering a row twice, also with the replay buffer's counter for that topic set ahead of the application seq.
+
 - Undo feedback tests execute the announcement helpers, require a persistent status region outside the toast, and keep countdown text outside live announcements.
 
 - Shooter timing tests verify click-time stamps on the real transport and cancellation of queued shots on navigation.
